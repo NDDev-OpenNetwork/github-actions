@@ -232,10 +232,17 @@ for toolchain_name in "${toolchain_names[@]}"; do
         ln -sfn "/usr/local/lib/nodejs/${toolchain_version}/bin/${node_binary}" \
           "/usr/local/bin/${node_binary}"
       done
+      # A real copy rather than a link into /usr/local, because the tool cache
+      # must be owned by the runner end to end -- sanitize refuses an entry it
+      # does not own, and a job has to be able to manage its own cache. The
+      # duplicate is the price of keeping both invariants: the runner owns its
+      # cache, and the PATH copy is root-owned so clearing that cache cannot
+      # take `node` away from the job after it.
       install -d -o runner -g runner -m 0755 \
         "${runner_tool_cache}/node" "${runner_tool_cache}/node/${toolchain_version}"
-      ln -sfn "/usr/local/lib/nodejs/${toolchain_version}" \
+      cp -a "/usr/local/lib/nodejs/${toolchain_version}" \
         "${runner_tool_cache}/node/${toolchain_version}/x64"
+      chown -R runner:runner "${runner_tool_cache}/node/${toolchain_version}"
       install -o runner -g runner -m 0644 /dev/null \
         "${runner_tool_cache}/node/${toolchain_version}/x64.complete"
       [[ "$(node --version)" == "v${toolchain_version}" ]]
@@ -264,8 +271,12 @@ for toolchain_name in "${toolchain_names[@]}"; do
   rmdir "${toolchain_scratch}"
   rm -f -- "${toolchain_archive}"
 done
-if find "${runner_tool_cache}" -maxdepth 3 ! -user runner -print -quit | grep -q .; then
-  echo "runner tool cache contains an entry the runner does not own" >&2
+# Naming the entry matters: the check has to say which path is wrong, or a
+# toolchain that lands one directory off looks identical to one that is not
+# owned at all.
+unowned_tool_cache_entry="$(find "${runner_tool_cache}" -maxdepth 3 ! -user runner -printf '%p (%u)\n' -quit)"
+if [[ -n "${unowned_tool_cache_entry}" ]]; then
+  echo "runner tool cache contains an entry the runner does not own: ${unowned_tool_cache_entry}" >&2
   exit 1
 fi
 

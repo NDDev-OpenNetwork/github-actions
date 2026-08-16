@@ -1,7 +1,7 @@
 schema_version: 1
 
 image:
-  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b5
+  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b6
   current_alias: nddev-ubuntu-24.04-amd64-docker-current
   previous_alias: nddev-ubuntu-24.04-amd64-docker-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-r20260801
