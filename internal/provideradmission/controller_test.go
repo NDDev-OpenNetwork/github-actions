@@ -704,3 +704,45 @@ func TestReleaseByGARMNameRemovesWarmLeaseAndClaim(t *testing.T) {
 		t.Fatalf("journal=%#v", journal)
 	}
 }
+
+// Resizing a class must not wedge the fleet on the workers already running.
+//
+// A lease records what its instance was created with; the allocation it is
+// reconciled against is built from the policy as it reads now. When
+// nddev-linux-integration went from 4 vCPU / 8192 MiB to 2 / 6144 while one
+// worker was thirty minutes into a job, every reconciliation called that a
+// conflict and refused the next create -- 766 of them in twenty-five minutes.
+func TestReconcileToleratesALeaseWhoseClassWasResizedUnderIt(t *testing.T) {
+	t.Parallel()
+	lease := providerjournal.Lease{
+		InstanceName: "worker-1", ControllerID: "controller-1",
+		PoolID: "pool-1", PoolName: "integration",
+		VCPU: 4, MemoryMiB: 8192, ImageFingerprint: "image-old",
+	}
+	// The same instance, described by a policy that has since been resized and
+	// had its image rebuilt.
+	resized := Allocation{
+		InstanceName: "worker-1", ControllerID: "controller-1",
+		PoolID: "pool-1", PoolName: "integration",
+		VCPU: 2, MemoryMiB: 6144, ImageFingerprint: "image-new",
+	}
+	if err := leaseIdentityMatches(lease, resized); err != nil {
+		t.Fatalf("a resize was treated as a conflict: %v", err)
+	}
+	if err := leaseMatches(lease, resized); err == nil {
+		t.Fatal("the strict comparison stopped noticing a resource change")
+	}
+
+	// Identity is still enforced: a lease that names another instance, another
+	// controller or another pool is a real conflict whatever the policy says.
+	for name, wrong := range map[string]Allocation{
+		"instance":   {InstanceName: "worker-2", ControllerID: "controller-1", PoolID: "pool-1", PoolName: "integration"},
+		"controller": {InstanceName: "worker-1", ControllerID: "controller-2", PoolID: "pool-1", PoolName: "integration"},
+		"pool id":    {InstanceName: "worker-1", ControllerID: "controller-1", PoolID: "pool-2", PoolName: "integration"},
+		"pool name":  {InstanceName: "worker-1", ControllerID: "controller-1", PoolID: "pool-1", PoolName: "standard"},
+	} {
+		if err := leaseIdentityMatches(lease, wrong); err == nil {
+			t.Errorf("a %s mismatch was accepted", name)
+		}
+	}
+}
