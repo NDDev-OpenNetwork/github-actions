@@ -41,7 +41,13 @@ const (
 // other, and the provider reaches the cluster, over the private network. So
 // the boundary widens by exactly one subnet and no further -- an Incus API
 // outside it would accept a client certificate from anywhere on the internet.
-var fleetPrivateNetwork = netip.MustParsePrefix("172.16.0.0/20")
+//
+// The prefix itself is deployment data, not an engine constant: which private
+// network a fleet sits on is a fact about that estate. It is declared in the
+// provider configuration, and the value below is only what an example estate
+// uses, so a deployment on another network states its own instead of patching
+// the binary.
+const DefaultFleetPrivateNetwork = "172.16.0.0/20"
 
 var fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -132,6 +138,11 @@ type Incus struct {
 	// the "default" profile to any newly created instance.
 	IncludeDefaultProfile bool `toml:"include_default_profile" json:"include-default-profile"`
 
+	// PrivateNetwork is the CIDR the fleet's hosts sit on. A cluster member's
+	// API address must be inside it; a standalone host uses loopback and never
+	// consults it. Empty means DefaultFleetPrivateNetwork.
+	PrivateNetwork string `toml:"private_network" json:"private-network"`
+
 	// URL holds the URL of the remote Incus server.
 	// example: https://10.10.10.1:8443/
 	URL string `toml:"url" json:"url"`
@@ -210,7 +221,7 @@ func (l *Incus) Validate() error {
 		parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
 		return fmt.Errorf("url must be a bare https endpoint with no path, query, fragment or credentials")
 	}
-	if err := validateIncusEndpoint(parsedURL.Host); err != nil {
+	if err := validateIncusEndpoint(parsedURL.Host, l.PrivateNetwork); err != nil {
 		return fmt.Errorf("invalid Incus endpoint %q: %w", parsedURL.Host, err)
 	}
 
@@ -401,7 +412,7 @@ func validateStateDirectory(path string) error {
 // address here would expose instance creation to any holder of a client
 // certificate, and this provider is the only thing standing between GARM and
 // the hypervisor.
-func validateIncusEndpoint(host string) error {
+func validateIncusEndpoint(host, privateNetwork string) error {
 	if host == "127.0.0.1:8443" {
 		return nil
 	}
@@ -412,8 +423,28 @@ func validateIncusEndpoint(host string) error {
 	if address.Port() != 8443 {
 		return fmt.Errorf("must use port 8443")
 	}
-	if !fleetPrivateNetwork.Contains(address.Addr()) {
-		return fmt.Errorf("must be %s or a cluster member inside %s", ExpectedIncusURL, fleetPrivateNetwork)
+	network, err := FleetPrivateNetwork(privateNetwork)
+	if err != nil {
+		return err
+	}
+	if !network.Contains(address.Addr()) {
+		return fmt.Errorf("must be %s or a cluster member inside %s", ExpectedIncusURL, network)
 	}
 	return nil
+}
+
+// FleetPrivateNetwork parses a declared private network, falling back to the
+// example estate's when a deployment states none.
+func FleetPrivateNetwork(declared string) (netip.Prefix, error) {
+	if declared == "" {
+		declared = DefaultFleetPrivateNetwork
+	}
+	network, err := netip.ParsePrefix(declared)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("private_network must be a CIDR: %w", err)
+	}
+	if !network.Addr().IsPrivate() {
+		return netip.Prefix{}, fmt.Errorf("private_network %s is not a private range", network)
+	}
+	return network, nil
 }

@@ -232,3 +232,32 @@ func TestIncusConfigAcceptsAClusterMemberInsideThePrivateNetwork(t *testing.T) {
 		require.ErrorContains(t, cfg.Validate(), "cluster member inside", "accepted %s", outside)
 	}
 }
+
+// The private network a fleet sits on is deployment data. Compiling one
+// estate's subnet in meant a fleet on another network could not validate its
+// own cluster endpoint without a patched binary -- which is exactly what
+// happened when this repository was anonymised for publication and the
+// rewritten constant started refusing every endpoint on the live fleet.
+func TestIncusEndpointAcceptsTheNetworkTheDeploymentDeclares(t *testing.T) {
+	t.Parallel()
+	// A member on a network that is not the default.
+	if err := validateIncusEndpoint("10.110.0.9:8443", "10.110.0.0/20"); err != nil {
+		t.Fatalf("a declared network was refused: %v", err)
+	}
+	// The same address with no declaration falls back to the example estate's
+	// network and is correctly outside it.
+	if err := validateIncusEndpoint("10.110.0.9:8443", ""); err == nil {
+		t.Fatal("an address outside the default network was accepted")
+	}
+	// Loopback stays valid whatever is declared, and the boundary still holds.
+	if err := validateIncusEndpoint("127.0.0.1:8443", "10.110.0.0/20"); err != nil {
+		t.Fatalf("loopback was refused: %v", err)
+	}
+	if err := validateIncusEndpoint("203.0.113.9:8443", "10.110.0.0/20"); err == nil {
+		t.Fatal("a public address was accepted")
+	}
+	// A declaration that is not private is refused rather than trusted.
+	if err := validateIncusEndpoint("203.0.113.9:8443", "203.0.113.0/24"); err == nil {
+		t.Fatal("a public range was accepted as the fleet private network")
+	}
+}

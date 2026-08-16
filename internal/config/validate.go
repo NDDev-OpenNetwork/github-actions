@@ -242,7 +242,7 @@ func validateIncus(add func(string, string), incus Incus) {
 	if err != nil || !address.Addr().IsLoopback() || address.Port() != 8443 {
 		add("incus.api_address", "must be the loopback TLS endpoint 127.0.0.1:8443")
 	}
-	validateCluster(add, incus.Cluster)
+	validateCluster(add, incus.Cluster, incus.PrivateNetwork)
 	for path, value := range map[string]string{
 		"incus.project":      incus.Project,
 		"incus.storage_pool": incus.StoragePool,
@@ -518,10 +518,31 @@ func oneOf(value string, allowed ...string) bool {
 // exactly why the address is checked rather than assumed: the one thing that
 // must never happen is an Incus API reachable from outside the fleet's own
 // subnet, where it would accept a client certificate from anywhere.
-// fleetPrivateNetwork is the cloud private network every fleet host sits on.
-var fleetPrivateNetwork = netip.MustParsePrefix("172.16.0.0/20")
+// DefaultFleetPrivateNetwork is the private network an example estate sits on.
+//
+// Which network a fleet actually uses is deployment data, not an engine
+// constant, so a host declares its own in incus.private_network and this is
+// only the fallback. Compiling one estate's subnet into the binary meant a
+// deployment elsewhere could not validate its own cluster without a patched
+// build -- and it is how anonymising this repository once refused every
+// endpoint on the live fleet.
+const DefaultFleetPrivateNetwork = "172.16.0.0/20"
 
-func validateCluster(add func(string, string), cluster Cluster) {
+func fleetPrivateNetworkOf(declared string) (netip.Prefix, error) {
+	if declared == "" {
+		declared = DefaultFleetPrivateNetwork
+	}
+	network, err := netip.ParsePrefix(declared)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	if !network.Addr().IsPrivate() {
+		return netip.Prefix{}, fmt.Errorf("%s is not a private range", network)
+	}
+	return network, nil
+}
+
+func validateCluster(add func(string, string), cluster Cluster, privateNetwork string) {
 	if !cluster.Enabled {
 		if cluster.MemberName != "" || cluster.APIAddress != "" || cluster.Members != 0 {
 			add("incus.cluster", "must be empty unless clustering is enabled")
@@ -537,8 +558,13 @@ func validateCluster(add func(string, string), cluster Cluster) {
 		add("incus.cluster.api_address", "must be an address:8443 endpoint")
 	case address.Addr().IsLoopback():
 		add("incus.cluster.api_address", "must not be loopback; a cluster member's peers have to reach it")
-	case !fleetPrivateNetwork.Contains(address.Addr()):
-		add("incus.cluster.api_address", "must be inside the fleet private network "+fleetPrivateNetwork.String())
+	default:
+		network, networkErr := fleetPrivateNetworkOf(privateNetwork)
+		if networkErr != nil {
+			add("incus.private_network", networkErr.Error())
+		} else if !network.Contains(address.Addr()) {
+			add("incus.cluster.api_address", "must be inside the fleet private network "+network.String())
+		}
 	}
 	// Four hosts is what this fleet has; the bound exists so a typo cannot
 	// multiply the project quota into capacity no set of hosts can serve.

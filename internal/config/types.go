@@ -52,6 +52,10 @@ type Cluster struct {
 }
 
 type Incus struct {
+	// PrivateNetwork is the CIDR this fleet's hosts sit on. Empty means
+	// DefaultFleetPrivateNetwork.
+	PrivateNetwork string `json:"private_network,omitempty" yaml:"private_network,omitempty"`
+
 	Version             string `json:"version" yaml:"version"`
 	APIAddress          string `json:"api_address" yaml:"api_address"`
 	Project             string `json:"project" yaml:"project"`
