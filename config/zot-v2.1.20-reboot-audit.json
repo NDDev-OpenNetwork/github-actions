@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-08T23:04:22Z",
+  "repository_commit": "547f3cab399fb9bc107f107a6bb1d1f387a64f99",
+  "host": "server-example-legacy",
+  "previous_boot": {
+    "boot_id": "d00fa803-a30a-4ff6-a2e9-c0bf55ef3a14",
+    "gate_accepted": false,
+    "zot_bind_attempt_at": "2026-08-08T22:36:26Z",
+    "gha0_created_at": "2026-08-08T22:36:32Z",
+    "incus_active_at": "2026-08-08T22:36:33Z",
+    "zot_exit_status": 0
+  },
+  "corrective_contract": {
+    "network_probe_sha256": "2430d54b9faaebe2a111c8a3b76608faf1202b90d039ffa49f8d869e3ecac2c4",
+    "zot_unit_sha256": "aeaf09612d5ee107482968dffacb6bc3812cac3a8f608fb47ea70729bebeaeb7",
+    "rustfs_unit_sha256": "463deaddac603f249142d43d7e8e7705f6bcb0ed3a6b8afed878dfd07391ed64",
+    "requires_incus": true,
+    "interface": "gha0",
+    "probe_timeout_seconds": 120,
+    "systemd_timeout_seconds": 150,
+    "restart_policy": "always"
+  },
+  "accepted_boot": {
+    "boot_id": "3a3ed9f4-6a6b-4732-9d27-d22afce1442a",
+    "started_at": "2026-08-08T22:57:44Z",
+    "system_state": "running",
+    "incus_active_monotonic_usec": 12229714,
+    "zot_active_monotonic_usec": 12340195,
+    "rustfs_active_monotonic_usec": 12342090,
+    "zot_restarts": 0,
+    "zot_probe_status": 0,
+    "rustfs_probe_status": 0,
+    "zot_bind_race_detected": false,
+    "manual_cache_start_or_restart": false
+  },
+  "zot": {
+    "binary_sha256": "902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6",
+    "config_sha256": "e3dd89b03676b1280e9932721593c7dcba9257aab2dccb6676c8ae15e6f663e4",
+    "credential_state": "managed",
+    "bcrypt_cost": 12,
+    "anonymous_http": 401,
+    "systemd_security_exposure": 2.7,
+    "journal_secret_match": false
+  },
+  "post_boot_authorization": {
+    "trusted_oci_crud": true,
+    "trusted_cross_namespace_write_http": 403,
+    "untrusted_oci_crud": true,
+    "untrusted_cross_namespace_write_http": 403,
+    "promoter_oci_crud": true,
+    "promoter_cross_namespace_write_http": 403,
+    "release_promoted_read": true,
+    "release_promoted_write_http": 403,
+    "anonymous_http": 401,
+    "temporary_manifests_deleted": true,
+    "cache_service_restarted": false
+  },
+  "audit_tool": {
+    "expected_smoke_script_sha256": "7a7401873c271011ff2d76148630419bf23fd762691d504d73777460552d9aa8",
+    "observed_at_boot_sha256": "6c518d1d622a540a062773f94690e61e0a9779ada7ecc4728d8dbf0f12021fd9",
+    "reconciled_after_boot": true,
+    "cache_service_restarted": false
+  },
+  "fleet": {
+    "observer_captured_at": "2026-08-08T23:04:12.000605024Z",
+    "observer_healthy": true,
+    "collection_errors": 0,
+    "visible_instances": 0,
+    "orphan_instances": 0,
+    "missing_instances": 0,
+    "provider_leases": 0,
+    "diagnostic_source_bundles": 23,
+    "diagnostic_exported_bundles": 23,
+    "diagnostic_pending_bundles": 0,
+    "diagnostic_consecutive_failures": 0,
+    "failed_systemd_units": 0,
+    "root_free_percent": 40
+  },
+  "retained_services": {
+    "legacy_runner_units": 12,
+    "legacy_listeners": 12,
+    "legacy_workers_at_capture": 1,
+    "workers_signaled_during_drain": 0,
+    "jobs_cancelled_during_drain": 0,
+    "example-platform_http": 200,
+    "captcha_http": 200,
+    "running_or_healthy_containers": 5
+  }
+}

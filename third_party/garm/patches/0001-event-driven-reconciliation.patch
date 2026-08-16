@@ -1,0 +1,359 @@
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index 78465f5..51a6522 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -44,6 +44,7 @@ func newInstanceManager(ctx context.Context, instance params.Instance, scaleSet
+ 		instance:       instance,
+ 		provider:       provider,
+ 		deleteBackoff:  time.Second * 0,
++		reconcileWake:  make(chan struct{}, 1),
+ 		scaleSet:       scaleSet,
+ 		helper:         helper,
+ 		scaleSetEntity: githubEntity,
+@@ -72,9 +73,12 @@ type instanceManager struct {
+ 	deleteBackoff time.Duration
+ 
+ 	updates chan dbCommon.ChangePayload
+-	mux     sync.Mutex
+-	running atomic.Bool
+-	quit    chan struct{}
++	// reconcileWake coalesces lifecycle changes so create/delete work starts
++	// immediately. The periodic loop remains as a convergence safety net.
++	reconcileWake chan struct{}
++	mux           sync.Mutex
++	running       atomic.Bool
++	quit          chan struct{}
+ }
+ 
+ func (i *instanceManager) Start() error {
+@@ -92,6 +96,7 @@ func (i *instanceManager) Start() error {
+ 
+ 	go i.loop()
+ 	go i.updatesLoop()
++	i.signalReconcile()
+ 	return nil
+ }
+ 
+@@ -433,11 +438,20 @@ func (i *instanceManager) updatesLoop() {
+ 					return
+ 				}
+ 				slog.ErrorContext(i.ctx, "handling update", "error", err)
++				continue
+ 			}
++			i.signalReconcile()
+ 		}
+ 	}
+ }
+ 
++func (i *instanceManager) signalReconcile() {
++	select {
++	case i.reconcileWake <- struct{}{}:
++	default:
++	}
++}
++
+ func (i *instanceManager) loop() {
+ 	defer i.Stop()
+ 	ticker := time.NewTicker(5 * time.Second)
+@@ -449,13 +463,14 @@ func (i *instanceManager) loop() {
+ 		case <-i.ctx.Done():
+ 			return
+ 		case <-ticker.C:
+-			if err := i.consolidateState(); err != nil {
+-				if errors.Is(err, ErrInstanceDeleted) {
+-					// instance had been deleted, we can exit the loop.
+-					return
+-				}
+-				slog.ErrorContext(i.ctx, "consolidating state", "error", err)
++		case <-i.reconcileWake:
++		}
++		if err := i.consolidateState(); err != nil {
++			if errors.Is(err, ErrInstanceDeleted) {
++				// instance had been deleted, we can exit the loop.
++				return
+ 			}
++			slog.ErrorContext(i.ctx, "consolidating state", "error", err)
+ 		}
+ 	}
+ }
+diff --git a/workers/provider/instance_manager_wake_test.go b/workers/provider/instance_manager_wake_test.go
+new file mode 100644
+index 0000000..f569786
+--- /dev/null
++++ b/workers/provider/instance_manager_wake_test.go
+@@ -0,0 +1,13 @@
++package provider
++
++import "testing"
++
++func TestSignalReconcileCoalesces(t *testing.T) {
++	manager := &instanceManager{reconcileWake: make(chan struct{}, 1)}
++	manager.signalReconcile()
++	manager.signalReconcile()
++
++	if got := len(manager.reconcileWake); got != 1 {
++		t.Fatalf("reconcile wake depth = %d, want 1", got)
++	}
++}
+diff --git a/workers/scaleset/autoscale_wake_test.go b/workers/scaleset/autoscale_wake_test.go
+new file mode 100644
+index 0000000..bcc1ee7
+--- /dev/null
++++ b/workers/scaleset/autoscale_wake_test.go
+@@ -0,0 +1,65 @@
++package scaleset
++
++import (
++	"context"
++	"testing"
++
++	dbCommon "github.com/cloudbase/garm/database/common"
++	"github.com/cloudbase/garm/params"
++)
++
++func TestSignalAutoScaleCoalesces(t *testing.T) {
++	w := &Worker{autoscaleWake: make(chan struct{}, 1)}
++	w.signalAutoScale()
++	w.signalAutoScale()
++
++	if got := len(w.autoscaleWake); got != 1 {
++		t.Fatalf("autoscale wake depth = %d, want 1", got)
++	}
++}
++
++func TestScaleSetUpdateSignalsAutoScale(t *testing.T) {
++	w := &Worker{
++		ctx:           context.Background(),
++		scaleSet:      params.ScaleSet{Enabled: true, MaxRunners: 1},
++		autoscaleWake: make(chan struct{}, 1),
++	}
++	updated := params.ScaleSet{Enabled: true, MaxRunners: 1, DesiredRunnerCount: 1}
++	w.handleScaleSetEvent(dbCommon.ChangePayload{
++		Operation: dbCommon.UpdateOperation,
++		Payload:   updated,
++	})
++
++	if w.scaleSet.DesiredRunnerCount != 1 {
++		t.Fatalf("desired runner count = %d, want 1", w.scaleSet.DesiredRunnerCount)
++	}
++	select {
++	case <-w.autoscaleWake:
++	default:
++		t.Fatal("scale set update did not wake autoscaler")
++	}
++}
++
++func TestScaleDownProtectsStartupAndExecutionStates(t *testing.T) {
++	tests := []struct {
++		name      string
++		status    params.RunnerStatus
++		protected bool
++	}{
++		{name: "pending", status: params.RunnerPending, protected: true},
++		{name: "installing", status: params.RunnerInstalling, protected: true},
++		{name: "active", status: params.RunnerActive, protected: true},
++		{name: "terminated", status: params.RunnerTerminated, protected: true},
++		{name: "idle", status: params.RunnerIdle},
++		{name: "failed", status: params.RunnerFailed},
++		{name: "offline", status: params.RunnerOffline},
++		{name: "unknown", status: params.RunnerUnknown},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			if got := scaleDownProtected(test.status); got != test.protected {
++				t.Fatalf("scaleDownProtected(%q) = %t, want %t", test.status, got, test.protected)
++			}
++		})
++	}
++}
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index abc2426..6b28f6f 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -61,6 +61,7 @@ func NewWorker(ctx context.Context, store dbCommon.Store, scaleSet params.ScaleS
+ 		scaleSet:       scaleSet,
+ 		entity:         entity,
+ 		runners:        make(map[string]params.Instance),
++		autoscaleWake:  make(chan struct{}, 1),
+ 	}, nil
+ }
+ 
+@@ -82,6 +83,11 @@ type Worker struct {
+ 	mux     sync.Mutex
+ 	running bool
+ 	quit    chan struct{}
++
++	// autoscaleWake is a coalescing edge trigger. Database watcher updates wake
++	// the autoscaler immediately, while its periodic ticker remains the
++	// reconciliation safety net.
++	autoscaleWake chan struct{}
+ }
+ 
+ func (w *Worker) ensureScaleSetInGitHub() error {
+@@ -333,6 +339,7 @@ func (w *Worker) Start() (err error) {
+ 	go w.loop()
+ 	go w.keepListenerAlive()
+ 	go w.handleAutoScale()
++	w.signalAutoScale()
+ 	return nil
+ }
+ 
+@@ -618,6 +625,7 @@ func (w *Worker) handleScaleSetEvent(event dbCommon.ChangePayload) {
+ 		}
+ 		w.scaleSet = scaleSet
+ 		w.mux.Unlock()
++		w.signalAutoScale()
+ 	default:
+ 		slog.DebugContext(w.ctx, "invalid operation type; ignoring", "operation_type", event.Operation)
+ 	}
+@@ -856,25 +864,17 @@ func (w *Worker) handleScaleUp() {
+ 	}
+ }
+ 
+-func (w *Worker) waitForToolsOrCancel() (hasTools, stopped bool) {
+-	ticker := time.NewTicker(1 * time.Second)
+-	defer ticker.Stop()
+-	select {
+-	case <-ticker.C:
+-		entity, err := w.scaleSet.GetEntity()
+-		if err != nil {
+-			slog.ErrorContext(w.ctx, "error getting entity", "error", err)
+-		}
+-		if _, err := cache.GetGithubToolsCache(entity.ID); err != nil {
+-			slog.DebugContext(w.ctx, "tools not found in cache; waiting for tools")
+-			return false, false
+-		}
+-		return true, false
+-	case <-w.quit:
+-		return false, true
+-	case <-w.ctx.Done():
+-		return false, true
++func (w *Worker) githubToolsAvailable() bool {
++	entity, err := w.scaleSet.GetEntity()
++	if err != nil {
++		slog.ErrorContext(w.ctx, "error getting entity", "error", err)
++		return false
++	}
++	if _, err := cache.GetGithubToolsCache(entity.ID); err != nil {
++		slog.DebugContext(w.ctx, "tools not found in cache; waiting for tools")
++		return false
+ 	}
++	return true
+ }
+ 
+ func (w *Worker) handleScaleDown() {
+@@ -895,11 +887,10 @@ func (w *Worker) handleScaleDown() {
+ 		}
+ 		switch runner.Status {
+ 		case commonParams.InstanceRunning:
+-			switch runner.RunnerStatus {
+-			case params.RunnerTerminated, params.RunnerActive:
+-				slog.DebugContext(w.ctx, "runner is not in a valid state; skipping", "runner_name", runner.Name, "runner_status", runner.RunnerStatus)
+-				continue
+-			}
++			if scaleDownProtected(runner.RunnerStatus) {
++				slog.DebugContext(w.ctx, "runner is protected from scale down; skipping", "runner_name", runner.Name, "runner_status", runner.RunnerStatus)
++				continue
++			}
+ 			locked := locking.TryLock(runner.Name, w.consumerID)
+ 			if !locked {
+ 				slog.DebugContext(w.ctx, "runner is locked; skipping", "runner_name", runner.Name)
+@@ -951,6 +942,15 @@ func (w *Worker) handleScaleDown() {
+ 	}
+ }
+ 
++func scaleDownProtected(status params.RunnerStatus) bool {
++	switch status {
++	case params.RunnerPending, params.RunnerInstalling, params.RunnerActive, params.RunnerTerminated:
++		return true
++	default:
++		return false
++	}
++}
++
+ func (w *Worker) targetRunners() int {
+ 	var desiredRunners uint
+ 	if w.scaleSet.DesiredRunnerCount > 0 {
+@@ -963,6 +963,13 @@ func (w *Worker) runnerCount() int {
+ 	return len(w.runners)
+ }
+ 
++func (w *Worker) signalAutoScale() {
++	select {
++	case w.autoscaleWake <- struct{}{}:
++	default:
++	}
++}
++
+ func (w *Worker) handleAutoScale() {
+ 	ticker := time.NewTicker(5 * time.Second)
+ 	defer ticker.Stop()
+@@ -976,14 +983,14 @@ func (w *Worker) handleAutoScale() {
+ 	}
+ 
+ 	for {
+-		hasTools, stopped := w.waitForToolsOrCancel()
+-		if stopped {
+-			slog.DebugContext(w.ctx, "worker is stopped; exiting handleAutoScale")
+-			return
+-		}
+-
++		w.mux.Lock()
++		hasTools := w.githubToolsAvailable()
++		w.mux.Unlock()
+ 		if !hasTools {
+-			w.sleepWithCancel(1 * time.Second)
++			if w.sleepWithCancel(1 * time.Second) {
++				slog.DebugContext(w.ctx, "worker is stopped; exiting handleAutoScale")
++				return
++			}
+ 			continue
+ 		}
+ 
+@@ -993,27 +1000,29 @@ func (w *Worker) handleAutoScale() {
+ 		case <-w.ctx.Done():
+ 			return
+ 		case <-ticker.C:
+-			w.mux.Lock()
+-			for _, instance := range w.runners {
+-				if err := w.handleInstanceCleanup(instance); err != nil {
+-					slog.ErrorContext(w.ctx, "error cleaning up instance", "instance_id", instance.ID, "error", err)
+-				}
+-			}
++		case <-w.autoscaleWake:
++		}
+ 
+-			if w.runnerCount() == w.targetRunners() {
+-				lastMsgDebugLog("desired runner count reached", w.targetRunners(), w.runnerCount())
+-				w.mux.Unlock()
+-				continue
++		w.mux.Lock()
++		for _, instance := range w.runners {
++			if err := w.handleInstanceCleanup(instance); err != nil {
++				slog.ErrorContext(w.ctx, "error cleaning up instance", "instance_id", instance.ID, "error", err)
+ 			}
++		}
+ 
+-			if w.runnerCount() < w.targetRunners() {
+-				lastMsgDebugLog("scaling up", w.targetRunners(), w.runnerCount())
+-				w.handleScaleUp()
+-			} else {
+-				lastMsgDebugLog("attempting to scale down", w.targetRunners(), w.runnerCount())
+-				w.handleScaleDown()
+-			}
++		if w.runnerCount() == w.targetRunners() {
++			lastMsgDebugLog("desired runner count reached", w.targetRunners(), w.runnerCount())
+ 			w.mux.Unlock()
++			continue
+ 		}
++
++		if w.runnerCount() < w.targetRunners() {
++			lastMsgDebugLog("scaling up", w.targetRunners(), w.runnerCount())
++			w.handleScaleUp()
++		} else {
++			lastMsgDebugLog("attempting to scale down", w.targetRunners(), w.runnerCount())
++			w.handleScaleDown()
++		}
++		w.mux.Unlock()
+ 	}
+ }

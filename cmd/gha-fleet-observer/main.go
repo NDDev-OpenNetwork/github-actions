@@ -1,0 +1,243 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetobserve"
+	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/provider"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
+)
+
+const (
+	expectedListenAddress = "127.0.0.1:9464"
+	sampleInterval        = 15 * time.Second
+	sampleTimeout         = 10 * time.Second
+	maxStaleness          = 45 * time.Second
+	observerControllerID  = "nddev-loopback-observer"
+	diagnosticExportState = "/var/lib/gha-diagnostic-exporter"
+	pilotProfile          = "nddev-linux-standard"
+)
+
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
+type options struct {
+	platformConfig string
+	providerConfig string
+	listen         string
+	showVersion    bool
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	options, err := parseOptions(args, stderr)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "gha-fleet-observer: %v\n", err)
+		return 2
+	}
+	if options.showVersion {
+		_, _ = fmt.Fprintf(stdout, "gha-fleet-observer %s (%s)\n", version, commit)
+		return 0
+	}
+
+	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	collector, err := buildCollector(options)
+	if err != nil {
+		logger.Error("initialize fleet observer", "error", err)
+		return 1
+	}
+	if err := collector.Validate(); err != nil {
+		logger.Error("validate fleet observer", "error", err)
+		return 1
+	}
+
+	rootContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	state := &fleetobserve.State{}
+	state.Set(collect(rootContext, collector))
+
+	handler := fleetobserve.Handler{State: state, MaxStaleness: maxStaleness}
+	server := &http.Server{
+		Addr:              options.listen,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
+
+	go sample(rootContext, collector, state, logger)
+	go func() {
+		<-rootContext.Done()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			logger.Error("fleet observer shutdown failed", "error", err)
+		}
+	}()
+
+	logger.Info(
+		"fleet observer starting",
+		"listen_address", options.listen,
+		"sample_interval", sampleInterval.String(),
+		"max_staleness", maxStaleness.String(),
+		"version", version,
+		"commit", commit,
+	)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("fleet observer stopped", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func parseOptions(args []string, stderr io.Writer) (options, error) {
+	flags := flag.NewFlagSet("gha-fleet-observer", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	platformPath := flags.String("config", "/etc/gha-fleet/platform.yaml", "validated platform policy")
+	providerPath := flags.String("provider-config", "/etc/garm/provider-incus.toml", "hardened Incus provider configuration")
+	listen := flags.String("listen", expectedListenAddress, "loopback metrics and health address")
+	showVersion := flags.Bool("version", false, "print version information and exit")
+	if err := flags.Parse(args); err != nil {
+		return options{}, err
+	}
+	if flags.NArg() != 0 {
+		return options{}, fmt.Errorf("positional arguments are not accepted")
+	}
+	if *listen != expectedListenAddress {
+		return options{}, fmt.Errorf("listen address must remain %s", expectedListenAddress)
+	}
+	return options{
+		platformConfig: *platformPath,
+		providerConfig: *providerPath,
+		listen:         *listen,
+		showVersion:    *showVersion,
+	}, nil
+}
+
+func buildCollector(options options) (fleetobserve.Collector, error) {
+	platform, err := config.Load(options.platformConfig)
+	if err != nil {
+		return fleetobserve.Collector{}, err
+	}
+	providerConfiguration, err := providerconfig.NewConfig(options.providerConfig)
+	if err != nil {
+		return fleetobserve.Collector{}, err
+	}
+	journalStore := providerjournal.Store{
+		Path:     providerConfiguration.JournalFile,
+		LockPath: providerConfiguration.JournalLockFile,
+	}
+	return fleetobserve.Collector{
+		Config: platform,
+		Host:   hostprobe.Collect,
+		Journal: func(ctx context.Context) (providerjournal.Journal, error) {
+			return journalStore.ReadOnly(ctx)
+		},
+		Queue: func(ctx context.Context) (queueintent.Snapshot, error) {
+			return (queueintent.Reader{Path: providerConfiguration.QueueIntentFile}).ReadActive(ctx)
+		},
+		Instances: func(ctx context.Context) ([]string, error) {
+			incusProvider, err := provider.NewIncusProvider(options.providerConfig, observerControllerID)
+			if err != nil {
+				return nil, err
+			}
+			probe, err := incusProvider.Probe(ctx, pilotProfile)
+			if err != nil {
+				return nil, err
+			}
+			return probe.VisibleInstances, nil
+		},
+		Diagnostics: func(now time.Time) (workerdiagnostics.SpoolStats, error) {
+			return workerdiagnostics.Inspect(providerConfiguration.DiagnosticsDirectory, now)
+		},
+		Export: func() (diagnosticexport.Status, error) {
+			return diagnosticexport.ReadStatus(diagnosticExportState)
+		},
+		Service: serviceState,
+	}, nil
+}
+
+func collect(parent context.Context, collector fleetobserve.Collector) fleetobserve.Snapshot {
+	ctx, cancel := context.WithTimeout(parent, sampleTimeout)
+	defer cancel()
+	return collector.Collect(ctx)
+}
+
+func sample(ctx context.Context, collector fleetobserve.Collector, state *fleetobserve.State, logger *slog.Logger) {
+	ticker := time.NewTicker(sampleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			snapshot := collect(ctx, collector)
+			state.Set(snapshot)
+			if !snapshot.Healthy {
+				logger.Warn(
+					"fleet observer sample is unhealthy",
+					"collection_errors", len(snapshot.CollectionErrors),
+					"orphan_instances", snapshot.Incus.OrphanInstances,
+					"missing_instances", snapshot.Incus.MissingInstances,
+				)
+			}
+		}
+	}
+}
+
+func serviceState(ctx context.Context, name string) (string, error) {
+	allowed := false
+	for _, expected := range fleetobserve.ServiceNames() {
+		if name == expected {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("service %q is outside the fixed observer inventory", name)
+	}
+	output, err := exec.CommandContext(ctx, "systemctl", "is-active", systemdUnitName(name)).CombinedOutput()
+	state := strings.TrimSpace(string(output))
+	switch state {
+	case "active", "activating", "deactivating", "failed", "inactive", "reloading":
+		return state, nil
+	default:
+		if err != nil {
+			return "", fmt.Errorf("query service %s: %w", name, err)
+		}
+		return "", fmt.Errorf("service %s returned unknown state %q", name, state)
+	}
+}
+
+func systemdUnitName(name string) string {
+	if strings.HasSuffix(name, ".service") || strings.HasSuffix(name, ".timer") {
+		return name
+	}
+	return name + ".service"
+}

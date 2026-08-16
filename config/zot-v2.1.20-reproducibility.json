@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-08",
+  "independence_scope": "separate-source-checkout-module-cache-and-build-cache-on-same-host",
+  "repository": "project-zot/zot",
+  "version": "v2.1.20",
+  "source_commit": "3b5796d834e8661ea661a5fcc47add8d4405aebf",
+  "commit_description": "v2.1.20-0-g3b5796d",
+  "github_commit_verification": "verified",
+  "github_artifact_attestation_found": false,
+  "toolchain": "go1.26.5",
+  "build": {
+    "cgo_enabled": false,
+    "goexperiment": "jsonv2",
+    "goamd64": "v1",
+    "build_mode": "pie",
+    "trimpath": true
+  },
+  "release_asset": {
+    "name": "zot-linux-amd64-minimal",
+    "sha256": "902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6"
+  },
+  "runs": [
+    {
+      "build_id": "clean-build-1",
+      "fresh_source_checkout": true,
+      "isolated_module_cache": true,
+      "isolated_build_cache": true,
+      "module_verification": true,
+      "vcs_modified": false,
+      "output_sha256": "902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6",
+      "release_asset_match": true
+    },
+    {
+      "build_id": "clean-build-2",
+      "fresh_source_checkout": true,
+      "isolated_module_cache": true,
+      "isolated_build_cache": true,
+      "module_verification": true,
+      "vcs_modified": false,
+      "output_sha256": "902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6",
+      "release_asset_match": true
+    }
+  ]
+}

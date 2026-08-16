@@ -1,0 +1,36 @@
+# The one statement of which Incus provider this tree builds, ships and admits.
+#
+# It exists because the version used to be written down four times -- the build
+# stamp in the Makefile, the runtime fallback in main.go, the admission baseline
+# as a bare literal, and the desired state in each host config -- and bound to
+# none of them. Two production hosts ended up running different binaries, built
+# from ad8efaa and cae2d18, both reporting v0.1.5-nddev.30. See issue #263.
+#
+# The GARM derivative already worked this way: config/garm-derivative.yaml is the
+# authority and every host config is compared against it. This is the same shape
+# for the other in-tree derivative.
+schema_version: 1
+artifact: garm-provider-incus
+
+# Bump this and the build stamp, the admission baseline and the host desired
+# state all move together, because all three derive from here. A provider change
+# that does not bump it ships under the previous version, which is exactly how
+# runner-1 and runner-2 diverged.
+derivative_version: v0.1.5-nddev.32
+
+# The external-provider protocol GARM speaks to this binary. It moves on its own
+# schedule -- a provider release does not imply an interface release -- so it is
+# stated separately rather than derived from the version above.
+interface_version: v0.1.0
+
+upstream:
+  repository: https://github.com/cloudbase/garm-provider-incus
+  release: v0.1.5
+  commit: f3ae31910c6443c31d841de268a377985e7c60a5
+  release_asset_sha256: 1489b5f9b3f01528e338c604c13dabe8321ed6f1bc6de77c7344119d7731c43f
+
+runtime:
+  # The Incus client library this provider is compiled against. It decides which
+  # Incus API the fleet can speak, so it belongs to the release identity rather
+  # than to the code that happens to import it.
+  incus_sdk_version: v7.3.0

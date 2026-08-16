@@ -1,0 +1,15 @@
+[package]
+name = "nddev-runner-benchmark"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = "=1.0.104"
+rayon = "=1.12.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"

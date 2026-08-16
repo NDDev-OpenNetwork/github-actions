@@ -1,0 +1,323 @@
+name: Self-hosted canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Exact manual-JIT label or GARM Scale Set name
+        required: true
+        default: nddev-canary
+        type: choice
+        options:
+          - nddev-canary
+          - nddev-linux-standard
+          # Served by gha-runner-2, the Docker-capable failure domain. A scale
+          # set name is unique per repository, so each host serves a different
+          # one and this choice also selects which host is exercised.
+          - nddev-linux-integration
+          # The class most of this estate's jobs actually need: a shell, no job
+          # credential and no Docker. It was unreachable from here for as long
+          # as it was unreachable everywhere else.
+          - nddev-linux-fast
+      mode:
+        description: Canary behavior to exercise
+        required: true
+        default: basic
+        type: choice
+        options:
+          - basic
+          - reconciliation
+          - cancellation
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-hosted-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Official runner one-job canary
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 10
+    env:
+      NDDEV_CANARY_RUNNER_LABEL: ${{ inputs.runner_label }}
+    steps:
+      - name: Validate immutable worker boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RUNNER_OS}" == Linux ]]
+          [[ "$(id -un)" == runner ]]
+          case "${NDDEV_CANARY_RUNNER_LABEL}" in
+            nddev-linux-standard) expected_groups="runner sudo" ;;
+            nddev-linux-integration) expected_groups="docker runner sudo" ;;
+            *) expected_groups="" ;;
+          esac
+          if [[ -n "${expected_groups}" ]]; then
+            actual_groups="$(id --groups --name runner | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ' -)"
+            if [[ "${actual_groups}" != "${expected_groups}" ]]; then
+              printf 'runner groups are %q, expected %q\n' "${actual_groups}" "${expected_groups}" >&2
+              exit 1
+            fi
+          fi
+          test -r /etc/nddev/image-build.json
+          jq -e '
+            .schema_version == 2 and
+            .runner_version == "v2.336.0" and
+            (.manifest_fingerprint | test("^sha256:[0-9a-f]{64}$")) and
+            (.recipe_fingerprint | test("^sha256:[0-9a-f]{64}$")) and
+            (.package_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+            .runner_tool_cache == "/home/runner/actions-runner/_work/_tool" and
+            (.toolchains | keys) == ["bun", "go", "rust", "uv"] and
+            (.toolchains | to_entries | all(
+              (.value.version | test("^[0-9]+[.][0-9]+[.][0-9]+$")) and
+              (.value.archive_sha256 | test("^[0-9a-f]{64}$"))))
+          ' \
+            /etc/nddev/image-build.json >/dev/null
+          go_version="$(jq -er .toolchains.go.version /etc/nddev/image-build.json)"
+          test -f "/home/runner/actions-runner/_work/_tool/go/${go_version}/x64.complete"
+          [[ "$(rustc --version)" == "rustc $(jq -er .toolchains.rust.version /etc/nddev/image-build.json) "* ]]
+          [[ "$(uv --version)" == "uv $(jq -er .toolchains.uv.version /etc/nddev/image-build.json)"* ]]
+          [[ "$(bun --version)" == "$(jq -er .toolchains.bun.version /etc/nddev/image-build.json)" ]]
+          [[ "$(cat /etc/machine-id)" =~ ^[0-9a-f]{32}$ ]]
+          # The property being defended is that the *host's* Docker socket never
+          # reaches a worker. On the standard flavour that means no socket at
+          # all. The Docker-capable flavour runs its own daemon inside the VM,
+          # which is the entire point of it, so there the socket must exist, be
+          # served by the guest's own dockerd, and not be a mount from outside:
+          # a passed-in host socket would show up as a mountpoint at this path.
+          if [[ "${NDDEV_CANARY_RUNNER_LABEL}" == nddev-linux-integration ]]; then
+            test -S /var/run/docker.sock
+            systemctl is-active --quiet docker
+            if findmnt --noheadings --output SOURCE /var/run/docker.sock 2>/dev/null | grep -q .; then
+              printf 'docker socket is mounted in from outside the VM\n' >&2
+              exit 1
+            fi
+          else
+            test ! -S /var/run/docker.sock
+          fi
+          test ! -S /run/incus/unix.socket
+          test ! -S /var/lib/incus/unix.socket
+          test ! -S /var/snap/lxd/common/lxd/unix.socket
+          test ! -e /dev/kvm
+          if dpkg -s openssh-server >/dev/null 2>&1; then
+            printf 'OpenSSH server package is installed\n' >&2
+            exit 1
+          fi
+          for unit in ssh.service ssh.socket sshd.service sshd.socket; do
+            [[ "$(systemctl is-enabled "${unit}" 2>/dev/null || true)" == masked ]]
+            if systemctl is-active --quiet "${unit}"; then
+              printf 'SSH unit %s is active\n' "${unit}" >&2
+              exit 1
+            fi
+          done
+          if ss -H -lnt 'sport = :22' | grep -q .; then
+            printf 'unexpected SSH listener\n' >&2
+            exit 1
+          fi
+          if find /opt/cache/actions-runner -type f \
+            \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) \
+            -print -quit | grep -q .; then
+            printf 'runner registration state leaked into immutable cache\n' >&2
+            exit 1
+          fi
+          test ! -e /tmp/nddev-runner-canary-sentinel
+          install -m 0600 /dev/null /tmp/nddev-runner-canary-sentinel
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify one-job RustFS cache delivery
+        if: ${{ inputs.runner_label == 'nddev-linux-standard' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+
+          [[ "${NDDEV_CACHE_ROLE:-}" == trusted-writer ]]
+          [[ "${NDDEV_CACHE_MODE:-}" == read-write ]]
+          [[ "${NDDEV_CACHE_PREFIX_ROOT:-}" == NDDev-OpenNetwork/github-actions/trust/trusted ]]
+          [[ "${NDDEV_CACHE_DELIVERY_ID:-}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${AWS_ACCESS_KEY_ID:-}" =~ ^AKIA[0-9A-F]{16}$ ]]
+          [[ "${AWS_SECRET_ACCESS_KEY:-}" =~ ^[A-Za-z0-9_-]{64}$ ]]
+          [[ "${AWS_REGION:-}" == us-east-1 ]]
+          [[ "${AWS_DEFAULT_REGION:-}" == us-east-1 ]]
+          [[ "${SCCACHE_BUCKET:-}" == github-actions-cache ]]
+          [[ "${SCCACHE_ENDPOINT:-}" == https://192.0.2.1:9002 ]]
+          [[ "${SCCACHE_REGION:-}" == us-east-1 ]]
+          [[ "${SCCACHE_S3_USE_SSL:-}" == true ]]
+          [[ -z "${SCCACHE_S3_KEY_PREFIX:-}" ]]
+          printf 'cache-canary-stage=environment\n'
+
+          delivery_root=/home/runner/.gha-cache
+          for removed in provider-assignment.json provider-assignment.ready; do
+            if [[ -e "${delivery_root}/${removed}" || -L "${delivery_root}/${removed}" ]]; then
+              printf 'cache delivery staging file remains: %s\n' "${removed}" >&2
+              exit 1
+            fi
+          done
+          consumed="${delivery_root}/provider-assignment.consumed"
+          if [[ -L "${consumed}" || ! -f "${consumed}" ]]; then
+            printf 'cache delivery consumed marker is absent or not a regular file\n' >&2
+            exit 1
+          fi
+          consumed_metadata="$(stat --format='%u:%g:%a:%h:%F' -- "${consumed}")"
+          if [[ "${consumed_metadata}" != '1001:1002:600:1:regular file' ]]; then
+            printf 'cache delivery consumed marker metadata is %q\n' "${consumed_metadata}" >&2
+            exit 1
+          fi
+          if [[ "$(<"${consumed}")" != "${NDDEV_CACHE_DELIVERY_ID}" ]]; then
+            printf 'cache delivery consumed marker is not bound to this delivery ID\n' >&2
+            exit 1
+          fi
+          printf 'cache-canary-stage=consumed-assignment\n'
+
+          cache_ca=/home/runner/.gha-cache/rustfs-ca.pem
+          cache_ca_bundle=/home/runner/.gha-cache/rustfs-ca-bundle.pem
+          test ! -L "${cache_ca}"
+          test -r "${cache_ca}"
+          [[ "$(stat --format='%u:%g:%a:%h:%F' -- "${cache_ca}")" == "$(id -u):$(id -g):400:1:regular file" ]]
+          openssl x509 -in "${cache_ca}" -noout -checkend 86400 >/dev/null
+          openssl verify -CAfile "${cache_ca}" "${cache_ca}" >/dev/null
+          [[ "$(openssl x509 -in "${cache_ca}" -noout -subject)" == 'subject=CN = NDDev-GHA-Cache-CA' ]]
+          test ! -L "${cache_ca_bundle}"
+          test -r "${cache_ca_bundle}"
+          [[ "$(stat --format='%u:%g:%a:%h:%F' -- "${cache_ca_bundle}")" == "$(id -u):$(id -g):400:1:regular file" ]]
+          [[ "${SSL_CERT_FILE:-}" == "${cache_ca_bundle}" ]]
+          [[ "${CURL_CA_BUNDLE:-}" == "${cache_ca_bundle}" ]]
+          [[ "${AWS_CA_BUNDLE:-}" == "${cache_ca_bundle}" ]]
+          openssl verify -CAfile "${cache_ca_bundle}" "${cache_ca}" >/dev/null
+          printf 'cache-canary-stage=trust-anchor\n'
+
+          [[ "${RUNNER_ARCH}" == X64 ]]
+          lock_digest="$(sha256sum go.sum | awk '{print $1}')"
+          [[ "${lock_digest}" =~ ^[0-9a-f]{64}$ ]]
+          object_key="${NDDEV_CACHE_PREFIX_ROOT}/linux/amd64/curl-sigv4-v1/${lock_digest}/canary/cache-delivery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+          cross_key="NDDev-OpenNetwork/github-actions/trust/untrusted/linux/amd64/curl-sigv4-v1/${lock_digest}/canary/cache-delivery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+          object_url="${SCCACHE_ENDPOINT}/${SCCACHE_BUCKET}/${object_key}"
+          cross_url="${SCCACHE_ENDPOINT}/${SCCACHE_BUCKET}/${cross_key}"
+          payload="${RUNNER_TEMP}/cache-delivery-payload"
+          downloaded="${RUNNER_TEMP}/cache-delivery-downloaded"
+          response="${RUNNER_TEMP}/cache-delivery-response"
+          curl_config="${RUNNER_TEMP}/cache-delivery-curl.conf"
+          printf 'nddev-cache-delivery-v1:%s:%s\n' "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >"${payload}"
+          printf 'user = "%s:%s"\n' "${AWS_ACCESS_KEY_ID}" "${AWS_SECRET_ACCESS_KEY}" >"${curl_config}"
+          chmod 0600 "${curl_config}"
+
+          require_status() {
+            local operation="$1"
+            local expected="$2"
+            local actual="$3"
+            if [[ "${actual}" != "${expected}" ]]; then
+              printf '%s returned HTTP %s, expected %s\n' "${operation}" "${actual}" "${expected}" >&2
+              exit 1
+            fi
+          }
+
+          signed_request=(
+            --config "${curl_config}"
+            --silent --show-error --connect-timeout 5 --max-time 30
+            --cacert "${cache_ca}"
+            --aws-sigv4 "aws:amz:${AWS_REGION}:s3"
+          )
+          put_code="$(curl "${signed_request[@]}" --output "${response}" --write-out '%{http_code}' --request PUT --data-binary "@${payload}" "${object_url}")"
+          require_status own-prefix-put 200 "${put_code}"
+          get_code="$(curl "${signed_request[@]}" --output "${downloaded}" --write-out '%{http_code}' "${object_url}")"
+          require_status own-prefix-get 200 "${get_code}"
+          cmp --silent "${payload}" "${downloaded}"
+          cross_code="$(curl "${signed_request[@]}" --output "${response}" --write-out '%{http_code}' --request PUT --data-binary "@${payload}" "${cross_url}")"
+          require_status cross-trust-put 403 "${cross_code}"
+          delete_code="$(curl "${signed_request[@]}" --output "${response}" --write-out '%{http_code}' --request DELETE "${object_url}")"
+          require_status own-prefix-delete 403 "${delete_code}"
+
+          printf 'RustFS one-job delivery, own-prefix read/write, cross-trust denial and delete denial passed.\n'
+
+      - name: Exercise composite action semantics
+        id: composite
+        uses: ./.github/actions/canary-composite
+        with:
+          marker: official-runner-ok
+
+      - name: Exercise command files and annotations
+        id: protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'value=official-runner-ok\n' >>"${GITHUB_OUTPUT}"
+          printf 'NDDEV_CANARY_ENV=command-file-ok\n' >>"${GITHUB_ENV}"
+          printf '### NDDev one-job canary\n\n' >>"${GITHUB_STEP_SUMMARY}"
+          printf -- "- commit: \`%s\`\n- image: immutable golden VM\n" \
+            "${GITHUB_SHA}" >>"${GITHUB_STEP_SUMMARY}"
+          printf '::notice title=NDDev canary::official runner command files are operational\n'
+
+      - name: Verify step output and environment propagation
+        shell: bash
+        env:
+          PROTOCOL_OUTPUT: ${{ steps.protocol.outputs.value }}
+          COMPOSITE_OUTPUT: ${{ steps.composite.outputs.value }}
+        run: |
+          set -euo pipefail
+          [[ "${PROTOCOL_OUTPUT}" == official-runner-ok ]]
+          [[ "${COMPOSITE_OUTPUT}" == composite-official-runner-ok ]]
+          [[ "${NDDEV_CANARY_ENV}" == command-file-ok ]]
+          git diff --exit-code
+          git status --short
+
+      - name: Hold runner across reconciliation windows
+        if: ${{ inputs.mode == 'reconciliation' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'holding official runner identity across reconciliation windows\n'
+          sleep 45
+
+      - name: Build non-secret diagnostic artifact
+        if: ${{ inputs.mode != 'cancellation' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "${RUNNER_TEMP}/nddev-canary"
+          jq -n \
+            --slurpfile image /etc/nddev/image-build.json \
+            --arg commit "${GITHUB_SHA}" \
+            --arg runner_os "${RUNNER_OS}" \
+            --arg runner_arch "${RUNNER_ARCH}" \
+            --arg machine_id "$(cat /etc/machine-id)" \
+            --arg composite_output "${{ steps.composite.outputs.value }}" \
+            '{
+              schema_version: 2,
+              commit: $commit,
+              runner_os: $runner_os,
+              runner_arch: $runner_arch,
+              machine_id: $machine_id,
+              runner_version: $image[0].runner_version,
+              manifest_fingerprint: $image[0].manifest_fingerprint,
+              recipe_fingerprint: $image[0].recipe_fingerprint,
+              package_manifest_sha256: $image[0].package_manifest_sha256,
+              composite_output: $composite_output
+            }' \
+            >"${RUNNER_TEMP}/nddev-canary/result.json"
+
+      - name: Upload canary artifact
+        if: ${{ inputs.mode != 'cancellation' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nddev-self-hosted-canary-${{ github.run_id }}
+          path: ${{ runner.temp }}/nddev-canary/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Await cancellation signal
+        if: ${{ inputs.mode == 'cancellation' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'printf "cancellation signal received\n"; exit 0' TERM INT
+          printf 'canary is ready for cancellation\n'
+          sleep 300 &
+          wait $!

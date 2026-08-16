@@ -1,0 +1,17 @@
+name: NDDev local Docker action parity
+description: Exercise the official runner Docker action path and its disposable-VM daemon boundary.
+
+inputs:
+  marker:
+    description: Non-secret marker returned through the action output file.
+    required: true
+
+outputs:
+  value:
+    description: Marker emitted from the Docker action container.
+
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - ${{ inputs.marker }}

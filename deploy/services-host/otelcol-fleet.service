@@ -1,0 +1,37 @@
+[Unit]
+Description=Collect NDDev GitHub Actions telemetry services logs into OpenObserve
+Documentation=https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/adr/0033-telemetry-plane.md
+After=network-online.target openobserve.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otelcol
+Group=otelcol
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/gha-fleet/otelcol-fleet.env
+ExecStart=/usr/local/libexec/gha-fleet/otelcol-contrib --config /etc/gha-fleet/otelcol-fleet.yaml
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/otelcol-fleet
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target

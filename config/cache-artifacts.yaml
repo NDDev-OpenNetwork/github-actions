@@ -1,0 +1,69 @@
+schema_version: 1
+
+rustfs:
+  repository: rustfs/rustfs
+  version: 1.0.0-rc.1
+  source_commit: 778f1dfa2155cbbc61ad54e6896de9e29d2c4d8d
+  architecture: x86_64
+  libc: gnu
+  archive:
+    name: rustfs-linux-x86_64-gnu-v1.0.0-rc.1.zip
+    url: https://github.com/rustfs/rustfs/releases/download/1.0.0-rc.1/rustfs-linux-x86_64-gnu-v1.0.0-rc.1.zip
+    sha256: 01c03ba58adfca757578729501f4f886a98f13acfb18be5a2db60e04f5cbb595
+  binary_sha256: eb63af6574150a62a4509461f16b178976e67485ce6beacf41e6b67944d41db0
+  checksums:
+    name: SHA256SUMS
+    url: https://github.com/rustfs/rustfs/releases/download/1.0.0-rc.1/SHA256SUMS
+    sha256: 0888600d5dcaf1008664b51d47161195a1979544b0a3115b19ac3149c3d6687e
+  provenance:
+    name: rustfs-1.0.0-rc.1.provenance.json
+    url: https://github.com/rustfs/rustfs/releases/download/1.0.0-rc.1/rustfs-1.0.0-rc.1.provenance.json
+    sha256: 6057800d6bec74249dbb762e0ecb7ed6f34bc4ffe4f8547f2446155087ebf10d
+  sbom:
+    name: rustfs-1.0.0-rc.1.sbom.cdx.json
+    url: https://github.com/rustfs/rustfs/releases/download/1.0.0-rc.1/rustfs-1.0.0-rc.1.sbom.cdx.json
+    sha256: 1fac0eaa79353e8e18e1f8d6958162fae547d628ec7fc9d43f33b918a4ed9e19
+  deployment_stage: canary-only
+  production_promotion_allowed: false
+
+oci_registry:
+  implementation: zot
+  repository: project-zot/zot
+  version: v2.1.20
+  source_commit: 3b5796d834e8661ea661a5fcc47add8d4405aebf
+  architecture: amd64
+  build_profile: minimal
+  storage_driver: filesystem
+  extensions_enabled: false
+  binary:
+    name: zot-linux-amd64-minimal
+    url: https://github.com/project-zot/zot/releases/download/v2.1.20/zot-linux-amd64-minimal
+    sha256: 902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6
+  checksums:
+    name: checksums.sha256.txt
+    url: https://github.com/project-zot/zot/releases/download/v2.1.20/checksums.sha256.txt
+    sha256: a9fe260d8259084d884f2135f33a6f63ce898665e2c1115b76c871a196df6653
+  schema:
+    name: zot-schema.json
+    url: https://github.com/project-zot/zot/releases/download/v2.1.20/zot-schema.json
+    sha256: b462672271dcb74b5439dd257fbd38a880a5e053b307cce39c7c8b20642e8bf9
+  reproducible_build:
+    toolchain: go1.26.5
+    goexperiment: jsonv2
+    cgo_enabled: false
+    goamd64: v1
+    build_mode: pie
+    commit_description: v2.1.20-0-g3b5796d
+    independent_builds: 2
+    output_sha256: 902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6
+    evidence_file: zot-v2.1.20-reproducibility.json
+    evidence_sha256: 020b153ba1c150c751e6ee00d1efe9af81b90321587f228f1271cd7525293d57
+  runtime_evidence:
+    storage_audit_file: zot-v2.1.20-storage-audit.json
+    storage_audit_sha256: f373de41eb12cc8279906032ed3139b4e394b1efe560ccbff462e9017440bde2
+    authorization_audit_file: zot-v2.1.20-authz-audit.json
+    authorization_audit_sha256: 7a061ca320e25b7061054bc9a98e44cb4ba1d829d7aa0eec45b3bd2069924404
+    reboot_audit_file: zot-v2.1.20-reboot-audit.json
+    reboot_audit_sha256: 6cd5650b17368a85de2e6b7fcc800aaa61fa99cd943c65caa452365130a18c15
+  deployment_stage: production
+  production_promotion_allowed: true

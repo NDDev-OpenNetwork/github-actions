@@ -1,0 +1,30 @@
+schema_version: 3
+deployment_stage: canary
+source_directory: /run/gha-diagnostic-exporter-source
+source_owner: garm
+state_directory: /var/lib/gha-diagnostic-exporter
+endpoint: https://192.0.2.1:9002
+region: us-east-1
+bucket: gha-diagnostics-canary
+prefix: diagnostics/v1
+repositories:
+  - NDDev-OpenNetwork/github-actions
+  - example-guild/ai_stp
+account_scopes:
+  - NDDev-OpenNetwork
+  - example-media
+pools:
+  - nddev-linux-fast
+  - nddev-linux-integration
+  - nddev-linux-standard
+trust: trusted
+platform: linux
+architecture: amd64
+path_style: true
+ca_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-ca.pem
+access_key_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-access-key
+secret_key_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-secret-key
+request_timeout_seconds: 20
+source_retention_hours: 168
+max_bundle_bytes: 16777216
+max_decompressed_bytes: 20971520

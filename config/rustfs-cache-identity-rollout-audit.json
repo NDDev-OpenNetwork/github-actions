@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T07:56:46Z",
+  "host": "server-example-legacy",
+  "repository_merge_commit": "4d3ebc2670d78271961d6809ba12455b09194c16",
+  "implementation": {
+    "pull_requests": [100, 101, 102, 103],
+    "feature_merge_commit": "6f5ac94a8d1b5be5f54f6375c448283cb3adab57",
+    "s3_signing_merge_commit": "ba0923fb56708eedfdb2a603363dee4ec1d5cfae",
+    "policy_envelope_merge_commit": "7c6c4dd8652aafd8687ff0f905b134d7174206b0",
+    "managed_probe_merge_commit": "4d3ebc2670d78271961d6809ba12455b09194c16"
+  },
+  "controller": {
+    "version": "v0.1.0",
+    "commit": "4d3ebc2670d78271961d6809ba12455b09194c16",
+    "binary_sha256": "59ce2b399327636066e7aa64e3214bfeea0181418aba538ca2d54cc0a7ad8413",
+    "config_sha256": "de01653a2b48f0fc9033d4cc6c96b6f5cd2ab88eed30e37cadbb51975e174d7c",
+    "release_path": "/usr/local/libexec/gha-fleet/releases/controller/v0.1.0-4d3ebc2670d78271961d6809ba12455b09194c16/gha-fleet",
+    "rollback_commit": "7c6c4dd8652aafd8687ff0f905b134d7174206b0",
+    "rollback_retained": true
+  },
+  "rustfs": {
+    "version": "1.0.0-rc.1",
+    "binary_sha256": "eb63af6574150a62a4509461f16b178976e67485ce6beacf41e6b67944d41db0",
+    "deployment_stage": "canary-only",
+    "production_promotion_allowed": false,
+    "bucket": "github-actions-cache",
+    "quota_bytes": 68719476736,
+    "quota_type": "HARD",
+    "lifecycle_rules": 3,
+    "identity_roles": 4
+  },
+  "rollout": {
+    "initial_local_state": "fresh",
+    "initial_remote_state": "fresh",
+    "s3_signing_failure_detected_before_apply": true,
+    "s3_signing_failure_http_status": 400,
+    "corrected_head_bucket_status": 404,
+    "first_apply_resources_created": true,
+    "first_apply_post_inspection_converged": false,
+    "first_apply_effective_probes_executed": false,
+    "first_apply_credentials_retained": true,
+    "first_apply_failure_reason": "RustFS info-canned-policy returns a policy metadata envelope",
+    "recovery_required_credential_regeneration": false,
+    "recovery_required_resource_deletion": false
+  },
+  "managed_apply": {
+    "applied": true,
+    "local_state": "managed",
+    "state_before": "managed",
+    "state_after": "managed",
+    "actions": ["verify_effective_boundaries"],
+    "result_sha256": "d50a040b0e436e65a25cd6bd3cdbfb262097ac7476709431bbf63af190c216d9",
+    "own_prefix_write_read_passed": true,
+    "release_write_denied": true,
+    "cross_prefix_write_denied": true,
+    "identity_delete_denied": true,
+    "root_probe_cleanup_passed": true
+  },
+  "final_plan": {
+    "applied": false,
+    "local_state": "managed",
+    "state_before": "managed",
+    "state_after": "managed",
+    "actions": 0,
+    "result_sha256": "b51a9192448e8190c5e5c618fce6544fc66ab3c2744fbbe5acf733aeff01fb2c"
+  },
+  "storage_postcondition": {
+    "list_http_status": 200,
+    "remaining_objects": 0,
+    "list_response_bytes": 249,
+    "list_response_sha256": "51ec599974bdd798591c452b422a5045f2275e56bccc16669119202fccbbc2d6"
+  },
+  "credential_postcondition": {
+    "files": 8,
+    "owner": "root:garm",
+    "mode": "0640",
+    "link_count": 1,
+    "journal_secret_matches": 0,
+    "secrets_in_controller_json": false,
+    "secrets_in_golden_image": false,
+    "secrets_in_incus_config": false
+  },
+  "host_postcondition": {
+    "boot_id": "ddc33bc5-c743-4415-bfec-0926859c9201",
+    "failed_units": 0,
+    "garm_active": true,
+    "rustfs_active": true,
+    "zot_active": true,
+    "observer_healthy": true,
+    "observer_fresh": true,
+    "observer_collection_errors": 0,
+    "incus_visible_instances": 1,
+    "incus_orphans": 0,
+    "incus_missing_instances": 0,
+    "warm_instance": "warm-standard-8eca69fa70f0",
+    "warm_running": true,
+    "journal_warm_ready": 1,
+    "journal_claims": 0,
+    "diagnostic_bundles": 52,
+    "diagnostic_exported_bundles": 52,
+    "diagnostic_pending_bundles": 0,
+    "legacy_listeners": 12,
+    "legacy_workers": 0,
+    "example_platform_healthy": true,
+    "captcha_healthy": true,
+    "root_used_percent": 62
+  },
+  "verdict": {
+    "rustfs_identity_plane_complete": true,
+    "effective_trust_boundaries_complete": true,
+    "idempotent_plan_complete": true,
+    "credential_distribution_complete": false,
+    "rustfs_production_promotion_complete": false,
+    "legacy_runners_preserved": true,
+    "retained_applications_preserved": true,
+    "high_availability_complete": false
+  }
+}

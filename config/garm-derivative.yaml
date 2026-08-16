@@ -1,0 +1,62 @@
+schema_version: 1
+artifact: garm
+derivative_version: v0.2.1-nddev.15
+upstream:
+  repository: https://github.com/cloudbase/garm
+  release: v0.2.1
+  commit: 154638445c3949c1958b01812f69d9a1e4d82684
+  release_asset_sha256: 11176acb8a725f914b9b947891b4837d374fb616195562cc0ad45a7be8b6c746
+patches:
+  - path: third_party/garm/patches/0001-event-driven-reconciliation.patch
+    sha256: 2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34
+    purpose: Wake reconciliation from durable watcher events and keep starting runners out of generic scale-down while retaining periodic and timeout convergence.
+  - path: third_party/garm/patches/0002-central-queue-admission.patch
+    sha256: 2727ad8b3e92f7800af1251c032cd3b0a6d5b50babcbdab65bffe59a69d76131
+    purpose: Admit sparse JobAssigned UUID identities from canonical repository entities before desired capacity, retain deferred GitHub messages, and reconcile later AcquireJobs metadata and request IDs.
+  - path: third_party/garm/patches/0003-failed-scale-set-runner-cleanup.patch
+    sha256: 0cd77616af4160eae7be51f91340841b30e13d4b20ea5873e004c1b81d7879e1
+    purpose: Retain failed scale-set instance identity until its pre-created GitHub JIT runner registration is removed, retrying transient cleanup failures before provider and database teardown.
+  - path: third_party/garm/patches/0004-direct-jit-provider-handoff.patch
+    sha256: d23873baf6689c7e4cc366b14979ad86367ef9e321cb6d5d2745c78e64a3c172
+    purpose: Reconstruct the official one-job JIT blob only in the dynamic provider request for explicitly opted-in warm workers and bridge their authoritative JobStarted lifecycle into GARM's existing state machine, leaving the official runner, metadata workers, and unrelated providers unchanged.
+  - path: third_party/garm/patches/0005-direct-jit-phase-telemetry.patch
+    sha256: 49de677a1c483e58cc009ef8f23d301ef4647ea01aec4100a3e6c49376f7889f
+    purpose: Emit secret-free structured phase boundaries and monotonic durations around GitHub AcquireJobs and external-provider creation without changing admission, execution or reconciliation semantics.
+overlays:
+  - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
+    sha256: 874f3810a8d981eed3b4fe9c6bcb399604a1656e050818063832f3b49d904e4f
+    purpose: Fsync-backed central queue admission of configurable width, priority aging, repository quotas and weighted stride scheduling.
+  - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
+    sha256: 48f08a2b8c0c7c13000cb3368911cee945015bfc5cfc3468d21513fef7f8b269
+    purpose: Deterministic priority, fairness, width, idempotency, message retention, crash expiry and concurrent-selection tests.
+build:
+  container_image: docker.io/library/golang@sha256:6c5605ab3a9a9fb3c4eafe5b3d63cdbf3881caf113262b67862547b54a9db599
+  go_version: go1.26.5
+  cgo_enabled: true
+  target_os: linux
+  target_arch: amd64
+  network_during_test_and_build: none
+  module_mode: vendor
+  tags:
+    - osusergo
+    - netgo
+    - sqlite_omit_load_extension
+  reproducible_rebuilds: 2
+  maximum_required_glibc: "2.34"
+  binary_sha256: 35a93c8d009c2f5667e5f63c31b5f35db54b6c699b6374eaba3f2ef70f55348a
+runtime_contract:
+  event_driven_scale_set_wake: true
+  event_driven_instance_wake: true
+  startup_states_protected_from_scale_down: true
+  periodic_reconciliation_seconds: 5
+  durable_queue_intent_before_acquire: true
+  assigned_job_admission_before_capacity: true
+  deferred_available_message_retained: true
+  global_max_in_flight: 1
+  weighted_repository_fairness: true
+  per_repository_limit: 1
+  priority_aging_seconds: 300
+  failed_scale_set_registration_cleanup: true
+  direct_jit_provider_handoff: true
+  direct_jit_phase_telemetry: true
+  official_actions_runner_unchanged: true

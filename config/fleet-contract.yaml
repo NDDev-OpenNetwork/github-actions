@@ -1,0 +1,75 @@
+# The declared half of the fleet contract.
+#
+# Consumers -- github-device-sync above all, which pins this repository as a
+# submodule and has held that pin frozen since 2d277bd waiting for exactly this
+# artifact (NDDev-OpenNetwork/github-device-sync#172) -- need one statement of what
+# this fleet promises. This file holds only the part that cannot be derived from
+# the tree: what is contractual versus what may move, and what is still open.
+#
+# Everything factual is generated. `gha-fleet fleet-contract` reads the runner
+# classes from garmbootstrap.PublishedScaleSets, the tenants from
+# internal/tenant, the artifact identities from config/garm-derivative.yaml and
+# config/provider-derivative.yaml, and the required merge context from
+# .github/branch-protection.yaml, then stamps the commit it was rendered at.
+# None of that is written down here, because a contract that restates its own
+# sources is a contract that can disagree with them.
+schema_version: 1
+
+# Bumped when a consumer would have to re-read the contract to stay correct:
+# a runner class withdrawn, a tenancy boundary narrowed, an admission rule
+# changed. Adding a class or a tenant does not bump it -- that only widens what
+# is on offer.
+contract_version: 1
+
+# What a consumer may rely on, and for how long.
+guarantees:
+  - subject: runner-classes
+    promise: >-
+      A published runner class keeps its label and its capability shape. A class
+      is withdrawn only by a contract_version bump, and never silently: a label
+      that stops being served would leave a consumer's jobs queued forever
+      rather than failing.
+  - subject: job-isolation
+    promise: >-
+      One job per virtual machine, always. A worker is created for a job,
+      destroyed after it, and never reused or returned to a pool. This is the
+      property the whole design exists for and it is not negotiable per tenant.
+  - subject: tenant-boundary
+    promise: >-
+      A job is admitted only for a repository or account the tenant registry
+      names. Onboarding a tenant is a code change in this repository, reviewed
+      and merged; there is no runtime allowlist to edit.
+  - subject: artifact-identity
+    promise: >-
+      The GARM derivative is reproducible to an exact binary digest. The
+      provider is not yet -- its version names a release rather than a build,
+      which is why the deployed artifact is identified by the commit its
+      `version` subcommand reports (#263).
+
+# What may change without a contract_version bump, stated so a consumer does not
+# build on it by accident.
+not_contractual:
+  - Warm-pool depth, and whether a given job starts warm or cold.
+  - Per-host capacity and which host serves a given job.
+  - Image contents beyond the baked toolchains the class declares.
+  - Cache hit rate, and cache availability -- a cache outage degrades a build to
+    uncached rather than failing it.
+
+# Open work a consumer should know about before depending on this fleet for
+# something it does not yet do. Issue numbers only: their state is in GitHub, and
+# copying it here would make this file wrong the moment one closes.
+open_blockers:
+  - issue: 216
+    subject: Per-host queue capacity is compiled in at one job, in nine places.
+  - issue: 236
+    subject: Cache prefix root is a single-account constant, so tenants share one
+      read-write namespace.
+  - issue: 240
+    subject: A pool's declared tenant is enforced, but the provider boundary is
+      still the union of every tenant rather than the pool's own.
+  - issue: 253
+    subject: Queue admission refuses a message carrying a second assigned job, so
+      a backlog refuses itself.
+  - issue: 263
+    subject: The provider version names a release rather than a build; two hosts
+      ran different binaries under one version.

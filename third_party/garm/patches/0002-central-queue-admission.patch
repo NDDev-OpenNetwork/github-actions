@@ -1,0 +1,186 @@
+diff --git a/workers/scaleset/interfaces.go b/workers/scaleset/interfaces.go
+--- a/workers/scaleset/interfaces.go
++++ b/workers/scaleset/interfaces.go
+@@ -20,6 +20,7 @@ import (
+ 
+ type scaleSetHelper interface {
+ 	GetScaleSet() params.ScaleSet
++	GetEntity() params.ForgeEntity
+ 	GetScaleSetClient() (*scalesets.ScaleSetClient, error)
+ 	SetLastMessageID(id int64) error
+ 	SetDesiredRunnerCount(count int) error
+diff --git a/workers/scaleset/scaleset_helper.go b/workers/scaleset/scaleset_helper.go
+--- a/workers/scaleset/scaleset_helper.go
++++ b/workers/scaleset/scaleset_helper.go
+@@ -47,6 +47,10 @@ func (w *Worker) GetScaleSet() params.ScaleSet {
+ 	return w.scaleSet
+ }
+ 
++func (w *Worker) GetEntity() params.ForgeEntity {
++	return w.entity
++}
++
+ func (w *Worker) Owner() string {
+ 	return fmt.Sprintf("garm-%s", w.controllerInfo.ControllerID)
+ }
+diff --git a/workers/scaleset/scaleset_listener.go b/workers/scaleset/scaleset_listener.go
+index 3fc00e0..b35d10e 100644
+--- a/workers/scaleset/scaleset_listener.go
++++ b/workers/scaleset/scaleset_listener.go
+@@ -20,6 +20,7 @@ import (
+ 	"log/slog"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
+ 	"github.com/cloudbase/garm/params"
+@@ -37,9 +38,10 @@ func newListener(ctx context.Context, scaleSetHelper scaleSetHelper) *scaleSetLi
+ 		slog.Any("sub_worker", "scaleset-listener"),
+ 	)
+ 	return &scaleSetListener{
+-		ctx:            ctx,
+-		scaleSetHelper: scaleSetHelper,
+-		lastMessageID:  scaleSetHelper.GetScaleSet().LastMessageID,
++		ctx:               ctx,
++		scaleSetHelper:    scaleSetHelper,
++		lastMessageID:     scaleSetHelper.GetScaleSet().LastMessageID,
++		intentCoordinator: newQueueIntentCoordinatorFromEnvironment(),
+ 	}
+ }
+ 
+@@ -57,6 +59,9 @@ type scaleSetListener struct {
+ 
+ 	scaleSetHelper scaleSetHelper
+ 	messageSession *scalesets.MessageSession
++	// intentCoordinator is the single durable admission point before
++	// AcquireJobs. Every scale-set listener shares its fsync journal and lock.
++	intentCoordinator *queueIntentCoordinator
+ 
+ 	mux        sync.Mutex
+ 	running    atomic.Bool
+@@ -72,6 +77,12 @@ func (l *scaleSetListener) Start() error {
+ 	if l.running.Load() {
+ 		return nil
+ 	}
++	if l.intentCoordinator == nil {
++		return fmt.Errorf("queue-intent coordinator is not configured")
++	}
++	if err := l.intentCoordinator.Validate(); err != nil {
++		return fmt.Errorf("validating queue-intent coordinator: %w", err)
++	}
+ 
+ 	listenCtx, listenCancelFunc := context.WithCancel(context.Background())
+ 	listenCtx = garmUtil.CopySlogValuesToNewCtx(l.ctx, listenCtx)
+@@ -181,17 +192,36 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		slog.ErrorContext(l.ctx, "getting scale set client", "error", err)
+ 		return
+ 	}
++	scaleSet := l.scaleSetHelper.GetScaleSet()
++	// Completion must release the global slot before this same message tries
++	// to acquire newly available work. Recording lifecycle first also prevents
++	// a retained available message from hiding a completion in a mixed batch.
++	deferAssignedMessage, err := l.intentCoordinator.ObserveLifecycle(scaleSet, l.scaleSetHelper.GetEntity(), assignedJobs, startedJobs, completedJobs)
++	if err != nil {
++		slog.ErrorContext(l.ctx, "recording queue lifecycle", "error", err)
++		return
++	}
++	if deferAssignedMessage {
++		// JobAssigned precedes JobAvailable. Do not update desired capacity or
++		// acknowledge this message until its job wins global admission.
++		slog.DebugContext(l.ctx, "retaining deferred assigned-job message", "message_id", msg.MessageID)
++		timer := time.NewTimer(time.Second)
++		defer timer.Stop()
++		select {
++		case <-timer.C:
++		case <-l.listenerCtx.Done():
++		}
++		return
++	}
++	retainAvailableMessage := false
+ 	if len(availableJobs) > 0 {
+-		jobIDs := make([]int64, len(availableJobs))
+-		for idx, job := range availableJobs {
+-			jobIDs[idx] = job.RunnerRequestID
++		if err := l.intentCoordinator.ObserveAvailable(scaleSet, availableJobs); err != nil {
++			slog.ErrorContext(l.ctx, "recording available queue intents", "error", err)
++			return
+ 		}
+-		idsAcquired, err := scaleSetClient.AcquireJobs(
+-			l.listenerCtx, l.scaleSetHelper.GetScaleSet().ScaleSetID,
+-			l.messageSession.MessageQueueAccessToken(), jobIDs)
++		jobIDs, err := l.intentCoordinator.SelectForAcquire(scaleSet, availableJobs)
+ 		if err != nil {
+-			// don't mark message as processed. It will be requeued.
+-			slog.ErrorContext(l.ctx, "acquiring jobs", "error", err)
++			slog.ErrorContext(l.ctx, "selecting queue intents", "error", err)
+ 			return
+ 		}
+ 		// HandleJobsAvailable only records jobs in the database for now. The jobs are purely
+@@ -199,7 +216,34 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		if err := l.scaleSetHelper.HandleJobsAvailable(availableJobs); err != nil {
+ 			slog.ErrorContext(l.ctx, "error handling available jobs", "error", err)
+ 		}
+-		slog.DebugContext(l.ctx, "acquired jobs", "job_ids", idsAcquired)
++		acquireAttempted := false
++		if len(jobIDs) > 0 {
++			idsAcquired, err := scaleSetClient.AcquireJobs(
++				l.listenerCtx, scaleSet.ScaleSetID,
++				l.messageSession.MessageQueueAccessToken(), jobIDs)
++			if err != nil {
++				// The durable acquiring intent is returned to queued before this
++				// message is retried. Failure to do so stays fail-closed until TTL.
++				if releaseErr := l.intentCoordinator.FailAcquire(scaleSet, jobIDs); releaseErr != nil {
++					slog.ErrorContext(l.ctx, "releasing failed queue acquisition", "error", releaseErr)
++				}
++				slog.ErrorContext(l.ctx, "acquiring jobs", "error", err)
++				return
++			}
++			if err := l.intentCoordinator.CompleteAcquire(scaleSet, jobIDs, idsAcquired); err != nil {
++				slog.ErrorContext(l.ctx, "committing acquired queue intents", "error", err)
++				return
++			}
++			acquireAttempted = true
++			slog.DebugContext(l.ctx, "acquired jobs", "job_ids", idsAcquired)
++		}
++		if !acquireAttempted {
++			retainAvailableMessage, err = l.intentCoordinator.HasQueuedAvailable(scaleSet, availableJobs)
++			if err != nil {
++				slog.ErrorContext(l.ctx, "checking deferred queue intents", "error", err)
++				return
++			}
++		}
+ 	}
+ 
+ 	if len(assignedJobs) > 0 {
+@@ -222,16 +266,26 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		}
+ 	}
+ 
++	if err := l.scaleSetHelper.SetDesiredRunnerCount(msg.Statistics.TotalAssignedJobs); err != nil {
++		slog.ErrorContext(l.ctx, "setting desired runner count", "error", err)
++	}
++	if retainAvailableMessage {
++		slog.DebugContext(l.ctx, "retaining unacquired available-job message", "message_id", msg.MessageID)
++		timer := time.NewTimer(time.Second)
++		defer timer.Stop()
++		select {
++		case <-timer.C:
++		case <-l.listenerCtx.Done():
++		}
++		return
++	}
++
+ 	if err := l.scaleSetHelper.SetLastMessageID(msg.MessageID); err != nil {
+ 		slog.ErrorContext(l.ctx, "setting last message ID", "error", err)
+ 	} else {
+ 		l.lastMessageID = msg.MessageID
+ 	}
+ 
+-	if err := l.scaleSetHelper.SetDesiredRunnerCount(msg.Statistics.TotalAssignedJobs); err != nil {
+-		slog.ErrorContext(l.ctx, "setting desired runner count", "error", err)
+-	}
+-
+ 	if err := l.messageSession.DeleteMessage(l.listenerCtx, msg.MessageID); err != nil {
+ 		slog.ErrorContext(l.ctx, "deleting message", "error", err)
+ 	}

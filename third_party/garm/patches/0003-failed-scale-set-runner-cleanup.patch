@@ -1,0 +1,187 @@
+diff --git a/workers/provider/failed_scale_set_runner_cleanup_test.go b/workers/provider/failed_scale_set_runner_cleanup_test.go
+new file mode 100644
+index 0000000..111d5ad
+--- /dev/null
++++ b/workers/provider/failed_scale_set_runner_cleanup_test.go
+@@ -0,0 +1,111 @@
++package provider
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
++	commonParams "github.com/cloudbase/garm-provider-common/params"
++	"github.com/cloudbase/garm/auth"
++	"github.com/cloudbase/garm/params"
++)
++
++type failedScaleSetRunnerCleanupHelper struct {
++	removeErr    error
++	removeCalls  int
++	removedAgent int64
++	statusCalls  int
++	status       commonParams.InstanceStatus
++}
++
++func (f *failedScaleSetRunnerCleanupHelper) SetInstanceStatus(_ string, status commonParams.InstanceStatus, _ []byte, _ bool) error {
++	f.statusCalls++
++	f.status = status
++	return nil
++}
++
++func (*failedScaleSetRunnerCleanupHelper) InstanceTokenGetter() auth.InstanceTokenGetter {
++	return nil
++}
++
++func (*failedScaleSetRunnerCleanupHelper) updateArgsFromProviderInstance(_ string, _ commonParams.ProviderInstance) (params.Instance, error) {
++	return params.Instance{}, nil
++}
++
++func (*failedScaleSetRunnerCleanupHelper) GetControllerInfo() (params.ControllerInfo, error) {
++	return params.ControllerInfo{}, nil
++}
++
++func (*failedScaleSetRunnerCleanupHelper) GetGithubEntity(entity params.ForgeEntity) (params.ForgeEntity, error) {
++	return entity, nil
++}
++
++func (f *failedScaleSetRunnerCleanupHelper) RemoveScaleSetRunner(_ context.Context, _ params.ScaleSet, agentID int64) error {
++	f.removeCalls++
++	f.removedAgent = agentID
++	return f.removeErr
++}
++
++func failedScaleSetInstanceManager(helper providerHelper) *instanceManager {
++	manager := &instanceManager{
++		ctx: context.Background(),
++		instance: params.Instance{
++			Name:       "runner-failed",
++			Status:     commonParams.InstanceError,
++			ScaleSetID: 1,
++			AgentID:    322,
++		},
++		scaleSet: params.ScaleSet{ID: 1},
++		helper:   helper,
++	}
++	manager.running.Store(true)
++	return manager
++}
++
++func TestFailedScaleSetInstanceRemovesJITRegistrationBeforeTeardown(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); err != nil {
++		t.Fatalf("consolidating failed instance: %v", err)
++	}
++	if helper.removeCalls != 1 || helper.removedAgent != 322 {
++		t.Fatalf("remove calls=%d agent=%d", helper.removeCalls, helper.removedAgent)
++	}
++	if helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
++		t.Fatalf("status calls=%d status=%s", helper.statusCalls, helper.status)
++	}
++}
++
++func TestFailedScaleSetInstanceRetainsAgentIDUntilTransientRemovalConverges(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{removeErr: errors.New("temporary GitHub failure")}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); err == nil {
++		t.Fatal("expected transient removal failure")
++	}
++	if helper.statusCalls != 0 {
++		t.Fatalf("failed instance advanced to teardown: calls=%d", helper.statusCalls)
++	}
++
++	helper.removeErr = nil
++	if err := manager.consolidateState(); err != nil {
++		t.Fatalf("retrying failed instance: %v", err)
++	}
++	if helper.removeCalls != 2 || helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
++		t.Fatalf("remove calls=%d status calls=%d status=%s", helper.removeCalls, helper.statusCalls, helper.status)
++	}
++}
++
++func TestFailedScaleSetInstanceAcceptsAlreadyAbsentJITRegistration(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{removeErr: runnerErrors.ErrNotFound}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); err != nil {
++		t.Fatalf("consolidating already absent runner: %v", err)
++	}
++	if helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
++		t.Fatalf("status calls=%d status=%s", helper.statusCalls, helper.status)
++	}
++}
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index 51a6522..d8a22a2 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -367,8 +367,17 @@ func (i *instanceManager) consolidateState() error {
+ 		}
+ 		return ErrInstanceDeleted
+ 	case commonParams.InstanceError:
+-		// Instance is in error state. We wait for next status or potentially retry
+-		// spawning the instance with a backoff timer.
++		// Scale sets create the JIT runner registration before provider acquisition.
++		// Keep the DB record (and therefore AgentID) until GitHub confirms that the
++		// registration is gone; otherwise a provider failure can leave an
++		// uncorrelatable offline runner behind.
++		if i.instance.ScaleSetID != 0 && i.instance.AgentID != 0 {
++			if err := i.helper.RemoveScaleSetRunner(i.ctx, i.scaleSet, i.instance.AgentID); err != nil {
++				if !errors.Is(err, runnerErrors.ErrNotFound) {
++					return fmt.Errorf("removing failed scale set runner: %w", err)
++				}
++			}
++		}
+ 		if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstancePendingDelete, nil, true); err != nil {
+ 			return fmt.Errorf("setting instance status to error: %w", err)
+ 		}
+diff --git a/workers/provider/provider_helper.go b/workers/provider/provider_helper.go
+index 63cc2c2..e950880 100644
+--- a/workers/provider/provider_helper.go
++++ b/workers/provider/provider_helper.go
+@@ -14,11 +14,14 @@
+ package provider
+ 
+ import (
++	"context"
+ 	"fmt"
+ 
+ 	commonParams "github.com/cloudbase/garm-provider-common/params"
+ 	"github.com/cloudbase/garm/auth"
++	"github.com/cloudbase/garm/cache"
+ 	"github.com/cloudbase/garm/params"
++	"github.com/cloudbase/garm/util/github/scalesets"
+ )
+ 
+ type providerHelper interface {
+@@ -27,6 +30,26 @@ type providerHelper interface {
+ 	updateArgsFromProviderInstance(instanceName string, providerInstance commonParams.ProviderInstance) (params.Instance, error)
+ 	GetControllerInfo() (params.ControllerInfo, error)
+ 	GetGithubEntity(entity params.ForgeEntity) (params.ForgeEntity, error)
++	RemoveScaleSetRunner(ctx context.Context, scaleSet params.ScaleSet, agentID int64) error
++}
++
++func (p *Provider) RemoveScaleSetRunner(ctx context.Context, scaleSet params.ScaleSet, agentID int64) error {
++	entity, err := scaleSet.GetEntity()
++	if err != nil {
++		return fmt.Errorf("getting scale set entity: %w", err)
++	}
++	githubClient, ok := cache.GetGithubClient(entity.ID)
++	if !ok {
++		return fmt.Errorf("getting github client for scale set entity %s", entity.ID)
++	}
++	scaleSetClient, err := scalesets.NewClient(githubClient)
++	if err != nil {
++		return fmt.Errorf("creating scale set client: %w", err)
++	}
++	if err := scaleSetClient.RemoveRunner(ctx, agentID); err != nil {
++		return fmt.Errorf("removing scale set runner %d: %w", agentID, err)
++	}
++	return nil
+ }
+ 
+ func (p *Provider) updateArgsFromProviderInstance(instanceName string, providerInstance commonParams.ProviderInstance) (params.Instance, error) {

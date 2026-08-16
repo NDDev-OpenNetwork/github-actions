@@ -1,0 +1,25 @@
+name: NDDev canary composite
+description: Exercise local composite-action input, shell and output semantics.
+
+inputs:
+  marker:
+    description: Non-secret marker propagated through the composite action.
+    required: true
+
+outputs:
+  value:
+    description: Marker emitted through the composite step command file.
+    value: ${{ steps.emit.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - name: Emit composite output
+      id: emit
+      shell: bash
+      env:
+        NDDEV_CANARY_MARKER: ${{ inputs.marker }}
+      run: |
+        set -euo pipefail
+        [[ "${NDDEV_CANARY_MARKER}" == official-runner-ok ]]
+        printf 'value=composite-%s\n' "${NDDEV_CANARY_MARKER}" >>"${GITHUB_OUTPUT}"

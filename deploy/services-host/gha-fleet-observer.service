@@ -1,0 +1,61 @@
+# The queue host's observer unit.
+#
+# The observer reports the fleet's control-plane state -- the provider journal,
+# the queue intents, the pools -- so it belongs beside the queue, not beside the
+# capacity. On a capacity host it would read a journal that is no longer there.
+#
+# It also has no local hypervisor to inspect here, which is why incus.service
+# and /dev/kvm are absent. See deploy/fleet-host/gha-fleet-observer.service for
+# the variant that runs on a machine which also runs workers.
+
+[Unit]
+Description=Loopback health and metrics observer for the NDDev runner fleet
+After=network-online.target garm.service gha-fleet-gateway.service gha-rustfs.service gha-zot.service gha-warm-pool.timer
+Wants=network-online.target incus.service garm.service gha-fleet-gateway.service gha-rustfs.service gha-zot.service gha-warm-pool.timer
+
+[Service]
+Type=simple
+User=garm
+Group=garm
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/libexec/gha-fleet/gha-fleet-observer --config /etc/gha-fleet/platform.yaml --provider-config /etc/garm/provider-incus.toml --listen 127.0.0.1:9464
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+UMask=0077
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=false
+DevicePolicy=closed
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8
+InaccessiblePaths=-/var/run/docker.sock -/run/incus/unix.socket -/var/lib/incus/unix.socket
+ReadOnlyPaths=/etc/garm /etc/gha-fleet /var/lib/gha-fleet /var/lib/gha-diagnostic-exporter /usr/local/libexec/gha-fleet
+MemoryAccounting=true
+MemoryMax=256M
+TasksAccounting=true
+TasksMax=64
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
