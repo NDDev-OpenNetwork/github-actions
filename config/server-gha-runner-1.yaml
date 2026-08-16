@@ -6,7 +6,7 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.15
+  manager_version: v0.2.1-nddev.16
   scheduling_mode: scale-set
   provider: incus
   provider_version: v0.1.5-nddev.32
@@ -165,10 +165,10 @@ pools:
     scale_set_name: nddev-linux-integration
     trust: trusted
     resources:
-      vcpu: 4
-      memory_mib: 8192
+      vcpu: 2
+      memory_mib: 6144
       disk_gib: 50
-    max_running: 1
+    max_running: 3
     warm:
       target_ready: 0
       max_ready: 0

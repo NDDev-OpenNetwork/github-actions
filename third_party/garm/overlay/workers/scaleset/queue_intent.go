@@ -177,9 +177,24 @@ func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs
 					return fmt.Errorf("duplicate queue intent %q changed available-job metadata", intent.Key)
 				}
 				ensureRepositoryState(journal, config, intent.Repository)
-				// Redelivery is not progress and must not extend any state TTL.
-				// In particular, a stale acquired message cannot block the global
-				// admission slot forever by refreshing itself.
+				// Redelivery is not progress for a job that has already been
+				// admitted, and must not extend its TTL: a stale acquired
+				// message would otherwise hold the global admission slot
+				// forever by refreshing itself. Observed once as an assigned
+				// intent holding a one-wide class for twenty-four hours.
+				//
+				// A job still in `queued` is the opposite case. It holds no
+				// slot, so refreshing it costs no one capacity, and GitHub
+				// redelivering it is the only evidence the queue gets that the
+				// job is still waiting rather than gone. Letting that expire
+				// made waiting fatal: the intent was dropped, nothing wrote
+				// another, and the job could never be placed again while GARM
+				// kept creating runners the provider had to refuse.
+				if waiting := journal.Intents[intent.Key]; waiting.State == queueStateQueued {
+					waiting.ExpiresAt = expiryForState(config, queueStateQueued, now)
+					waiting.UpdatedAt = now
+					journal.Intents[intent.Key] = waiting
+				}
 				continue
 			}
 			journal.Intents[intent.Key] = intent

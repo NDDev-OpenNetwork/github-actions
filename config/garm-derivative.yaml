@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.15
+derivative_version: v0.2.1-nddev.16
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -24,10 +24,10 @@ patches:
     purpose: Emit secret-free structured phase boundaries and monotonic durations around GitHub AcquireJobs and external-provider creation without changing admission, execution or reconciliation semantics.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 874f3810a8d981eed3b4fe9c6bcb399604a1656e050818063832f3b49d904e4f
+    sha256: 3b8cca7c0288aeee8fd8e05697414c0a43264c5b660d2f265226f05f32af15e1
     purpose: Fsync-backed central queue admission of configurable width, priority aging, repository quotas and weighted stride scheduling.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 48f08a2b8c0c7c13000cb3368911cee945015bfc5cfc3468d21513fef7f8b269
+    sha256: 597e04c32036d7bd71fd31b2341da54b9fbc01c910bf810f943961619f010fe8
     purpose: Deterministic priority, fairness, width, idempotency, message retention, crash expiry and concurrent-selection tests.
 build:
   container_image: docker.io/library/golang@sha256:6c5605ab3a9a9fb3c4eafe5b3d63cdbf3881caf113262b67862547b54a9db599
@@ -43,7 +43,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 35a93c8d009c2f5667e5f63c31b5f35db54b6c699b6374eaba3f2ef70f55348a
+  binary_sha256: caa54233f4252f223f8f7b2461c25a10f6f1108e7815483d31331b85b7865165
 runtime_contract:
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true

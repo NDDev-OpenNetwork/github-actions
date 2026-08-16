@@ -865,3 +865,89 @@ func TestAssignedIntentExpiresLongBeforeARunningOne(t *testing.T) {
 		t.Fatalf("an assigned intent holds the slot for %s; the gap to acquiring is seconds", got)
 	}
 }
+
+// A job that is still waiting must survive its own TTL. GitHub redelivering an
+// unacquired message is the only evidence the queue gets that the job has not
+// gone away, and dropping the intent used to make the job permanently
+// unplaceable: nothing wrote another, while GARM kept creating runners the
+// provider had to refuse. Waiting holds no admission slot, so refreshing it
+// costs no one capacity.
+func TestQueueCoordinatorRefreshesAWaitingIntentOnRedelivery(t *testing.T) {
+	now := time.Now().UTC()
+	// Width zero for the class: the job is recorded and never admitted, which
+	// is exactly the state that used to expire into nothing.
+	coordinator := testQueueCoordinatorOfWidth(t, &now, map[string]queueRepositoryPolicy{
+		"owner/waiting": {Weight: 1, MaxInFlight: 1},
+	}, 1, 1)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	holder := testQueueJob(101, "owner", "holder", now.Add(-time.Minute))
+	waiting := testQueueJob(102, "owner", "waiting", now.Add(-time.Minute))
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{holder, waiting}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := queueIntentKey(int64(scaleSet.ScaleSetID), waiting.JobID)
+	queued, exists := before.Intents[key]
+	if !exists || queued.State != queueStateQueued {
+		t.Fatalf("waiting job is not queued: %#v", before.Intents)
+	}
+
+	// Nine minutes later the message is redelivered, one minute before the
+	// 600-second queued TTL would have dropped it.
+	now = now.Add(9 * time.Minute)
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{holder, waiting}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed, exists := after.Intents[key]
+	if !exists {
+		t.Fatal("a redelivered waiting job lost its intent")
+	}
+	if !refreshed.ExpiresAt.After(queued.ExpiresAt) {
+		t.Fatalf("waiting intent was not refreshed: %s then %s", queued.ExpiresAt, refreshed.ExpiresAt)
+	}
+	if refreshed.State != queueStateQueued {
+		t.Fatalf("refresh changed the state to %q", refreshed.State)
+	}
+}
+
+// The other half, and the reason the refresh is scoped to one state. An intent
+// that has already been admitted holds the slot, so refreshing it on
+// redelivery is how a stale message once held a one-wide class for
+// twenty-four hours.
+func TestQueueCoordinatorDoesNotRefreshAnAdmittedIntentOnRedelivery(t *testing.T) {
+	now := time.Now().UTC()
+	coordinator := testQueueCoordinator(t, &now, map[string]queueRepositoryPolicy{})
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(101, "owner", "admitted", now.Add(-time.Minute))
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+	admitted, exists := before.Intents[key]
+	if !exists || admitted.State == queueStateQueued {
+		t.Fatalf("job was not admitted: %#v", before.Intents)
+	}
+
+	now = now.Add(time.Minute)
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Intents[key].ExpiresAt.Equal(admitted.ExpiresAt) {
+		t.Fatalf("an admitted intent was refreshed: %s then %s", admitted.ExpiresAt, after.Intents[key].ExpiresAt)
+	}
+}
