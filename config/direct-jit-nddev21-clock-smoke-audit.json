@@ -1,0 +1,109 @@
+{
+  "schema_version": 2,
+  "captured_at": "2026-08-10T02:01:27.339595959Z",
+  "series": {
+    "repository": "example-user/github-actions",
+    "workflow": "self-hosted-canary.yml",
+    "ref": "main",
+    "head_sha": "0b6e72ba39d92fce0bd0f11623a551b1b0b04a82",
+    "runner_label": "nddev-linux-standard",
+    "server": "server-example-legacy",
+    "provider_version": "v0.1.5-nddev.21",
+    "provider_commit": "0b6e72ba39d92fce0bd0f11623a551b1b0b04a82",
+    "required_samples": 1,
+    "nominal_preflight_max_load_1": 4,
+    "latency_definition": "github-job-created-to-started-observed",
+    "quantile_method": "nearest-rank",
+    "target_p95_milliseconds_exclusive": 5000
+  },
+  "samples": [
+    {
+      "index": 1,
+      "workflow_run_id": 31348692974,
+      "job_id": 93335361000,
+      "opaque_job_id": "7fbe832e-d39e-5f1d-928f-d83e161880a0",
+      "dispatch_at": "2026-08-10T02:02:25.607676126Z",
+      "created_at": "2026-08-10T02:02:28Z",
+      "started_at": "2026-08-10T02:02:35Z",
+      "completed_at": "2026-08-10T02:02:48Z",
+      "garm_assignment_at": "2026-08-10T02:02:29.362105587Z",
+      "provider_started_at": "2026-08-10T02:02:30.548222426Z",
+      "provider_completed_at": "2026-08-10T02:02:30.959462016Z",
+      "runner_session_at": "2026-08-10 02:02:33Z",
+      "latency_milliseconds": 7000,
+      "phase_durations": {
+        "assignment_to_provider_start_milliseconds": 1186,
+        "provider_create_milliseconds": 411,
+        "assignment_to_provider_complete_milliseconds": 1597,
+        "guest_assignment_setup_milliseconds": 340
+      },
+      "guest_phase_clock": {
+        "assignment_script_started_unix_ns": 1786327349683854261,
+        "runner_exec_unix_ns": 1786327350024279556
+      },
+      "preflight": {
+        "load_1": 1.78,
+        "legacy_workers": 0
+      },
+      "runner_name": "nddev-et3vqvbnpo9n",
+      "physical_instance": "warm-standard-ca9d0700ad13",
+      "replacement_instance": "warm-standard-609bdeb924e6",
+      "diagnostic_archive": "runner-diagnostics-v1-warm-standard-ca9d0700ad13-20260810T020249.180563497Z-c63bfaa6c178.tar.gz",
+      "diagnostic_sha256": "b1e359886a6213c5ff579461615e575eefade219e27e57f6d9ee629b4de87f61",
+      "diagnostic_token_shape_matches": 0,
+      "diagnostics_before": 153,
+      "diagnostics_after": 154,
+      "postcondition": {
+        "healthy": true,
+        "queue_active": 0,
+        "queue_in_flight": 0,
+        "queue_uncovered_running": 0,
+        "claims": 0,
+        "warm_ready": 1,
+        "visible_instances": 1,
+        "orphan_instances": 0,
+        "missing_instances": 0,
+        "diagnostic_sync": "synchronized",
+        "diagnostic_pending": 0,
+        "legacy_listeners": 12,
+        "example_platform_healthy": true,
+        "captcha_healthy": true,
+        "failed_systemd_units": 0,
+        "github_runner_registrations": 0
+      }
+    }
+  ],
+  "statistics": {
+    "samples": 1,
+    "minimum_milliseconds": 7000,
+    "maximum_milliseconds": 7000,
+    "median_milliseconds": 7000,
+    "p95_milliseconds": 7000,
+    "target_milliseconds_exclusive": 5000,
+    "passed": false
+  },
+  "postconditions": {
+    "completed_at": "2026-08-10T02:04:11.060273555Z",
+    "observer_healthy": true,
+    "queue_active": 0,
+    "queue_in_flight": 0,
+    "queue_uncovered_running": 0,
+    "claims": 0,
+    "warm_ready": 1,
+    "visible_instances": 1,
+    "orphan_instances": 0,
+    "missing_instances": 0,
+    "diagnostics_source": 154,
+    "diagnostics_exported": 154,
+    "diagnostics_pending": 0,
+    "legacy_listeners": 12,
+    "example_platform_healthy": true,
+    "captcha_healthy": true,
+    "failed_systemd_units": 0,
+    "github_runner_registrations": 0
+  },
+  "verdict": {
+    "complete": true,
+    "warm_queue_to_online_p95_gate_complete": false
+  }
+}

@@ -1,0 +1,203 @@
+schema_version: 2
+
+platform:
+  name: nddev-github-actions
+  host: server-gha-runner-3
+
+control_plane:
+  manager: garm
+  manager_version: v0.2.1-nddev.15
+  scheduling_mode: scale-set
+  provider: incus
+  provider_version: v0.1.5-nddev.32
+  provider_interface: v0.1.0
+  worker_kind: virtual-machine
+  runner: actions/runner
+  runner_version: v2.336.0
+  runner_update_policy: image-canary
+
+incus:
+  version: v6.0.0
+  api_address: 127.0.0.1:8443
+  project: gha-fleet
+  storage_pool: gha-lvm
+  storage_driver: lvm
+  storage_size_gib: 200
+  project_disk_limit_gib: 120
+  network: gha0
+  network_cidr: 192.0.2.1/24
+  egress_acl: gha-public-egress
+  public_host_address: 159.65.197.135
+  project_max_instances: 3
+  project_max_cpu_units: 6
+  project_max_memory_mib: 12288
+  cluster:
+    enabled: true
+    member_name: gha-runner-3
+    api_address: 172.16.0.8:8443
+    members: 4
+  registry_port: 5001
+  rustfs_port: 9002
+  garm_gateway_port: 9443
+
+guardrails:
+  require_ephemeral: true
+  jobs_per_vm: 1
+  warm_instances_unregistered: true
+  deny_host_docker_socket: true
+  deny_nested_virtualization: true
+  deny_private_network_by_default: true
+  allow_cpu_overcommit: false
+  allow_memory_ballooning: false
+
+host_reserve:
+  # Carries nothing but this fleet, and nothing but its light pool. The reserve
+  # covers only the control plane and the operating system, measured together
+  # at well under a gibibyte.
+  #
+  # It used to be four rather than two for a reason that no longer holds. The
+  # reserve was also the one-minute load ceiling admission compared against, so
+  # a single worker took the load past a smaller number on its own and the host
+  # then refused to replenish the warm VM it had just consumed. Load is now
+  # delegated to the journal on a dedicated host, where exact CPU-unit
+  # accounting already exists, so the reserve is free to be what its name says.
+  mode: dedicated
+  minimum_cpu_units: 2
+  minimum_memory_mib: 2048
+  minimum_percent: 10
+  minimum_free_disk_percent: 20
+
+cache:
+  object_store:
+    implementation: rustfs
+    endpoint_env: GHA_FLEET_RUSTFS_ENDPOINT
+    access_key_env: GHA_FLEET_RUSTFS_ACCESS_KEY
+    secret_key_env: GHA_FLEET_RUSTFS_SECRET_KEY
+    bucket: github-actions-cache
+  # The `trust` segment is a literal, not a token: it separates the
+  # trust-scoped cache from anything else under the repository prefix. It was
+  # missing here, so the declared template described eight segments while the
+  # implementation wrote nine and nothing compared them.
+  namespace_template: "{organization}/{repository}/trust/{trust}/{platform}/{architecture}/{toolchain}/{lock_digest}/{ref_class}"
+  untrusted_write_scope: isolated
+  release_write_scope: none
+
+backends:
+  - name: linux-amd64-incus
+    platform: linux
+    architecture: amd64
+    implementation: incus-vm
+    failure_domain: server-gha-runner-3
+    capabilities:
+      docker: true
+
+# Pilot values reflect the current 8-vCPU/16-GiB virtual host. The standard
+# image passed stage-only and promotion smoke, so exactly one unregistered warm
+# VM is enabled. Every other warm target remains zero.
+pools:
+  # This host exists for this pool. A scale set name is unique per entity, so
+  # one host serves one name: gha-runner-1 keeps standard warm, gha-runner-2
+  # keeps integration, and this one keeps fast. Six project CPU units over
+  # three two-vCPU workers is what the reserve leaves, and three is what the
+  # instance ceiling allows.
+  - name: nddev-linux-fast
+    backend: linux-amd64-incus
+    scale_set_name: nddev-linux-fast
+    trust: trusted
+    # Sized from measurement rather than symmetry with the heavier pools. The
+    # job trees this pool exists for -- lint, format, typecheck, secret scan --
+    # were observed at 292 to 607 MiB resident on the shared listeners. Four
+    # gibibytes left five times the observed peak, which was sized against a
+    # standard worker that then held 10240 MiB. Standard is now 4096, so fast
+    # is 3072: still four times the observed peak once the 536 MiB guest
+    # baseline is counted, and still strictly cheaper than standard, which is
+    # the only thing that makes this a separate pool.
+    resources:
+      vcpu: 2
+      memory_mib: 3072
+      disk_gib: 30
+    max_running: 3
+    warm:
+      target_ready: 0
+      max_ready: 0
+    capabilities:
+      docker: false
+      credentials: none
+      # This asked for github-cache-only, which no bridge implements, so the
+      # pool could never be planned and has held zero capacity everywhere. The
+      # policy was also wrong for the work: a linter resolves dependencies from
+      # npm and PyPI, which GitHub and the local cache alone do not serve.
+      #
+      # The boundary this pool actually keeps is the one it can: no job
+      # credential, no Docker, and the same bounded public egress every pool
+      # gets, where the ACL rejects private, metadata, multicast and host
+      # ranges before any allow is considered.
+      network_policy: public-internet
+      cache_write_scope: trusted
+
+  - name: nddev-linux-standard
+    backend: linux-amd64-incus
+    scale_set_name: nddev-linux-standard
+    trust: trusted
+    # Sized from the running fleet, not from symmetry with the host. A live
+    # standard worker holding 10240 MiB reported 536 MiB used and 9387 MiB
+    # available inside the guest: the VM baseline is the guest OS plus the
+    # runner, and the job gets everything above it. Four gibibytes therefore
+    # leaves ~3.5 GiB for the job, against light job trees measured at 292 to
+    # 607 MiB resident and a fleet exec profile of p50 111s / p95 2209s.
+    #
+    # The old 4 vCPU / 10240 MiB shape was what capped this pool at one worker
+    # per host -- two would have needed 8 CPU units against a project quota of
+    # 6 -- and one worker per host is what produced 14880 pool-saturated
+    # admission refusals in seven days while p95 queue wait reached 22 hours
+    # and host load averaged 0.4 of eight cores. Jobs heavier than this belong
+    # in nddev-linux-integration, which keeps 4 vCPU / 8192 MiB for them.
+    resources:
+      vcpu: 2
+      memory_mib: 4096
+      disk_gib: 30
+    max_running: 3
+    warm:
+      target_ready: 1
+      max_ready: 1
+    capabilities:
+      docker: false
+      credentials: repository
+      network_policy: public-internet
+      cache_write_scope: trusted
+
+  - name: nddev-linux-integration
+    backend: linux-amd64-incus
+    scale_set_name: nddev-linux-integration
+    trust: trusted
+    resources:
+      vcpu: 4
+      memory_mib: 8192
+      disk_gib: 50
+    max_running: 1
+    warm:
+      target_ready: 0
+      max_ready: 0
+    capabilities:
+      docker: true
+      credentials: repository
+      network_policy: public-internet
+      cache_write_scope: trusted
+
+  - name: nddev-linux-release
+    backend: linux-amd64-incus
+    scale_set_name: nddev-linux-release
+    trust: release
+    resources:
+      vcpu: 4
+      memory_mib: 8192
+      disk_gib: 40
+    max_running: 1
+    warm:
+      target_ready: 0
+      max_ready: 0
+    capabilities:
+      docker: false
+      credentials: oidc-only
+      network_policy: release-allowlist
+      cache_write_scope: none

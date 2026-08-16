@@ -1,0 +1,57 @@
+# GitHub Code Quality runs outside every workflow this repository owns, so its
+# routing is invisible to `runs-on` and to actionlint, yet it lands on the same
+# hosts. Two concurrent dynamic analyses were measured at roughly 6.5 to 7 GiB
+# resident each, which is more than a whole worker pool, and the fleet learned
+# about it only from saturation.
+#
+# The setup is machine-readable and writable:
+#   gh api repos/{owner}/{repo}/code-quality/setup
+#   gh api -X PATCH repos/{owner}/{repo}/code-quality/setup
+#
+# This file is the reviewed intent to compare that observation against. It
+# grants nothing and applies nothing; it exists so a drift is a diff rather
+# than an incident.
+schema_version: 1
+observed_at: "2026-08-11"
+owner: NDDev-OpenNetwork
+
+policy:
+  # Dynamic analysis is a resource class, not a trust class. It does not fit
+  # the pools, which are sized for one worker each, and no pool declares a
+  # memory envelope that admits two 7-GiB analyses beside a running job.
+  default_runner_type: standard
+  # A repository may only be labeled once its analysis has a measured envelope
+  # and a pool whose reserve admits it. Neither exists yet.
+  labeled_requires:
+    - measured peak resident set for one and for two concurrent analyses
+    - a pool whose memory reserve admits that peak beside a running job
+    - a recorded decision naming the pool and the reason
+
+# Repositories observed routing analysis onto the shared `example-legacy` label.
+# They are a second consumer of the organization-scoped listeners on
+# server-example-legacy, alongside the workflows that select the label
+# directly, and both must move before those listeners can be retired.
+labeled:
+  - repository: example-repository-01
+    label: example-legacy
+  - repository: example-repository-02
+    label: example-legacy
+  - repository: example-repository-03
+    label: example-legacy
+  - repository: example-repository-04
+    label: example-legacy
+  - repository: example-repository-05
+    label: example-legacy
+  - repository: example-repository-06
+    label: example-legacy
+  - repository: example-repository-07
+    label: example-legacy
+  - repository: example-repository-09
+    label: example-legacy
+  - repository: example-repository-08
+    label: example-legacy
+  - repository: example-repository-10
+    label: example-legacy
+
+# Every other repository in the organization was observed on `standard`, which
+# is the intended default and needs no entry here.

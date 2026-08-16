@@ -1,0 +1,67 @@
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -241,11 +241,26 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+ 		},
+ 	}
+ 
++	providerStartedAt := time.Now()
++	slog.InfoContext(i.ctx, "direct JIT phase",
++		"phase", "provider-create-started",
++		"runner_name", instance.Name,
++		"provider", i.scaleSet.ProviderName)
+ 	providerInstance, err := i.provider.CreateInstance(i.ctx, bootstrapArgs, createInstanceParams)
+ 	if err != nil {
++		slog.InfoContext(i.ctx, "direct JIT phase",
++			"phase", "provider-create-failed",
++			"runner_name", instance.Name,
++			"provider", i.scaleSet.ProviderName,
++			"duration_ms", time.Since(providerStartedAt).Milliseconds())
+ 		instanceIDToDelete = instance.Name
+ 		return fmt.Errorf("creating instance in provider: %w", err)
+ 	}
++	slog.InfoContext(i.ctx, "direct JIT phase",
++		"phase", "provider-create-completed",
++		"runner_name", instance.Name,
++		"provider", i.scaleSet.ProviderName,
++		"duration_ms", time.Since(providerStartedAt).Milliseconds())
+ 
+ 	if providerInstance.Status == commonParams.InstanceError {
+ 		instanceIDToDelete = instance.ProviderID
+diff --git a/workers/scaleset/scaleset_listener.go b/workers/scaleset/scaleset_listener.go
+--- a/workers/scaleset/scaleset_listener.go
++++ b/workers/scaleset/scaleset_listener.go
+@@ -223,10 +223,20 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		}
+ 		acquireAttempted := false
+ 		if len(jobIDs) > 0 {
++			acquireStartedAt := time.Now()
++			slog.InfoContext(l.ctx, "direct JIT phase",
++				"phase", "acquire-jobs-started",
++				"scale_set_id", scaleSet.ScaleSetID,
++				"runner_request_ids", jobIDs)
+ 			idsAcquired, err := scaleSetClient.AcquireJobs(
+ 				l.listenerCtx, scaleSet.ScaleSetID,
+ 				l.messageSession.MessageQueueAccessToken(), jobIDs)
+ 			if err != nil {
++				slog.InfoContext(l.ctx, "direct JIT phase",
++					"phase", "acquire-jobs-failed",
++					"scale_set_id", scaleSet.ScaleSetID,
++					"runner_request_ids", jobIDs,
++					"duration_ms", time.Since(acquireStartedAt).Milliseconds())
+ 				// The durable acquiring intent is returned to queued before this
+ 				// message is retried. Failure to do so stays fail-closed until TTL.
+ 				if releaseErr := l.intentCoordinator.FailAcquire(scaleSet, jobIDs); releaseErr != nil {
+@@ -236,6 +252,12 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 				slog.ErrorContext(l.ctx, "acquiring jobs", "error", err)
+ 				return
+ 			}
++			slog.InfoContext(l.ctx, "direct JIT phase",
++				"phase", "acquire-jobs-completed",
++				"scale_set_id", scaleSet.ScaleSetID,
++				"runner_request_ids", jobIDs,
++				"acquired_runner_request_ids", idsAcquired,
++				"duration_ms", time.Since(acquireStartedAt).Milliseconds())
+ 			if err := l.intentCoordinator.CompleteAcquire(scaleSet, jobIDs, idsAcquired); err != nil {
+ 				slog.ErrorContext(l.ctx, "committing acquired queue intents", "error", err)
+ 				return

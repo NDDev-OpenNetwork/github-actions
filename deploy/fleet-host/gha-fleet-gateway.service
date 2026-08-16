@@ -1,0 +1,46 @@
+[Unit]
+Description=Restricted TLS gateway from disposable workers to GARM
+Wants=network-online.target
+After=network-online.target incus.service garm.service
+Requires=incus.service garm.service
+
+[Service]
+Type=simple
+User=gha-gateway
+Group=gha-gateway
+ExecStart=/usr/local/libexec/gha-fleet/gha-fleet-gateway
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+UMask=0077
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_INET
+ReadOnlyPaths=/etc/gha-fleet/pki /usr/local/libexec/gha-fleet
+LimitNOFILE=8192
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

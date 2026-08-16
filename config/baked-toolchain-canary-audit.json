@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-10T06:56:47Z",
+  "head_sha": "0771f3db2353956a333203ff1c3c070c569bd2a9",
+  "server": "server-example-legacy",
+  "image": {
+    "standard_alias": "nddev-ubuntu-24.04-amd64-runner-2.336.0-r20260801-b9",
+    "standard_fingerprint": "366866d4ec6070c38351c73e6ac7cd79b2e7abaf6c3190e5388756d4e4961135"
+  },
+  "claim": "per-job toolchain installation is a no-op on the promoted ADR 0030 images",
+  "measured_step": "Install toolchain",
+  "comparison": {
+    "go": {
+      "before_seconds": 19,
+      "after_seconds": 2,
+      "before_run": 31309941051,
+      "after_run": 31362325411,
+      "before_log": "Attempting to download 1.26.5... / Acquiring 1.26.5 from https://github.com/actions/go-versions/releases/download/1.26.5-28913679792/go-1.26.5-linux-x64.tar.gz / Extracting Go... / Successfully cached go to /home/runner/actions-runner/_work/_tool/go/1.26.5/x64",
+      "after_log": "Found in cache @ /home/runner/actions-runner/_work/_tool/go/1.26.5/x64 / Added go to the path / Successfully set up Go version 1.26.5",
+      "mechanism": "actions/setup-go resolves the pre-seeded runner tool cache instead of downloading"
+    },
+    "rust": {
+      "before_seconds": 21,
+      "after_seconds": 1,
+      "before_run": 31353395224,
+      "after_run": 31362861073,
+      "mechanism": "scripts/install-benchmark-toolchain.sh exits early because rustc and cargo already report the pinned 1.97.1"
+    }
+  },
+  "samples": {
+    "go": {
+      "workload": "go",
+      "workflow_run_id": 31362325411,
+      "job_id": 93373496202,
+      "runner_name": "nddev-ufb98toghynu",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "seconds": 4
+        },
+        {
+          "name": "Set up runner",
+          "seconds": 0
+        },
+        {
+          "name": "Check out source",
+          "seconds": 4
+        },
+        {
+          "name": "Start benchmark metrics",
+          "seconds": 0
+        },
+        {
+          "name": "Install toolchain",
+          "seconds": 2
+        },
+        {
+          "name": "Resolve dependencies",
+          "seconds": 5
+        },
+        {
+          "name": "Build workload",
+          "seconds": 81
+        },
+        {
+          "name": "Test workload",
+          "seconds": 30
+        },
+        {
+          "name": "Finish benchmark metrics",
+          "seconds": 0
+        },
+        {
+          "name": "Upload benchmark record",
+          "seconds": 2
+        },
+        {
+          "name": "Post Install toolchain",
+          "seconds": 0
+        },
+        {
+          "name": "Post Check out source",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "seconds": 0
+        }
+      ]
+    },
+    "rust": {
+      "workload": "rust",
+      "workflow_run_id": 31362861073,
+      "job_id": 93375092111,
+      "runner_name": "nddev-hxnwmwigvyvy",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "seconds": 3
+        },
+        {
+          "name": "Set up runner",
+          "seconds": 1
+        },
+        {
+          "name": "Check out source",
+          "seconds": 3
+        },
+        {
+          "name": "Start benchmark metrics",
+          "seconds": 0
+        },
+        {
+          "name": "Install toolchain",
+          "seconds": 1
+        },
+        {
+          "name": "Resolve dependencies",
+          "seconds": 2
+        },
+        {
+          "name": "Build workload",
+          "seconds": 21
+        },
+        {
+          "name": "Test workload",
+          "seconds": 14
+        },
+        {
+          "name": "Finish benchmark metrics",
+          "seconds": 1
+        },
+        {
+          "name": "Upload benchmark record",
+          "seconds": 1
+        },
+        {
+          "name": "Post Check out source",
+          "seconds": 1
+        },
+        {
+          "name": "Complete job",
+          "seconds": 0
+        }
+      ]
+    }
+  },
+  "scope": {
+    "note": "only the Install toolchain step is a controlled comparison. Total job time is not, because the surrounding steps differ by cache mode, by host contention and by how much the repository has grown since the baseline runs",
+    "ratio_unchanged": "this removes a constant present in both cold and warm runs, so it improves absolute job time and does not move the cold-to-warm ratio the Phase 3 cache gate measures. ADR 0032 records why that gate needs representative fixtures instead"
+  },
+  "postconditions": {
+    "observer_healthy": true,
+    "warm_ready": 1,
+    "claims": 0,
+    "queue_active": 0,
+    "orphan_instances": 0,
+    "missing_instances": 0,
+    "diagnostics_pending": 0,
+    "legacy_listeners": 12,
+    "example_platform_healthy": true,
+    "captcha_healthy": true,
+    "failed_systemd_units": 0,
+    "github_runner_registrations": 0
+  }
+}

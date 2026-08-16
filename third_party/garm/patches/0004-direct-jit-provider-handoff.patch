@@ -1,0 +1,343 @@
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -212,5 +212,9 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+ 	//   * user explicitly overwrites the install template via extra specs
+ 	bootstrapArgs = garmUtil.MaybeAddWrapperToExtraSpecs(i.ctx, bootstrapArgs)
++	bootstrapArgs.ExtraSpecs, err = withNDDevDirectJIT(bootstrapArgs.ExtraSpecs, instance.JitConfiguration)
++	if err != nil {
++		return fmt.Errorf("preparing direct JIT provider handoff: %w", err)
++	}
+ 
+ 	var instanceIDToDelete string
+ 	baseParams, err := i.getProviderBaseParams()
+diff --git a/workers/provider/nddev_direct_jit.go b/workers/provider/nddev_direct_jit.go
+new file mode 100644
+index 0000000..556e636
+--- /dev/null
++++ b/workers/provider/nddev_direct_jit.go
+@@ -0,0 +1,65 @@
++package provider
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"fmt"
++)
++
++const (
++	nddevDirectJITEnabledKey = "nddev_direct_jit"
++	nddevEncodedJITKey       = "nddev_encoded_jit_config"
++	nddevMaximumJITJSONBytes = 64 * 1024
++)
++
++// withNDDevDirectJIT is an opt-in transport optimization for the NDDev
++// external provider. GARM remains the sole caller of GitHub's generate-JIT
++// endpoint and the official runner remains the execution engine. The dynamic
++// blob exists only in the provider subprocess request; static scale-set extra
++// specs and the sealed instance record retain their existing representations.
++func withNDDevDirectJIT(extraSpecs json.RawMessage, jitConfiguration map[string]string) (json.RawMessage, error) {
++	if len(extraSpecs) == 0 {
++		return extraSpecs, nil
++	}
++	var specs map[string]json.RawMessage
++	if err := json.Unmarshal(extraSpecs, &specs); err != nil {
++		return nil, fmt.Errorf("decoding extra specs: %w", err)
++	}
++	rawEnabled, enabledPresent := specs[nddevDirectJITEnabledKey]
++	if !enabledPresent {
++		return extraSpecs, nil
++	}
++	var enabled bool
++	if err := json.Unmarshal(rawEnabled, &enabled); err != nil {
++		return nil, fmt.Errorf("%s must be a boolean: %w", nddevDirectJITEnabledKey, err)
++	}
++	if !enabled {
++		return extraSpecs, nil
++	}
++	if _, collision := specs[nddevEncodedJITKey]; collision {
++		return nil, fmt.Errorf("static extra specs contain reserved field %q", nddevEncodedJITKey)
++	}
++	if len(jitConfiguration) == 0 {
++		return nil, fmt.Errorf("direct JIT is enabled without a generated JIT configuration")
++	}
++	jitJSON, err := json.Marshal(jitConfiguration)
++	if err != nil {
++		return nil, fmt.Errorf("encoding JIT configuration: %w", err)
++	}
++	defer clear(jitJSON)
++	if len(jitJSON) > nddevMaximumJITJSONBytes {
++		return nil, fmt.Errorf("JIT configuration is %d bytes, maximum is %d", len(jitJSON), nddevMaximumJITJSONBytes)
++	}
++	encoded := base64.StdEncoding.EncodeToString(jitJSON)
++	encodedJSON, err := json.Marshal(encoded)
++	if err != nil {
++		return nil, fmt.Errorf("encoding direct JIT transport: %w", err)
++	}
++	defer clear(encodedJSON)
++	specs[nddevEncodedJITKey] = encodedJSON
++	result, err := json.Marshal(specs)
++	if err != nil {
++		return nil, fmt.Errorf("encoding provider extra specs: %w", err)
++	}
++	return result, nil
++}
+diff --git a/workers/scaleset/nddev_direct_jit_state.go b/workers/scaleset/nddev_direct_jit_state.go
+new file mode 100644
+index 0000000..4a22222
+--- /dev/null
++++ b/workers/scaleset/nddev_direct_jit_state.go
+@@ -0,0 +1,32 @@
++package scaleset
++
++import (
++	"encoding/json"
++
++	"github.com/cloudbase/garm/params"
++)
++
++func nddevDirectJITEnabled(extraSpecs json.RawMessage) bool {
++	if len(extraSpecs) == 0 {
++		return false
++	}
++	var specs struct {
++		Enabled bool `json:"nddev_direct_jit"`
++	}
++	return json.Unmarshal(extraSpecs, &specs) == nil && specs.Enabled
++}
++
++// A direct-JIT runner does not execute GARM's metadata installer callbacks.
++// A GitHub JobStarted message is authoritative proof that the official runner
++// is online and has acquired the job, so bridge only the lifecycle states the
++// callbacks would otherwise have established before applying Active.
++func nddevDirectJITStartedTransitions(current params.RunnerStatus) []params.RunnerStatus {
++	switch current {
++	case params.RunnerPending:
++		return []params.RunnerStatus{params.RunnerInstalling, params.RunnerIdle, params.RunnerActive}
++	case params.RunnerInstalling:
++		return []params.RunnerStatus{params.RunnerIdle, params.RunnerActive}
++	default:
++		return []params.RunnerStatus{params.RunnerActive}
++	}
++}
+diff --git a/workers/scaleset/nddev_direct_jit_state_test.go b/workers/scaleset/nddev_direct_jit_state_test.go
+new file mode 100644
+index 0000000..6a55f90
+--- /dev/null
++++ b/workers/scaleset/nddev_direct_jit_state_test.go
+@@ -0,0 +1,73 @@
++package scaleset
++
++import (
++	"encoding/json"
++	"slices"
++	"testing"
++
++	"github.com/cloudbase/garm/params"
++)
++
++func TestNDDevDirectJITEnabled(t *testing.T) {
++	for _, test := range []struct {
++		name string
++		raw  string
++		want bool
++	}{
++		{name: "absent", raw: `{"disable_updates":true}`},
++		{name: "disabled", raw: `{"nddev_direct_jit":false}`},
++		{name: "invalid", raw: `{"nddev_direct_jit":"true"}`},
++		{name: "enabled", raw: `{"disable_updates":true,"nddev_direct_jit":true}`, want: true},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			if got := nddevDirectJITEnabled(json.RawMessage(test.raw)); got != test.want {
++				t.Fatalf("enabled = %t, want %t", got, test.want)
++			}
++		})
++	}
++}
++
++func TestNDDevDirectJITStartedTransitions(t *testing.T) {
++	for _, test := range []struct {
++		name    string
++		current params.RunnerStatus
++		want    []params.RunnerStatus
++	}{
++		{name: "pending", current: params.RunnerPending, want: []params.RunnerStatus{params.RunnerInstalling, params.RunnerIdle, params.RunnerActive}},
++		{name: "installing", current: params.RunnerInstalling, want: []params.RunnerStatus{params.RunnerIdle, params.RunnerActive}},
++		{name: "idle", current: params.RunnerIdle, want: []params.RunnerStatus{params.RunnerActive}},
++		{name: "active retry", current: params.RunnerActive, want: []params.RunnerStatus{params.RunnerActive}},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			got := nddevDirectJITStartedTransitions(test.current)
++			if len(got) != len(test.want) {
++				t.Fatalf("transition count = %d, want %d", len(got), len(test.want))
++			}
++			for index, want := range test.want {
++				if got[index] != want {
++					t.Fatalf("transition %d = %q, want %q", index, got[index], want)
++				}
++			}
++		})
++	}
++}
++
++func TestNDDevDirectJITStartedTransitionsAreLegal(t *testing.T) {
++	for _, current := range []params.RunnerStatus{
++		params.RunnerPending,
++		params.RunnerInstalling,
++		params.RunnerIdle,
++		params.RunnerActive,
++	} {
++		next := current
++		for _, transition := range nddevDirectJITStartedTransitions(current) {
++			if transition != next && !slices.Contains(params.RunnerStatusTransitions[next], transition) {
++				t.Fatalf("illegal transition from %q to %q", next, transition)
++			}
++			next = transition
++		}
++		if next != params.RunnerActive {
++			t.Fatalf("final status from %q = %q, want %q", current, next, params.RunnerActive)
++		}
++	}
++}
+diff --git a/workers/scaleset/scaleset_helper.go b/workers/scaleset/scaleset_helper.go
+index e0871d1..9c73e00 100644
+--- a/workers/scaleset/scaleset_helper.go
++++ b/workers/scaleset/scaleset_helper.go
+@@ -137,6 +137,7 @@ func (w *Worker) HandleJobsCompleted(jobs []params.ScaleSetJobMessage) (err erro
+ func (w *Worker) HandleJobsStarted(jobs []params.ScaleSetJobMessage) (err error) {
+ 	slog.DebugContext(w.ctx, "handling job started", "jobs", jobs)
+ 	defer slog.DebugContext(w.ctx, "finished handling job started", "jobs", jobs, "error", err)
++Jobs:
+ 	for _, job := range jobs {
+ 		if err := w.recordOrUpdateJob(job); err != nil {
+ 			// recording scale set jobs are purely informational for now.
+@@ -148,20 +149,33 @@ func (w *Worker) HandleJobsStarted(jobs []params.ScaleSetJobMessage) (err error)
+ 			continue
+ 		}
+ 
+-		updateParams := params.UpdateInstanceParams{
+-			RunnerStatus: params.RunnerActive,
++		locking.Lock(job.RunnerName, w.consumerID)
++		transitions := []params.RunnerStatus{params.RunnerActive}
++		if nddevDirectJITEnabled(w.scaleSet.ExtraSpecs) {
++			instance, getErr := w.store.GetInstance(w.ctx, job.RunnerName)
++			if getErr != nil {
++				if errors.Is(getErr, runnerErrors.ErrNotFound) {
++					slog.InfoContext(w.ctx, "runner not found; handled by some other controller?", "runner_name", job.RunnerName)
++					locking.Unlock(job.RunnerName, true)
++					continue Jobs
++				}
++				locking.Unlock(job.RunnerName, false)
++				return fmt.Errorf("getting direct JIT runner %s: %w", job.RunnerName, getErr)
++			}
++			transitions = nddevDirectJITStartedTransitions(instance.RunnerStatus)
+ 		}
+ 
+-		locking.Lock(job.RunnerName, w.consumerID)
+-		_, err := w.store.UpdateInstance(w.ctx, job.RunnerName, updateParams)
+-		if err != nil {
+-			if errors.Is(err, runnerErrors.ErrNotFound) {
+-				slog.InfoContext(w.ctx, "runner not found; handled by some other controller?", "runner_name", job.RunnerName)
+-				locking.Unlock(job.RunnerName, true)
+-				continue
++		for _, runnerStatus := range transitions {
++			_, err := w.store.UpdateInstance(w.ctx, job.RunnerName, params.UpdateInstanceParams{RunnerStatus: runnerStatus})
++			if err != nil {
++				if errors.Is(err, runnerErrors.ErrNotFound) {
++					slog.InfoContext(w.ctx, "runner not found; handled by some other controller?", "runner_name", job.RunnerName)
++					locking.Unlock(job.RunnerName, true)
++					continue Jobs
++				}
++				locking.Unlock(job.RunnerName, false)
++				return fmt.Errorf("updating runner %s: %w", job.RunnerName, err)
+ 			}
+-			locking.Unlock(job.RunnerName, false)
+-			return fmt.Errorf("updating runner %s: %w", job.RunnerName, err)
+ 		}
+ 		locking.Unlock(job.RunnerName, false)
+ 	}
+diff --git a/workers/provider/nddev_direct_jit_test.go b/workers/provider/nddev_direct_jit_test.go
+new file mode 100644
+index 0000000..0538fb4
+--- /dev/null
++++ b/workers/provider/nddev_direct_jit_test.go
+@@ -0,0 +1,79 @@
++package provider
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"strings"
++	"testing"
++)
++
++func TestWithNDDevDirectJITLeavesUnrelatedProvidersByteExact(t *testing.T) {
++	raw := json.RawMessage(`{"disable_updates":true}`)
++	got, err := withNDDevDirectJIT(raw, map[string]string{"runner": "opaque"})
++	if err != nil {
++		t.Fatalf("direct JIT disabled: %v", err)
++	}
++	if string(got) != string(raw) {
++		t.Fatalf("disabled extra specs changed: got %s want %s", got, raw)
++	}
++}
++
++func TestWithNDDevDirectJITInjectsReconstructableEphemeralBlob(t *testing.T) {
++	jit := map[string]string{
++		".runner":                "cnVubmVy",
++		".credentials":           "Y3JlZGVudGlhbHM=",
++		".credentials_rsaparams": "cnNh",
++	}
++	got, err := withNDDevDirectJIT(json.RawMessage(`{"disable_updates":true,"nddev_direct_jit":true}`), jit)
++	if err != nil {
++		t.Fatalf("inject direct JIT: %v", err)
++	}
++	var specs map[string]json.RawMessage
++	if err := json.Unmarshal(got, &specs); err != nil {
++		t.Fatalf("decode injected specs: %v", err)
++	}
++	if string(specs["disable_updates"]) != "true" || string(specs[nddevDirectJITEnabledKey]) != "true" {
++		t.Fatalf("static fields changed: %s", got)
++	}
++	var encoded string
++	if err := json.Unmarshal(specs[nddevEncodedJITKey], &encoded); err != nil {
++		t.Fatalf("decode transport string: %v", err)
++	}
++	rawJIT, err := base64.StdEncoding.DecodeString(encoded)
++	if err != nil {
++		t.Fatalf("decode transport base64: %v", err)
++	}
++	var reconstructed map[string]string
++	if err := json.Unmarshal(rawJIT, &reconstructed); err != nil {
++		t.Fatalf("decode transported JIT: %v", err)
++	}
++	if len(reconstructed) != len(jit) {
++		t.Fatalf("transported JIT keys = %d, want %d", len(reconstructed), len(jit))
++	}
++	for key, want := range jit {
++		if reconstructed[key] != want {
++			t.Fatalf("transported JIT %q = %q, want %q", key, reconstructed[key], want)
++		}
++	}
++}
++
++func TestWithNDDevDirectJITFailsClosed(t *testing.T) {
++	tests := []struct {
++		name string
++		raw  string
++		jit  map[string]string
++		want string
++	}{
++		{name: "invalid flag", raw: `{"nddev_direct_jit":"true"}`, jit: map[string]string{"runner": "x"}, want: "must be a boolean"},
++		{name: "static collision", raw: `{"nddev_direct_jit":true,"nddev_encoded_jit_config":"attacker"}`, jit: map[string]string{"runner": "x"}, want: "reserved field"},
++		{name: "missing JIT", raw: `{"nddev_direct_jit":true}`, want: "without a generated"},
++		{name: "oversized JIT", raw: `{"nddev_direct_jit":true}`, jit: map[string]string{"runner": strings.Repeat("x", nddevMaximumJITJSONBytes)}, want: "maximum"},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			if _, err := withNDDevDirectJIT(json.RawMessage(test.raw), test.jit); err == nil || !strings.Contains(err.Error(), test.want) {
++				t.Fatalf("error = %v, want substring %q", err, test.want)
++			}
++		})
++	}
++}

@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T17:36:05.606858517Z",
+  "host": "server-example-legacy",
+  "repository_merge_commit": "8c469b9340684022a2f84d4c4266e86e012315e8",
+  "artifacts": {
+    "garm_version": "v0.2.1-nddev.6",
+    "garm_binary_sha256": "a2b6018eb47533763f07e1abde0317a52ba654ff271825e501e61ca7df9af517",
+    "controller_binary_sha256": "dce195d61a18778daa94dcded64b41a561b7c94c7cf4cb5ec21d823689089d84",
+    "provider_version": "v0.1.5-nddev.16",
+    "provider_binary_sha256": "90c32bf00e3712addf72bb0764954cca3cd65a55569be173ad391a6913bc5013",
+    "observer_version": "v0.5.0",
+    "observer_binary_sha256": "3052412f46603161034269da3b552cc11bcfc8f77d810866e2598e4d229dce2a"
+  },
+  "protocol_findings": [
+    {
+      "derivative": "v0.2.1-nddev.3",
+      "run_id": 31320857112,
+      "head_sha": "b7c1188ce5468d5af0c6576c564502738610cc51",
+      "job_id": "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+      "boundary": "JobAssigned jobId is an opaque UUID while runnerRequestId is zero",
+      "failed_closed": true,
+      "worker_assigned": false,
+      "rollback_completed": true
+    },
+    {
+      "derivative": "v0.2.1-nddev.4",
+      "run_id": 31323265749,
+      "head_sha": "d4fc05bdeea0bc0edbf19fae122e257f8797df31",
+      "job_id": "3f763b92-f434-5d9e-ae49-09e46af7a8c0",
+      "boundary": "JobAssigned omits repository, workflow, event and queue-time metadata",
+      "failed_closed": true,
+      "worker_assigned": false,
+      "rollback_completed": true
+    },
+    {
+      "derivative": "v0.2.1-nddev.5",
+      "run_id": 31325617638,
+      "head_sha": "6417164598ddd85124846f18bb6b3dc237a5ac2b",
+      "job_id": "e8ed5844-4da9-5d79-9b67-6bd37d2d1114",
+      "boundary": "JobStarted and JobCompleted can be delivered in the same message",
+      "failed_closed": true,
+      "workflow_conclusion": "success",
+      "rollback_completed": true
+    }
+  ],
+  "terminal_reconciliation": {
+    "run_id": 31325617638,
+    "job_id": "e8ed5844-4da9-5d79-9b67-6bd37d2d1114",
+    "github_conclusion": "success",
+    "provider_claims_before": 0,
+    "incus_instances_before": 0,
+    "writers_stopped": true,
+    "exact_key_checked": true,
+    "flock_held": true,
+    "temporary_file_fsynced": true,
+    "directory_fsynced": true,
+    "journal_generation_before": 2,
+    "journal_generation_after": 3,
+    "removed_intents": 1,
+    "repository_stride_preserved": true
+  },
+  "accepted_canary": {
+    "run_id": 31326743839,
+    "job_id": 93278223512,
+    "head_sha": "8c469b9340684022a2f84d4c4266e86e012315e8",
+    "created_at": "2026-08-09T17:34:11Z",
+    "started_at": "2026-08-09T17:34:23Z",
+    "completed_at": "2026-08-09T17:34:36Z",
+    "conclusion": "success",
+    "label": "nddev-linux-standard",
+    "runner_name": "nddev-d7qvolu6scab",
+    "opaque_job_id": "33500137-5157-5fe4-b14b-959b4a82b987",
+    "created_to_job_start_seconds": 12,
+    "job_duration_seconds": 13,
+    "mixed_started_completed_observed": true,
+    "immutable_boundary_passed": true,
+    "rustfs_cache_delivery_passed": true,
+    "composite_actions_passed": true,
+    "command_files_passed": true,
+    "artifact_upload_passed": true,
+    "post_action_passed": true
+  },
+  "worker": {
+    "instance_name": "warm-standard-d076caba559d",
+    "destroyed_after_job": true,
+    "returned_to_warm_pool": false,
+    "diagnostics_archive": "runner-diagnostics-v1-warm-standard-d076caba559d-20260809T173436.874842176Z-595dc205afbf.tar.gz",
+    "diagnostics_sha256": "557ea612f53a87f5c3ae8c6a224c509180c39b6cfed72a7ce8bfb7980dddcdef",
+    "diagnostics_bytes": 38098,
+    "diagnostics_exported_to_rustfs": true
+  },
+  "replacement": {
+    "instance_name": "warm-standard-2d8bf0fa04b8",
+    "created_at": "2026-08-09T17:35:25Z",
+    "lifecycle": "warm-unregistered",
+    "ready": true,
+    "claims": 0
+  },
+  "postconditions": {
+    "garm_systemd_restarts": 0,
+    "failed_units": 0,
+    "observer_healthy": true,
+    "observer_fresh": true,
+    "queue_schema_version": 1,
+    "queue_generation": 5,
+    "queue_intents": 0,
+    "provider_journal_schema_version": 4,
+    "provider_claims": 0,
+    "incus_visible_instances": 1,
+    "diagnostic_bundles": 99,
+    "diagnostic_exported_bundles": 99,
+    "diagnostic_pending_bundles": 0,
+    "root_free_percent": 35,
+    "legacy_listeners": 12,
+    "example_platform_containers_healthy": true,
+    "captcha_containers_healthy": true,
+    "rustfs_active": true,
+    "zot_active": true
+  },
+  "verdict": {
+    "central_pre_capacity_admission_operational": true,
+    "sparse_assigned_identity_operational": true,
+    "mixed_terminal_batch_converges": true,
+    "one_job_vm_lifecycle_operational": true,
+    "warm_replacement_operational": true,
+    "single_sample_gate_complete": true,
+    "production_reliability_gate_complete": false,
+    "remaining_gate": "complete restart, cancellation, acquisition-failure and saturation fault injection, then collect at least 500 jobs"
+  }
+}

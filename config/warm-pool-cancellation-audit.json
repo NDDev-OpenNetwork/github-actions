@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T03:35:04.061263026Z",
+  "host": "server-example-legacy",
+  "deployed_provider_commit": "aa574c8510e9b9a6ac5bac49c01d703dcfe9db98",
+  "image_fingerprint": "d36fc3f425133fd2a5335e48fd8d2e4f8598d6ff54675b84c5523d842b93578c",
+  "workflow": {
+    "run_id": 31292542279,
+    "job_id": 93192091483,
+    "head_sha": "132c03ea631bbb2055ae45221d45be1417a6f751",
+    "created_at": "2026-08-09T03:29:54Z",
+    "started_at": "2026-08-09T03:30:15Z",
+    "completed_at": "2026-08-09T03:31:29Z",
+    "conclusion": "cancelled",
+    "runner_name": "nddev-qjxwbgbp3uzf",
+    "runner_group": "Default",
+    "label": "nddev-linux-standard",
+    "cancelled_during_step": "Await cancellation signal",
+    "post_action_completed": true
+  },
+  "executed_worker": {
+    "instance_name": "warm-standard-173f11a2cbe2",
+    "provider_delete_requested_at": "2026-08-09T03:31:30.79791105Z",
+    "diagnostics_collected_at": "2026-08-09T03:31:31.003753383Z",
+    "diagnostics_sha256": "d9ac6d43ea93b1e69636629d775d906e93e236011d508699f08404143f67105a",
+    "diagnostics_exported_at": "2026-08-09T03:31:34.773486646Z",
+    "instance_lease_and_claim_absent_by": "2026-08-09T03:31:45Z",
+    "maximum_observed_teardown_seconds": 15,
+    "returned_to_warm_pool": false
+  },
+  "replacement": {
+    "instance_name": "warm-standard-9dc7b9e9adda",
+    "admitted_at": "2026-08-09T03:31:42.851021333Z",
+    "ready_observed_by": "2026-08-09T03:32:17Z",
+    "maximum_observed_admission_to_ready_seconds": 35,
+    "different_from_executed_worker": true,
+    "lifecycle": "warm-unregistered",
+    "warm_ready": true,
+    "repository_identity": "",
+    "job_identity": "",
+    "claims": 0
+  },
+  "postconditions": {
+    "observer_healthy": true,
+    "platform_healthy": true,
+    "journal_schema_version": 2,
+    "journal_warm_ready": 1,
+    "journal_claims": 0,
+    "incus_visible_instances": 1,
+    "incus_orphans": 0,
+    "incus_missing_instances": 0,
+    "github_repository_runner_registrations": 0,
+    "diagnostic_bundles": 42,
+    "diagnostic_exported_bundles": 42,
+    "diagnostic_pending_bundles": 0,
+    "root_free_percent": 39,
+    "legacy_listeners": 12,
+    "example_platform_http_status": 200,
+    "captcha_http_status": 200
+  },
+  "verdict": {
+    "bounded_cancellation_teardown": true,
+    "executed_worker_destroyed": true,
+    "clean_replacement_ready": true,
+    "production_reliability_gate_complete": false,
+    "remaining_gate": "fault injection and at least 500 jobs with an infrastructure failure rate below 0.5 percent and zero orphan resources"
+  }
+}

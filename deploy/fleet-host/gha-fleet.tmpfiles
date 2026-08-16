@@ -1,0 +1,34 @@
+d /etc/garm 0750 root garm -
+# The one-job cache credential loader validates this directory on every
+# delivery and refuses anything but mode 0750 owned by root:garm. Nothing
+# in the repository ever created it, so a host rebuilt from this contract
+# alone had /etc/garm but not /etc/garm/cache, and reconcile-rustfs-cache
+# failed before it could write a single credential.
+d /etc/garm/cache 0750 root garm -
+d /etc/gha-fleet 0755 root root -
+d /etc/gha-fleet/pki 0750 root gha-gateway -
+d /etc/gha-fleet/pki/cache 0700 root root -
+d /etc/gha-fleet/trust 0755 root root -
+d /etc/gha-fleet/secrets 0700 root root -
+d /etc/gha-fleet/zot 0750 root gha-zot -
+d /var/lib/garm 0700 garm garm -
+# The host probe shells out to `incus version`, and the Incus CLI creates its
+# config directory under $HOME on first use. The warm-pool unit runs under
+# ProtectSystem=strict with /var/lib/gha-fleet as its only writable path, so
+# that mkdir fails and the probe reports Incus missing on a host where Incus is
+# installed and healthy. Creating the directory up front keeps the unit from
+# needing write access to GARM's database directory to answer the question.
+d /var/lib/garm/.config 0700 garm garm -
+d /var/lib/garm/.config/incus 0700 garm garm -
+d /var/lib/gha-fleet 0700 garm garm -
+d /var/lib/gha-fleet/diagnostics 0700 garm garm -
+d /var/lib/gha-diagnostic-exporter 0750 root garm -
+d /var/lib/gha-cache 0711 root root -
+d /var/lib/gha-cache/rustfs 0700 gha-rustfs gha-rustfs -
+d /var/lib/gha-cache/rustfs/data 0700 gha-rustfs gha-rustfs -
+d /var/lib/gha-cache/rustfs/logs 0700 gha-rustfs gha-rustfs -
+d /var/lib/gha-cache/zot 0700 gha-zot gha-zot -
+d /var/lib/gha-cache/zot/data 0700 gha-zot gha-zot -
+d /usr/local/libexec/gha-fleet 0755 root root -
+d /var/lib/otelcol-fleet 0700 otelcol otelcol -
+d /var/lib/otelcol-fleet/queue 0700 otelcol otelcol -

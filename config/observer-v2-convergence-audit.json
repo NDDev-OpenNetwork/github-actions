@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-09T01:49:11.080265446Z",
+  "repository_commit": "bbe83ce3100a1d4faea21c5364b90843850a65fc",
+  "pull_request": 76,
+  "ci_run_id": 31288730335,
+  "observer": {
+    "version": "v0.1.0",
+    "snapshot_schema_version": 2,
+    "sha256": "6b6e71737a49f21b9c217302040e464b85c5f777c85c00464fcc2aaa69908d18",
+    "systemd_restarts": 0
+  },
+  "precondition": {
+    "captured_at": "2026-08-09T01:41:57.000586433Z",
+    "snapshot_schema_version": 1,
+    "healthy": true,
+    "diagnostic_bundles": 38,
+    "exported_bundles": 38,
+    "pending_bundles": 0,
+    "visible_instances": 0,
+    "journal_leases": 0,
+    "orphan_instances": 0,
+    "missing_instances": 0
+  },
+  "canary_runs": [
+    {
+      "run_id": 31288871282,
+      "role": "deployment-smoke",
+      "head_sha": "bbe83ce3100a1d4faea21c5364b90843850a65fc",
+      "conclusion": "success",
+      "diagnostic_bundle_count_after": 39
+    },
+    {
+      "run_id": 31288969439,
+      "role": "controlled-convergence-proof",
+      "head_sha": "bbe83ce3100a1d4faea21c5364b90843850a65fc",
+      "conclusion": "success",
+      "created_at": "2026-08-09T01:46:53Z",
+      "job_started_at": "2026-08-09T01:47:58Z",
+      "job_completed_at": "2026-08-09T01:48:10Z",
+      "diagnostic_bundle_count_after": 40
+    }
+  ],
+  "exporter_anchor": {
+    "observed_at": "2026-08-09T01:48:00.704429096Z",
+    "source_bundles": 39,
+    "exported_bundles": 39,
+    "pending_bundles": 0,
+    "consecutive_failures": 0,
+    "source_bytes": 1344179,
+    "exported_bytes": 1344179
+  },
+  "grace_sample": {
+    "captured_at": "2026-08-09T01:48:26.078088572Z",
+    "snapshot_schema_version": 2,
+    "healthy": true,
+    "collection_errors": 0,
+    "state": "convergence-grace",
+    "grace_period_seconds": 90,
+    "grace_remaining_seconds": 65,
+    "local_bundle_delta": 1,
+    "local_byte_delta": 36603,
+    "diagnostic_bundles": 40,
+    "diagnostic_bytes": 1380782,
+    "exporter_source_bundles": 39,
+    "exporter_exported_bundles": 39,
+    "exporter_pending_bundles": 0,
+    "visible_instances": 0,
+    "journal_leases": 0,
+    "orphan_instances": 0,
+    "missing_instances": 0
+  },
+  "converged_sample": {
+    "captured_at": "2026-08-09T01:49:11.080265446Z",
+    "exporter_observed_at": "2026-08-09T01:49:04.634476115Z",
+    "snapshot_schema_version": 2,
+    "healthy": true,
+    "collection_errors": 0,
+    "state": "synchronized",
+    "grace_remaining_seconds": 0,
+    "local_bundle_delta": 0,
+    "local_byte_delta": 0,
+    "diagnostic_bundles": 40,
+    "diagnostic_bytes": 1380782,
+    "exporter_source_bundles": 40,
+    "exporter_exported_bundles": 40,
+    "exporter_pending_bundles": 0,
+    "exporter_consecutive_failures": 0,
+    "visible_instances": 0,
+    "journal_leases": 0,
+    "orphan_instances": 0,
+    "missing_instances": 0
+  },
+  "postcondition": {
+    "github_registered_runners": 0,
+    "active_platform_units": [
+      "garm",
+      "gha-diagnostic-exporter.timer",
+      "gha-fleet-gateway",
+      "gha-fleet-observer",
+      "gha-rustfs",
+      "gha-zot"
+    ],
+    "failed_systemd_units": 0,
+    "root_filesystem_free_percent": 40,
+    "legacy_runner_listeners": 12,
+    "example_platform_http_status": 200,
+    "captcha_http_status": 200
+  }
+}

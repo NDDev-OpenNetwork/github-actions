@@ -1,0 +1,422 @@
+package incusplan
+
+import (
+	"fmt"
+	"net/netip"
+	"slices"
+	"strconv"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+)
+
+type Plan struct {
+	Version      string       `json:"version" yaml:"version"`
+	APIAddress   string       `json:"api_address" yaml:"api_address"`
+	HostFirewall HostFirewall `json:"host_firewall" yaml:"host_firewall"`
+	Storage      Storage      `json:"storage" yaml:"storage"`
+	Network      Network      `json:"network" yaml:"network"`
+	Project      Project      `json:"project" yaml:"project"`
+	ACL          ACL          `json:"acl" yaml:"acl"`
+	// PoolACLs are the additional ACLs a pool receives on its own NIC. The
+	// bridge ACL above is what every pool shares; anything wider than that is
+	// declared by exactly one pool and reaches only that pool's workers.
+	PoolACLs []ACL     `json:"pool_acls" yaml:"pool_acls"`
+	Profiles []Profile `json:"profiles" yaml:"profiles"`
+}
+
+type HostFirewall struct {
+	Backend         string             `json:"backend" yaml:"backend"`
+	RequiredStatus  string             `json:"required_status" yaml:"required_status"`
+	RequiredDefault string             `json:"required_default" yaml:"required_default"`
+	Rules           []HostFirewallRule `json:"rules" yaml:"rules"`
+}
+
+type HostFirewallRule struct {
+	Name string   `json:"name" yaml:"name"`
+	Args []string `json:"args" yaml:"args"`
+}
+
+type Storage struct {
+	Name   string            `json:"name" yaml:"name"`
+	Driver string            `json:"driver" yaml:"driver"`
+	Config map[string]string `json:"config" yaml:"config"`
+}
+
+type Network struct {
+	Name   string            `json:"name" yaml:"name"`
+	Type   string            `json:"type" yaml:"type"`
+	Config map[string]string `json:"config" yaml:"config"`
+}
+
+type Project struct {
+	Name        string            `json:"name" yaml:"name"`
+	Description string            `json:"description" yaml:"description"`
+	Config      map[string]string `json:"config" yaml:"config"`
+}
+
+type ACL struct {
+	Name        string            `json:"name" yaml:"name"`
+	Description string            `json:"description" yaml:"description"`
+	Config      map[string]string `json:"config" yaml:"config"`
+	Ingress     []ACLRule         `json:"ingress" yaml:"ingress"`
+	Egress      []ACLRule         `json:"egress" yaml:"egress"`
+}
+
+type ACLRule struct {
+	Action          string `json:"action" yaml:"action"`
+	State           string `json:"state" yaml:"state"`
+	Description     string `json:"description" yaml:"description"`
+	Source          string `json:"source,omitempty" yaml:"source,omitempty"`
+	Destination     string `json:"destination,omitempty" yaml:"destination,omitempty"`
+	Protocol        string `json:"protocol,omitempty" yaml:"protocol,omitempty"`
+	SourcePort      string `json:"source_port,omitempty" yaml:"source_port,omitempty"`
+	DestinationPort string `json:"destination_port,omitempty" yaml:"destination_port,omitempty"`
+}
+
+type Profile struct {
+	Name        string                       `json:"name" yaml:"name"`
+	Description string                       `json:"description" yaml:"description"`
+	Config      map[string]string            `json:"config" yaml:"config"`
+	Devices     map[string]map[string]string `json:"devices" yaml:"devices"`
+}
+
+// Build derives every Incus object from the versioned platform policy. The
+// selected pools are explicit so a cold pilot cannot accidentally materialize
+// a release or otherwise unrequested profile.
+func Build(cfg config.Config, selectedPools []string) (Plan, error) {
+	if err := cfg.Validate(); err != nil {
+		return Plan{}, err
+	}
+	if len(selectedPools) == 0 {
+		return Plan{}, fmt.Errorf("at least one pool must be selected")
+	}
+	selected := make(map[string]struct{}, len(selectedPools))
+	for _, name := range selectedPools {
+		if _, duplicate := selected[name]; duplicate {
+			return Plan{}, fmt.Errorf("pool %q is selected more than once", name)
+		}
+		selected[name] = struct{}{}
+	}
+
+	bridgePrefix, err := netip.ParsePrefix(cfg.Incus.NetworkCIDR)
+	if err != nil {
+		return Plan{}, fmt.Errorf("parse Incus network: %w", err)
+	}
+	bridgeAddress := bridgePrefix.Addr().String()
+	bridgeSubnet := bridgePrefix.Masked().String()
+	profiles := make([]Profile, 0, len(selected))
+	poolACLs := make([]ACL, 0, len(selected))
+	for _, pool := range cfg.Pools {
+		if _, wanted := selected[pool.Name]; !wanted {
+			continue
+		}
+		switch pool.Capabilities.NetworkPolicy {
+		case "public-internet":
+		case "release-allowlist":
+			// A release pool reaches the same bounded public egress every pool
+			// gets, plus the destinations it declares -- on its own NIC, so
+			// opening one does not open it for the other pools on this bridge.
+			if acl, declared := poolEgressACL(cfg, pool, bridgeAddress); declared {
+				poolACLs = append(poolACLs, acl)
+			}
+		default:
+			return Plan{}, fmt.Errorf("pool %q requires %q networking and cannot use the public-egress pilot bridge", pool.Name, pool.Capabilities.NetworkPolicy)
+		}
+		profiles = append(profiles, profile(cfg, pool))
+		delete(selected, pool.Name)
+	}
+	if len(selected) > 0 {
+		missing := make([]string, 0, len(selected))
+		for name := range selected {
+			missing = append(missing, name)
+		}
+		slices.Sort(missing)
+		return Plan{}, fmt.Errorf("unknown pools: %v", missing)
+	}
+
+	return Plan{
+		Version:      cfg.Incus.Version,
+		APIAddress:   cfg.Incus.EffectiveAPIAddress(),
+		HostFirewall: hostFirewall(cfg, bridgeAddress, bridgeSubnet),
+		Storage: Storage{
+			Name:   cfg.Incus.StoragePool,
+			Driver: cfg.Incus.StorageDriver,
+			Config: map[string]string{
+				"lvm.thinpool_name": "gha-thin",
+				"lvm.use_thinpool":  "true",
+				"size":              strconv.Itoa(cfg.Incus.StorageSizeGiB) + "GiB",
+			},
+		},
+		Network: Network{
+			Name: cfg.Incus.Network,
+			Type: "bridge",
+			Config: map[string]string{
+				"dns.domain":                           "gha.internal",
+				"dns.mode":                             "managed",
+				"ipv4.address":                         cfg.Incus.NetworkCIDR,
+				"ipv4.dhcp":                            "true",
+				"ipv4.nat":                             "true",
+				"ipv6.address":                         "none",
+				"security.acls":                        cfg.Incus.EgressACL,
+				"security.acls.default.egress.action":  "reject",
+				"security.acls.default.ingress.action": "reject",
+			},
+		},
+		Project: Project{
+			Name:        cfg.Incus.Project,
+			Description: "Disposable NDDev GitHub Actions full-VM workers",
+			Config: map[string]string{
+				"features.images":                "true",
+				"features.networks":              "false",
+				"features.networks.zones":        "false",
+				"features.profiles":              "true",
+				"features.storage.buckets":       "false",
+				"features.storage.volumes":       "true",
+				"images.auto_update_interval":    "0",
+				"limits.containers":              "0",
+				"limits.cpu":                     strconv.Itoa(cfg.Incus.FleetMaxCPUUnits()),
+				"limits.disk":                    strconv.Itoa(cfg.Incus.FleetDiskLimitGiB()) + "GiB",
+				"limits.instances":               strconv.Itoa(cfg.Incus.FleetMaxInstances()),
+				"limits.memory":                  strconv.Itoa(cfg.Incus.FleetMaxMemoryMiB()) + "MiB",
+				"limits.networks":                "0",
+				"limits.virtual-machines":        strconv.Itoa(cfg.Incus.FleetMaxInstances()),
+				"restricted":                     "true",
+				"restricted.backups":             "block",
+				"restricted.containers.lowlevel": "block",
+				"restricted.devices.disk":        "managed",
+				"restricted.devices.nic":         "managed",
+				"restricted.networks.access":     cfg.Incus.Network,
+				"restricted.snapshots":           "block",
+				// Incus 6.0.0 ignores security.nesting=false when it builds a
+				// VM's QEMU CPU arguments. The builder and the pinned provider
+				// therefore set one closed raw.qemu value that removes VMX/SVM.
+				// Workflow VMs never receive Incus API access.
+				"restricted.virtual-machines.lowlevel": "allow",
+			},
+		},
+		ACL:      publicEgressACL(cfg, bridgeAddress),
+		PoolACLs: poolACLs,
+		Profiles: profiles,
+	}, nil
+}
+
+func profile(cfg config.Config, pool config.Pool) Profile {
+	nic := map[string]string{
+		"name":                    "eth0",
+		"network":                 cfg.Incus.Network,
+		"security.ipv4_filtering": "true",
+		"security.mac_filtering":  "true",
+		"security.port_isolation": "true",
+		"type":                    "nic",
+	}
+	// The bridge ACL applies to every NIC on it. A pool that declares its own
+	// destinations gets a second ACL here, on its own NIC, so the wider rule
+	// reaches that pool's workers and no others.
+	if len(pool.Capabilities.EgressAllowlist) > 0 {
+		nic["security.acls"] = cfg.Incus.EgressACL + "-" + pool.Name
+	}
+	return Profile{
+		Name:        pool.Name,
+		Description: "Managed full-VM profile for " + pool.Name,
+		Config: map[string]string{
+			"boot.autostart": "false",
+			"limits.cpu":     strconv.Itoa(pool.Resources.VCPU),
+			"limits.memory":  strconv.Itoa(pool.Resources.MemoryMiB) + "MiB",
+			// Incus 6.0 has no project-level VM nesting restriction. The
+			// profile blocks nesting and workers never receive the Incus API.
+			"security.nesting":     "false",
+			"security.secureboot":  "true",
+			"user.nddev.pool":      pool.Name,
+			"user.nddev.scale_set": pool.ScaleSetName,
+			"user.nddev.trust":     pool.Trust,
+		},
+		Devices: map[string]map[string]string{
+			"eth0": nic,
+			"root": {
+				"path": "/",
+				"pool": cfg.Incus.StoragePool,
+				"size": strconv.Itoa(pool.Resources.DiskGiB) + "GiB",
+				"type": "disk",
+			},
+		},
+	}
+}
+
+// reservedDestinations is the range set no worker may reach, taken from the one
+// declaration config validation refuses pool allowlists against, plus this
+// host's own public address. Reading them from the same place is what lets a
+// declared destination be proven not to overlap a rejected one.
+func reservedDestinations(cfg config.Config) []string {
+	return append(config.ReservedEgressDestinations(), cfg.Incus.PublicHostAddress+"/32")
+}
+
+// poolEgressACL renders one pool's declared destinations as an ACL for its own
+// NIC. It repeats the reject rules the bridge ACL already carries: config
+// validation guarantees a declared destination cannot overlap them, so the two
+// can never contradict each other, and repeating them means this ACL is
+// deny-shaped on its own rather than relying on the order an implementation
+// happens to evaluate two attached ACLs in.
+func poolEgressACL(cfg config.Config, pool config.Pool, bridgeAddress string) (ACL, bool) {
+	if len(pool.Capabilities.EgressAllowlist) == 0 {
+		return ACL{}, false
+	}
+	egress := baseEgressRejects(cfg, bridgeAddress)
+	for _, destination := range pool.Capabilities.EgressAllowlist {
+		egress = append(egress, ACLRule{
+			Action:          "allow",
+			State:           "enabled",
+			Description:     destination.Purpose,
+			Destination:     destination.Destination,
+			Protocol:        destination.Protocol,
+			DestinationPort: destination.Ports,
+		})
+	}
+	return ACL{
+		Name:        cfg.Incus.EgressACL + "-" + pool.Name,
+		Description: "Reviewed release egress for " + pool.Name,
+		Config:      map[string]string{"user.nddev.policy": "release-allowlist-v1"},
+		Ingress:     []ACLRule{},
+		Egress:      egress,
+	}, true
+}
+
+func baseEgressRejects(cfg config.Config, bridgeAddress string) []ACLRule {
+	return []ACLRule{
+		{
+			Action:      "reject",
+			State:       "enabled",
+			Description: "Block private, metadata, multicast and host public ranges",
+			Destination: join(reservedDestinations(cfg)),
+		},
+		{
+			Action:          "reject",
+			State:           "enabled",
+			Description:     "Block sensitive host bridge services",
+			Destination:     bridgeAddress + "/32",
+			Protocol:        "tcp",
+			DestinationPort: "22,80,443,8443,8444,9003",
+		},
+	}
+}
+
+func publicEgressACL(cfg config.Config, bridgeAddress string) ACL {
+	rejectDestinations := reservedDestinations(cfg)
+	return ACL{
+		Name:        cfg.Incus.EgressACL,
+		Description: "Deny host and private networks; allow bounded public pilot egress",
+		Config:      map[string]string{"user.nddev.policy": "public-internet-v1"},
+		// Incus installs non-overridable baseline DHCP/DNS service rules on
+		// managed bridges before the custom ACL chain. Host UFW policy is
+		// reconciled separately because an accept in one nftables base chain
+		// cannot override a drop in another one.
+		Ingress: []ACLRule{},
+		Egress: []ACLRule{
+			{
+				Action:      "reject",
+				State:       "enabled",
+				Description: "Block private, metadata, multicast and host public ranges",
+				Destination: join(rejectDestinations),
+			},
+			{
+				Action:          "reject",
+				State:           "enabled",
+				Description:     "Block sensitive host bridge services",
+				Destination:     bridgeAddress + "/32",
+				Protocol:        "tcp",
+				DestinationPort: "22,80,443,8443,8444,9003",
+			},
+			{
+				Action:          "allow",
+				State:           "enabled",
+				Description:     "Allow scoped local registry and RustFS endpoints",
+				Destination:     bridgeAddress + "/32",
+				Protocol:        "tcp",
+				DestinationPort: strconv.Itoa(cfg.Incus.RegistryPort) + "," + strconv.Itoa(cfg.Incus.RustFSPort),
+			},
+			{
+				Action:          "allow",
+				State:           "enabled",
+				Description:     "Allow the restricted GARM worker gateway",
+				Destination:     bridgeAddress + "/32",
+				Protocol:        "tcp",
+				DestinationPort: strconv.Itoa(cfg.Incus.GARMGatewayPort),
+			},
+			{
+				Action:          "allow",
+				State:           "enabled",
+				Description:     "Allow DNS to the managed bridge",
+				Destination:     bridgeAddress + "/32",
+				Protocol:        "udp",
+				DestinationPort: "53",
+			},
+			{
+				Action:          "allow",
+				State:           "enabled",
+				Description:     "Allow TCP DNS fallback to the managed bridge",
+				Destination:     bridgeAddress + "/32",
+				Protocol:        "tcp",
+				DestinationPort: "53",
+			},
+			{
+				Action:          "allow",
+				State:           "enabled",
+				Description:     "Allow public HTTP and HTTPS for the standard pilot",
+				Protocol:        "tcp",
+				DestinationPort: "80,443",
+			},
+		},
+	}
+}
+
+func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFirewall {
+	return HostFirewall{
+		Backend:         "ufw",
+		RequiredStatus:  "active",
+		RequiredDefault: "deny (incoming), allow (outgoing), deny (routed)",
+		Rules: []HostFirewallRule{
+			{
+				Name: "dhcp",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", "any", "port", "67", "proto", "udp", "comment", "gha-fleet-dhcp-v2"},
+			},
+			{
+				Name: "dns-udp",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", "53", "proto", "udp", "comment", "gha-fleet-dns-udp-v1"},
+			},
+			{
+				Name: "dns-tcp",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", "53", "proto", "tcp", "comment", "gha-fleet-dns-tcp-v1"},
+			},
+			{
+				Name: "registry",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RegistryPort), "proto", "tcp", "comment", "gha-fleet-registry-v1"},
+			},
+			{
+				Name: "rustfs",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-fleet-rustfs-v1"},
+			},
+			{
+				Name: "garm-gateway",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.GARMGatewayPort), "proto", "tcp", "comment", "gha-fleet-garm-gateway-v1"},
+			},
+			{
+				Name: "public-http",
+				Args: []string{"route", "allow", "in", "on", cfg.Incus.Network, "from", bridgeSubnet, "to", "any", "port", "80", "proto", "tcp", "comment", "gha-fleet-public-http-v1"},
+			},
+			{
+				Name: "public-https",
+				Args: []string{"route", "allow", "in", "on", cfg.Incus.Network, "from", bridgeSubnet, "to", "any", "port", "443", "proto", "tcp", "comment", "gha-fleet-public-https-v1"},
+			},
+		},
+	}
+}
+
+func join(values []string) string {
+	result := ""
+	for index, value := range values {
+		if index > 0 {
+			result += ","
+		}
+		result += value
+	}
+	return result
+}

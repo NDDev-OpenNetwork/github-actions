@@ -1,0 +1,56 @@
+[Unit]
+Description=Canary RustFS exporter for NDDev runner diagnostics
+After=network-online.target gha-rustfs.service
+Wants=network-online.target gha-rustfs.service
+
+[Service]
+Type=oneshot
+User=root
+Group=garm
+UMask=0027
+LoadCredential=exporter-config:/etc/gha-fleet/diagnostic-exporter.yaml
+LoadCredential=rustfs-access-key:/etc/gha-fleet/secrets/rustfs-diagnostics-access-key
+LoadCredential=rustfs-secret-key:/etc/gha-fleet/secrets/rustfs-diagnostics-secret-key
+LoadCredential=rustfs-ca.pem:/etc/gha-fleet/trust/rustfs-ca.pem
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/libexec/gha-fleet/gha-diagnostic-exporter --config /run/credentials/gha-diagnostic-exporter.service/exporter-config
+TimeoutStartSec=60s
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_INET
+IPAddressDeny=any
+IPAddressAllow=192.0.2.1/32
+BindReadOnlyPaths=/var/lib/gha-fleet/diagnostics:/run/gha-diagnostic-exporter-source
+InaccessiblePaths=/etc /var/lib/gha-fleet /var/lib/garm /var/lib/gha-cache
+InaccessiblePaths=-/var/run/docker.sock -/run/incus/unix.socket -/var/lib/incus/unix.socket
+ReadOnlyPaths=/usr/local/libexec/gha-fleet
+ReadWritePaths=/var/lib/gha-diagnostic-exporter
+MemoryAccounting=true
+MemoryMax=256M
+TasksAccounting=true
+TasksMax=64
+LimitNOFILE=1024

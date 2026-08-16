@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T21:47:05.831877751Z",
+  "host": "server-example-legacy",
+  "repository_merge_commit": "cdf3e18b3528515266874ca11d6accec37944fab",
+  "artifacts": {
+    "garm_version": "v0.2.1-nddev.9",
+    "garm_patch_sha256": "d23873baf6689c7e4cc366b14979ad86367ef9e321cb6d5d2745c78e64a3c172",
+    "garm_binary_sha256": "def77286f8903d77cb728ce0c4fe4118e9d793af0a9b346142e46591276343e2",
+    "controller_binary_sha256": "d0588336cab8659e358328cf1ae08e9fafef33df0aec1afeb77a6d6cbcc5be27",
+    "provider_version": "v0.1.5-nddev.18",
+    "provider_binary_sha256": "14e9831f1b6e15a78908bac849f3cd7679cd1102cd080acabca09b311d3d5fc9",
+    "observer_binary_sha256": "17ca97c225b24bdc6c44cb82098f0b73fe8e96161e3f6865a45affdca62f1664",
+    "gateway_binary_sha256": "33cb5ca5b34f3095995cd7c16aa4a64ff4ed1965d7271aae0f55ccd0f175ba59",
+    "platform_config_sha256": "79528e315c0adafe6294be84a58a3d307e28dbdd978f94fcae665a83f66f0ce4",
+    "provider_config_sha256": "fdb5b46bc6b612510c1978c24b7ed3d7b9029808f148fb28660a9ca35f79d861",
+    "reproducible_binary_rebuild_equal": true,
+    "upstream_race_suite_passed": true
+  },
+  "transactional_rollout": {
+    "attempts": 3,
+    "automatic_rollbacks": 2,
+    "successful_attempt": 3,
+    "attempt_1_failure": "rollout assertion expected version fields in the intentionally narrower provider probe schema",
+    "attempt_2_failure": "observer health was evaluated while its required warm timer remained deliberately stopped",
+    "attempt_3_sequence": [
+      "garm-readiness",
+      "provider-compatibility-probe",
+      "observer-start",
+      "warm-timer-start",
+      "observer-health"
+    ],
+    "rollback_bundle_sha256": [
+      "3753ee2b7199daf1dd4f8fb3dfb82a642972c623db253d3732c305f529d6ca5c",
+      "0870c5ec832713dd3c5b9d6638930e4cb07d231b785d739a16122360103510b1",
+      "ee65f28123918f27251ea7e3aec1a5bce0f3359d0ccd779c9b5d6ac617eb7221"
+    ],
+    "database_restored_exactly_on_rollback": true,
+    "binaries_and_config_restored_exactly_on_rollback": true
+  },
+  "activation": {
+    "scale_set": "nddev-linux-standard",
+    "mode": "direct-jit",
+    "dry_run_actions": [
+      "disable_and_migrate_scale_set_activation",
+      "enable_verified_scale_set"
+    ],
+    "max_runners": 1,
+    "integration_mode_unchanged": "metadata"
+  },
+  "rejected_contaminated_attempt": {
+    "workflow_run_id": 31337075129,
+    "job_id": 93304589381,
+    "conclusion": "cancelled",
+    "workflow_steps_executed": 0,
+    "stale_warm_instance": "warm-standard-7d9500504844",
+    "stale_provider_commit_rejected": true,
+    "cold_instance": "nddev-ozvzdboonpja",
+    "failure": "worker callback failed because a narrow GARM stop/start had not restored the required gateway listener",
+    "automatic_garm_reap_completed": true,
+    "provider_vm_delete_completed": true,
+    "diagnostics_exported": true,
+    "accepted_as_canary": false
+  },
+  "accepted_canary": {
+    "workflow_run_id": 31337636346,
+    "job_id": 93305994280,
+    "opaque_job_id": "06db49d0-6af4-5487-8bff-d4c1e8006ebc",
+    "head_sha": "cdf3e18b3528515266874ca11d6accec37944fab",
+    "label": "nddev-linux-standard",
+    "created_at": "2026-08-09T21:45:00Z",
+    "job_started_at": "2026-08-09T21:45:11Z",
+    "job_completed_at": "2026-08-09T21:45:25Z",
+    "conclusion": "success",
+    "runner_name": "nddev-uvkyiwi4csl1",
+    "claimed_warm_instance": "warm-standard-83894b4aeab7",
+    "replacement_warm_instance": "warm-standard-5068ac5a388a",
+    "created_to_job_start_seconds": 11,
+    "job_execution_seconds": 14,
+    "official_runner_semantics": {
+      "immutable_boundary": "passed",
+      "checkout": "passed",
+      "rustfs_one_job_delivery": "passed",
+      "composite_action": "passed",
+      "command_files_and_outputs": "passed",
+      "artifact_upload": "passed",
+      "post_action": "passed"
+    },
+    "garm_invalid_transition_errors": 0,
+    "garm_warning_or_error_events": 0,
+    "worker_destroyed_after_job": true,
+    "worker_returned_to_warm_pool": false,
+    "github_runner_registration_remaining": false,
+    "diagnostic_archive": "runner-diagnostics-v1-warm-standard-83894b4aeab7-20260809T214525.860491948Z-dd3cdcd4e1b4.tar.gz",
+    "diagnostic_sha256": "526f38e095ab0a7672e33a20e595398b7754b381645933d1ff8eb85ad54d1358",
+    "diagnostic_token_shape_matches": 0
+  },
+  "postconditions": {
+    "observer_healthy": true,
+    "observer_fresh": true,
+    "provider_leases": 1,
+    "provider_claims": 0,
+    "queue_active": 0,
+    "queue_in_flight": 0,
+    "incus_visible_instances": 1,
+    "incus_orphan_instances": 0,
+    "incus_missing_instances": 0,
+    "diagnostic_source_bundles": 114,
+    "diagnostic_exported_bundles": 114,
+    "diagnostic_pending_bundles": 0,
+    "root_free_percent": 35,
+    "legacy_listeners": 12,
+    "example_platform_containers_healthy": true,
+    "captcha_containers_healthy": true,
+    "failed_systemd_units": 0,
+    "services_active": [
+      "garm",
+      "gha-fleet-gateway",
+      "gha-fleet-observer",
+      "gha-warm-pool.timer",
+      "gha-diagnostic-exporter.timer",
+      "gha-rustfs",
+      "gha-zot"
+    ]
+  },
+  "verdict": {
+    "merge_bound_direct_jit_canary_accepted": true,
+    "lifecycle_bridge_accepted": true,
+    "transactional_rollback_accepted": true,
+    "warm_queue_to_online_p95_gate_complete": false,
+    "production_reliability_gate_complete": false,
+    "remaining_gate": "collect twenty clean nominal-load warm samples, then complete fault injection and the 500-job reliability gate"
+  }
+}

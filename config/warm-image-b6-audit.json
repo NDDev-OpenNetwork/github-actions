@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T03:02:08Z",
+  "host": "server-example-legacy",
+  "repository_commit": "5c080d32e3ddb5df4924f5f8dcf62de086a11e06",
+  "stage_only": true,
+  "promoted": false,
+  "immutable_alias": "nddev-ubuntu-24.04-amd64-runner-2.336.0-r20260801-b6",
+  "image_fingerprint": "d36fc3f425133fd2a5335e48fd8d2e4f8598d6ff54675b84c5523d842b93578c",
+  "image_created_at": "2026-08-09T02:59:23.381716252Z",
+  "image_size_bytes": 1323105894,
+  "manifest_fingerprint": "sha256:bb48789cef22660956a9351f426c206473276c8cd63e99b41cafbb8b8ca2658a",
+  "recipe_fingerprint": "sha256:4fb8b74ca642feae3baa9eaf83d0c534dda3a347583142496912eb17354c138f",
+  "smoke_fingerprint": "sha256:9c7ad99d8e91ba9d8c1558733ab7759e74d06cc74af78ce4c5662c1dbde82235",
+  "package_manifest_sha256": "10e1275e19482490da4803ddf30c167dcf2007d56dc43b5c74bcf5bc920eb9d2",
+  "runner_version": "2.336.0",
+  "runner_sha256": "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d",
+  "source_release": "20260801",
+  "source_disk_sha256": "0533b0655c32e68b31d792ecd6ccfca95abdbc536c4446874fe0513bd4140ffe",
+  "smoke": {
+    "forbidden_devices": "absent",
+    "host_route": "blocked",
+    "metadata_route": "blocked",
+    "nested_cpu_flags": "absent",
+    "public_egress": "ok",
+    "registration_state": "absent",
+    "ssh_listener": "absent",
+    "ssh_server_package": "absent",
+    "ssh_units": "masked",
+    "warm_agent": "ready-unregistered"
+  },
+  "postconditions": {
+    "builder_and_smoke_instances": 0,
+    "journal_leases": 0,
+    "journal_claims": 0,
+    "incus_orphans": 0,
+    "root_free_percent": 40,
+    "legacy_listeners": 12
+  }
+}

@@ -1,0 +1,482 @@
+package fleetobserve
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
+)
+
+const (
+	// 7 adds gha-diagnostic-exporter.timer and otelcol-fleet to the service
+	// inventory, so a snapshot now reports seven services where it reported five.
+	SchemaVersion                   = 7
+	diagnosticExportStatusMaxAge    = 3 * time.Minute
+	diagnosticExportSyncGracePeriod = 90 * time.Second
+)
+
+const (
+	diagnosticExportSyncUnavailable  = "unavailable"
+	diagnosticExportSyncSynchronized = "synchronized"
+	diagnosticExportSyncGrace        = "convergence-grace"
+	diagnosticExportSyncInvalid      = "invalid"
+)
+
+// requiredServices is what a serving host must have running for the observer to
+// call itself healthy. The diagnostic exporter timer and the collector were
+// missing while the observer depended on both -- it reads the exporter's state
+// file and ships its own metrics through the collector -- so a host could lose
+// either and still report healthy.
+var requiredServices = []string{
+	"garm",
+	"gha-fleet-gateway",
+	"gha-rustfs",
+	"gha-warm-pool.timer",
+	"gha-zot",
+	"gha-diagnostic-exporter.timer",
+	"otelcol-fleet",
+}
+
+func ServiceNames() []string {
+	return append([]string(nil), requiredServices...)
+}
+
+type HostSource func(context.Context) (hostprobe.Snapshot, error)
+type JournalSource func(context.Context) (providerjournal.Journal, error)
+type QueueIntentSource func(context.Context) (queueintent.Snapshot, error)
+type InstanceSource func(context.Context) ([]string, error)
+type DiagnosticsSource func(time.Time) (workerdiagnostics.SpoolStats, error)
+type DiagnosticExportSource func() (diagnosticexport.Status, error)
+type ServiceSource func(context.Context, string) (string, error)
+
+type Collector struct {
+	Config      config.Config
+	Host        HostSource
+	Journal     JournalSource
+	Queue       QueueIntentSource
+	Instances   InstanceSource
+	Diagnostics DiagnosticsSource
+	Export      DiagnosticExportSource
+	Service     ServiceSource
+	Now         func() time.Time
+}
+
+type Snapshot struct {
+	SchemaVersion        int                          `json:"schema_version"`
+	CapturedAt           time.Time                    `json:"captured_at"`
+	Healthy              bool                         `json:"healthy"`
+	Host                 hostprobe.Snapshot           `json:"host"`
+	Pools                []PoolStatus                 `json:"pools"`
+	Journal              JournalSummary               `json:"journal"`
+	Queue                QueueSummary                 `json:"queue"`
+	Incus                IncusSummary                 `json:"incus"`
+	Diagnostics          workerdiagnostics.SpoolStats `json:"diagnostics"`
+	DiagnosticExport     diagnosticexport.Status      `json:"diagnostic_export"`
+	DiagnosticExportSync DiagnosticExportSync         `json:"diagnostic_export_sync"`
+	Services             []ServiceStatus              `json:"services"`
+	CollectionErrors     []string                     `json:"collection_errors"`
+}
+
+type DiagnosticExportSync struct {
+	State                 string `json:"state"`
+	GracePeriodSeconds    int64  `json:"grace_period_seconds"`
+	GraceRemainingSeconds int64  `json:"grace_remaining_seconds"`
+	LocalBundleDelta      int    `json:"local_bundle_delta"`
+	LocalByteDelta        int64  `json:"local_byte_delta"`
+}
+
+type PoolStatus struct {
+	Name       string `json:"name"`
+	PilotReady bool   `json:"pilot_ready"`
+	Blockers   int    `json:"blockers"`
+	Warnings   int    `json:"warnings"`
+	Info       int    `json:"info"`
+}
+
+type JournalSummary struct {
+	SchemaVersion        int            `json:"schema_version"`
+	Generation           uint64         `json:"generation"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	Leases               int            `json:"leases"`
+	Claims               int            `json:"claims"`
+	WarmPreemptions      int            `json:"warm_preemptions"`
+	WarmPreemptionsTotal uint64         `json:"warm_preemptions_total"`
+	ByState              map[string]int `json:"by_state"`
+}
+
+type QueueSummary struct {
+	Generation            uint64         `json:"generation"`
+	Stored                int            `json:"stored"`
+	Active                int            `json:"active"`
+	Expired               int            `json:"expired"`
+	InFlight              int            `json:"in_flight"`
+	OldestQueueAgeSeconds int64          `json:"oldest_queue_age_seconds"`
+	UncoveredRunning      int            `json:"uncovered_running"`
+	ByState               map[string]int `json:"by_state"`
+	ByPriority            map[int]int    `json:"by_priority"`
+	ByScaleSet            map[string]int `json:"by_scale_set"`
+}
+
+type IncusSummary struct {
+	VisibleInstances int `json:"visible_instances"`
+	OrphanInstances  int `json:"orphan_instances"`
+	MissingInstances int `json:"missing_instances"`
+}
+
+type ServiceStatus struct {
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Active bool   `json:"active"`
+}
+
+func (c Collector) Collect(ctx context.Context) Snapshot {
+	now := c.now()
+	snapshot := Snapshot{
+		SchemaVersion:    SchemaVersion,
+		CapturedAt:       now,
+		Pools:            make([]PoolStatus, 0, len(c.Config.Pools)),
+		Services:         make([]ServiceStatus, len(requiredServices)),
+		CollectionErrors: make([]string, 0),
+		DiagnosticExportSync: DiagnosticExportSync{
+			State:              diagnosticExportSyncUnavailable,
+			GracePeriodSeconds: int64(diagnosticExportSyncGracePeriod / time.Second),
+		},
+	}
+
+	var host hostprobe.Snapshot
+	var hostErr error
+	var journal providerjournal.Journal
+	var journalErr error
+	var queue queueintent.Snapshot
+	var queueErr error
+	var instances []string
+	var instancesErr error
+	var diagnostics workerdiagnostics.SpoolStats
+	var diagnosticsErr error
+	var diagnosticExport diagnosticexport.Status
+	var diagnosticExportErr error
+	serviceErrors := make([]error, len(requiredServices))
+
+	var group sync.WaitGroup
+	group.Add(6 + len(requiredServices))
+	go func() {
+		defer group.Done()
+		host, hostErr = c.Host(ctx)
+	}()
+	go func() {
+		defer group.Done()
+		journal, journalErr = c.Journal(ctx)
+	}()
+	go func() {
+		defer group.Done()
+		queue, queueErr = c.Queue(ctx)
+	}()
+	go func() {
+		defer group.Done()
+		instances, instancesErr = c.Instances(ctx)
+	}()
+	go func() {
+		defer group.Done()
+		diagnostics, diagnosticsErr = c.Diagnostics(now)
+	}()
+	go func() {
+		defer group.Done()
+		diagnosticExport, diagnosticExportErr = c.Export()
+	}()
+	for index, name := range requiredServices {
+		index, name := index, name
+		go func() {
+			defer group.Done()
+			state, err := c.Service(ctx, name)
+			serviceErrors[index] = err
+			snapshot.Services[index] = ServiceStatus{Name: name, State: state, Active: state == "active"}
+		}()
+	}
+	group.Wait()
+
+	if hostErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("host", hostErr))
+	} else {
+		snapshot.Host = host
+		for _, pool := range c.Config.Pools {
+			decision := hostprobe.EvaluateColdPilot(host, c.Config.HostReserve, pool)
+			status := PoolStatus{Name: pool.Name, PilotReady: decision.PilotReady}
+			for _, finding := range decision.Findings {
+				switch finding.Severity {
+				case hostprobe.SeverityBlocker:
+					status.Blockers++
+				case hostprobe.SeverityWarning:
+					status.Warnings++
+				case hostprobe.SeverityInfo:
+					status.Info++
+				}
+			}
+			snapshot.Pools = append(snapshot.Pools, status)
+		}
+	}
+
+	boundNames := make(map[string]struct{})
+	if journalErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("journal", journalErr))
+	} else {
+		snapshot.Journal = summarizeJournal(journal)
+		for name, lease := range journal.Leases {
+			if lease.State == providerjournal.StateCreated || lease.State == providerjournal.StateDeleting ||
+				lease.State == providerjournal.StateWarmReady || lease.State == providerjournal.StateWarmClaimed {
+				boundNames[name] = struct{}{}
+			}
+		}
+	}
+	if queueErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("queue intent", queueErr))
+	} else {
+		queueSummary, err := summarizeQueue(queue, c.Config, now)
+		if err != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("queue intent", err))
+		} else {
+			snapshot.Queue = queueSummary
+		}
+	}
+
+	if instancesErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("incus", instancesErr))
+	} else {
+		visibleNames, err := validateInstanceNames(instances)
+		if err != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("incus", err))
+		} else {
+			snapshot.Incus.VisibleInstances = len(visibleNames)
+			if journalErr == nil {
+				for name := range visibleNames {
+					if _, exists := boundNames[name]; !exists {
+						snapshot.Incus.OrphanInstances++
+					}
+				}
+				for name := range boundNames {
+					if _, exists := visibleNames[name]; !exists {
+						snapshot.Incus.MissingInstances++
+					}
+				}
+			}
+		}
+	}
+
+	if diagnosticsErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("diagnostics", diagnosticsErr))
+	} else {
+		snapshot.Diagnostics = diagnostics
+	}
+	if diagnosticExportErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("diagnostic export", diagnosticExportErr))
+	} else {
+		snapshot.DiagnosticExport = diagnosticExport
+		if diagnosticsErr == nil {
+			syncStatus, err := validateDiagnosticExport(diagnosticExport, diagnostics, now)
+			snapshot.DiagnosticExportSync = syncStatus
+			if err != nil {
+				snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("diagnostic export", err))
+			}
+		}
+	}
+	for index, err := range serviceErrors {
+		if err != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("service "+requiredServices[index], err))
+		}
+	}
+	if journalErr == nil && queueErr == nil {
+		executionLeases := snapshot.Journal.ByState[string(providerjournal.StateCreated)] +
+			snapshot.Journal.ByState[string(providerjournal.StateWarmClaimed)]
+		running := snapshot.Queue.ByState[string(queueintent.StateRunning)]
+		if running > executionLeases {
+			snapshot.Queue.UncoveredRunning = running - executionLeases
+		}
+	}
+	sort.Strings(snapshot.CollectionErrors)
+	snapshot.Healthy = len(snapshot.CollectionErrors) == 0 &&
+		snapshot.Incus.OrphanInstances == 0 && snapshot.Incus.MissingInstances == 0 &&
+		snapshot.Queue.UncoveredRunning == 0
+	for _, service := range snapshot.Services {
+		if !service.Active {
+			snapshot.Healthy = false
+		}
+	}
+	return snapshot
+}
+
+func (c Collector) Validate() error {
+	if err := c.Config.Validate(); err != nil {
+		return err
+	}
+	if c.Host == nil || c.Journal == nil || c.Queue == nil || c.Instances == nil || c.Diagnostics == nil || c.Export == nil || c.Service == nil {
+		return fmt.Errorf("every observer source is required")
+	}
+	// The inventory used to be asserted at exactly five, which made adding a
+	// service two edits and stated a count rather than a property. What matters
+	// is that it is not empty; which services belong in it is decided by the
+	// list above and held by the deployment contract.
+	if len(requiredServices) == 0 {
+		return fmt.Errorf("observer service inventory is empty")
+	}
+	return nil
+}
+
+func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now time.Time) (QueueSummary, error) {
+	knownScaleSets := make(map[string]struct{}, len(platform.Pools))
+	for _, pool := range platform.Pools {
+		knownScaleSets[pool.ScaleSetName] = struct{}{}
+	}
+	summary := QueueSummary{
+		Generation: snapshot.Generation,
+		Stored:     snapshot.Stored,
+		Active:     len(snapshot.Active),
+		Expired:    snapshot.Expired,
+		ByState:    make(map[string]int),
+		ByPriority: make(map[int]int),
+		ByScaleSet: make(map[string]int),
+	}
+	for scaleSet := range knownScaleSets {
+		summary.ByScaleSet[scaleSet] = 0
+	}
+	for _, intent := range snapshot.Active {
+		if _, exists := knownScaleSets[intent.ScaleSetName]; !exists {
+			return QueueSummary{}, fmt.Errorf("active intent targets unknown scale set %q", intent.ScaleSetName)
+		}
+		if intent.QueueTime.After(now.Add(time.Second)) {
+			return QueueSummary{}, fmt.Errorf("active intent %q has a future queue timestamp", intent.Key)
+		}
+		summary.ByState[string(intent.State)]++
+		summary.ByPriority[intent.Priority]++
+		summary.ByScaleSet[intent.ScaleSetName]++
+		if intent.State != queueintent.StateQueued {
+			summary.InFlight++
+		}
+		age := int64(now.Sub(intent.QueueTime).Seconds())
+		if age > summary.OldestQueueAgeSeconds {
+			summary.OldestQueueAgeSeconds = age
+		}
+	}
+	return summary, nil
+}
+
+func validateDiagnosticExport(
+	status diagnosticexport.Status,
+	spool workerdiagnostics.SpoolStats,
+	now time.Time,
+) (DiagnosticExportSync, error) {
+	syncStatus := DiagnosticExportSync{
+		State:              diagnosticExportSyncInvalid,
+		GracePeriodSeconds: int64(diagnosticExportSyncGracePeriod / time.Second),
+		LocalBundleDelta:   spool.Bundles - status.SourceBundles,
+		LocalByteDelta:     spool.Bytes - status.SourceBytes,
+	}
+	if status.SchemaVersion != 1 || !diagnosticexport.StageAccepted(status.DeploymentStage) {
+		return syncStatus, fmt.Errorf("status schema or deployment stage is invalid")
+	}
+	observedAt, err := status.ObservedTime()
+	if err != nil || observedAt.After(now.Add(5*time.Second)) || now.Sub(observedAt) > diagnosticExportStatusMaxAge {
+		return syncStatus, fmt.Errorf("status timestamp is invalid or stale")
+	}
+	if status.SourceBundles < 0 || status.ExportedBundles < 0 || status.PendingBundles < 0 ||
+		status.ExportedBundles+status.PendingBundles != status.SourceBundles ||
+		status.SourceBytes < 0 || status.ExportedBytes < 0 || status.ExportedBytes > status.SourceBytes {
+		return syncStatus, fmt.Errorf("status counters are inconsistent")
+	}
+	if status.LastErrorCode != "" || status.ConsecutiveFailures != 0 || status.PendingBundles != 0 {
+		return syncStatus, fmt.Errorf("status reports pending or failed exports")
+	}
+	lastSuccess, err := status.LastSuccessTime()
+	if err != nil || lastSuccess.IsZero() || lastSuccess.After(now.Add(5*time.Second)) {
+		return syncStatus, fmt.Errorf("last successful export timestamp is invalid")
+	}
+	if syncStatus.LocalBundleDelta == 0 && syncStatus.LocalByteDelta == 0 {
+		syncStatus.State = diagnosticExportSyncSynchronized
+		return syncStatus, nil
+	}
+	if (syncStatus.LocalBundleDelta > 0) != (syncStatus.LocalByteDelta > 0) ||
+		(syncStatus.LocalBundleDelta < 0) != (syncStatus.LocalByteDelta < 0) ||
+		syncStatus.LocalBundleDelta == 0 || syncStatus.LocalByteDelta == 0 {
+		return syncStatus, fmt.Errorf("status and local spool diverge incoherently")
+	}
+	statusAge := now.Sub(observedAt)
+	if statusAge < 0 {
+		statusAge = 0
+	}
+	if statusAge >= diagnosticExportSyncGracePeriod {
+		return syncStatus, fmt.Errorf("status and local spool exceeded the %s convergence grace", diagnosticExportSyncGracePeriod)
+	}
+	syncStatus.State = diagnosticExportSyncGrace
+	remaining := diagnosticExportSyncGracePeriod - statusAge
+	syncStatus.GraceRemainingSeconds = int64((remaining + time.Second - 1) / time.Second)
+	return syncStatus, nil
+}
+
+func (c Collector) now() time.Time {
+	if c.Now != nil {
+		return c.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func summarizeJournal(journal providerjournal.Journal) JournalSummary {
+	byState := map[string]int{
+		string(providerjournal.StateAdmitted):    0,
+		string(providerjournal.StateCreated):     0,
+		string(providerjournal.StateDeleting):    0,
+		string(providerjournal.StateWarmReady):   0,
+		string(providerjournal.StateWarmClaimed): 0,
+	}
+	preemptions := 0
+	for _, lease := range journal.Leases {
+		byState[string(lease.State)]++
+		if lease.PreemptedBy != "" {
+			preemptions++
+		}
+	}
+	return JournalSummary{
+		SchemaVersion:        journal.SchemaVersion,
+		Generation:           journal.Generation,
+		UpdatedAt:            journal.UpdatedAt,
+		Leases:               len(journal.Leases),
+		Claims:               len(journal.Claims),
+		WarmPreemptions:      preemptions,
+		WarmPreemptionsTotal: journal.WarmPreemptionsTotal,
+		ByState:              byState,
+	}
+}
+
+func validateInstanceNames(names []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name || strings.ContainsAny(name, "\r\n\x00") {
+			return nil, fmt.Errorf("unsafe or empty visible instance name")
+		}
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("duplicate visible instance name %q", name)
+		}
+		result[name] = struct{}{}
+	}
+	return result, nil
+}
+
+func safeError(source string, err error) string {
+	message := strings.TrimSpace(string(workerdiagnostics.Redact([]byte(err.Error()))))
+	message = strings.Map(func(character rune) rune {
+		if character == '\r' || character == '\n' || character == '\x00' {
+			return ' '
+		}
+		return character
+	}, message)
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	return source + ": " + message
+}

@@ -1,0 +1,184 @@
+# Collector configuration for a fleet host. Every host-specific value is read
+# from /etc/gha-fleet/otelcol-fleet.env, so one file serves every host and
+# there is no second, written-in form to keep in step with it.
+# OpenTelemetry is the only collection standard for this fleet, and the
+# dedicated OpenObserve instance is the only place its telemetry is stored.
+# Nothing here writes to a store directly; a new signal gets a pipeline or it
+# is not stored. See ADR 0033.
+
+receivers:
+  # The observer already computes the fleet's state every scrape. Reading it
+  # here is the whole reason those 53 metrics stop being discarded. Loopback
+  # only: the observer's administrative surface never leaves the host.
+  prometheus/fleet:
+    config:
+      scrape_configs:
+        - job_name: gha-fleet-observer
+          scrape_interval: 15s
+          static_configs:
+            - targets:
+                - ${env:NDDEV_OBSERVER_TARGET}
+
+  # Every cluster member's own vitals. The observer reports the fleet's
+  # control-plane state and runs only where GARM does; these are the numbers
+  # that decide whether a member can take another worker, and they have to
+  # exist for all four hosts or the placement scriptlet's decisions cannot be
+  # explained after the fact.
+  hostmetrics/member:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      load:
+      memory:
+      filesystem:
+        include_mount_points:
+          mount_points: ["/"]
+          match_type: strict
+      disk:
+      network:
+
+  # Fleet control-plane logs only. The unit allowlist is exhaustive on purpose:
+  # a fleet host runs nothing but the fleet
+  # application stacks whose logs belong to their owners, not to this fleet.
+  journald/fleet:
+    units:
+      - garm.service
+      - gha-fleet-gateway.service
+      - gha-fleet-observer.service
+      - gha-warm-pool.service
+      - gha-diagnostic-exporter.service
+      - gha-rustfs.service
+      - gha-zot.service
+      - otelcol-fleet.service
+    priority: info
+
+processors:
+  # First in every pipeline. Under memory pressure the collector must refuse
+  # new data rather than be OOM-killed on a host that is already oversubscribed
+  # by the legacy runners it coexists with.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 192
+    spike_limit_mib: 48
+
+  resource/fleet:
+    attributes:
+      - key: service.namespace
+        value: nddev-github-actions
+        action: insert
+      - key: host.name
+        value: ${env:NDDEV_HOST_NAME}
+        action: insert
+      - key: deployment.environment
+        value: canary
+        action: insert
+
+  # A one-job worker handles GitHub JIT credentials, RustFS cache credentials
+  # and a private CA. None of that may reach a telemetry stream. The diagnostic
+  # exporter already scans its bundles for token shapes; this is the equivalent
+  # boundary for logs, and it drops the record rather than storing a redacted
+  # one, because a partially matched secret is still a secret.
+  filter/secrets:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'IsMatch(body, "gh[pousr]_[A-Za-z0-9_]{20,}")'
+        - 'IsMatch(body, "github_pat_[A-Za-z0-9_]{20,}")'
+        - 'IsMatch(body, "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}")'
+        - 'IsMatch(body, "-----BEGIN [A-Z ]*PRIVATE KEY-----")'
+
+  # The journald receiver hands the whole entry over as a map, which OpenObserve
+  # flattens into body__cursor, body__cap_effective and forty other fields while
+  # the message itself becomes just one more of them. Promote the fields a
+  # human or a dashboard actually queries on, then reduce the body to the
+  # message. Without this the data is stored but not usable.
+
+  # The journald receiver hands the whole entry over as a map whose keys are
+  # journal field names -- MESSAGE, _SYSTEMD_UNIT, _PID -- in upper case.
+  # These statements read them in that case. They previously read lower-case
+  # keys, matched nothing, and every statement here was a silent no-op: the
+  # `where` guard was simply never true, and `error_mode: ignore` meant nothing
+  # said so. The stored data looked consistent with the lower-case spelling
+  # because OpenObserve lower-cases field names when it flattens, so the store
+  # showed body__systemd_unit for a key the collector saw as _SYSTEMD_UNIT.
+  #
+  # The cost was 64 stored fields per record, no promoted attribute to query
+  # on, and the message buried among forty journal internals.
+  #
+  # Paths carry the `log.` context prefix, which is the form this collector
+  # asks for; without it every statement is rewritten at load with a notice.
+  transform/journal:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(log.attributes["systemd.unit"], log.body["_SYSTEMD_UNIT"]) where log.body["_SYSTEMD_UNIT"] != nil
+          - set(log.attributes["systemd.priority"], log.body["PRIORITY"]) where log.body["PRIORITY"] != nil
+          - set(log.attributes["process.pid"], log.body["_PID"]) where log.body["_PID"] != nil
+          - set(log.body, log.body["MESSAGE"]) where log.body["MESSAGE"] != nil
+          # Every fleet control-plane unit logs structured JSON. Promoting its
+          # fields is what makes msg, level, job_id, runner_name, worker and
+          # entity queryable instead of being one opaque string. The body keeps
+          # the original line, so filter/secrets below still sees everything.
+          - merge_maps(log.attributes, ParseJSON(log.body), "upsert") where IsMatch(log.body, "^\\{.*\\}$")
+          - set(log.severity_text, log.attributes["level"]) where log.attributes["level"] != nil
+  attributes/redact:
+    actions:
+      - key: authorization
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+
+  batch:
+    timeout: 10s
+    send_batch_size: 512
+
+exporters:
+  # HTTP rather than gRPC. `otlp_http` is the current component name; the
+  # `otlphttp` alias is deprecated: OpenObserve's ingestion documentation is written
+  # against the HTTP path, and that is the protocol the platform's own
+  # collector proved end to end.
+  otlp_http/fleet_logs:
+    endpoint: ${env:NDDEV_OO_ENDPOINT}/api/${env:NDDEV_OO_ORG}
+    headers:
+      Authorization: ${env:NDDEV_OO_AUTHORIZATION}
+      stream-name: fleet_logs
+    retry_on_failure: {enabled: true, max_elapsed_time: 300s}
+    sending_queue:
+      enabled: true
+      storage: file_storage/fleet
+
+  otlp_http/fleet_metrics:
+    endpoint: ${env:NDDEV_OO_ENDPOINT}/api/${env:NDDEV_OO_ORG}
+    headers:
+      Authorization: ${env:NDDEV_OO_AUTHORIZATION}
+      stream-name: fleet_metrics
+    retry_on_failure: {enabled: true, max_elapsed_time: 300s}
+    sending_queue:
+      enabled: true
+      storage: file_storage/fleet
+
+extensions:
+  # The queue on disk is what turns a store outage or a network partition into
+  # a delay instead of a hole in the record.
+  file_storage/fleet:
+    directory: /var/lib/otelcol-fleet/queue
+    timeout: 10s
+
+  health_check:
+    endpoint: 127.0.0.1:13134
+
+service:
+  extensions: [file_storage/fleet, health_check]
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    metrics/fleet:
+      receivers: [prometheus/fleet, hostmetrics/member]
+      processors: [memory_limiter, resource/fleet, batch]
+      exporters: [otlp_http/fleet_metrics]
+    logs/fleet:
+      receivers: [journald/fleet]
+      processors: [memory_limiter, transform/journal, filter/secrets, attributes/redact, resource/fleet, batch]
+      exporters: [otlp_http/fleet_logs]

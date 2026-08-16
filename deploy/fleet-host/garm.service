@@ -1,0 +1,55 @@
+[Unit]
+Description=GARM GitHub Actions runner manager
+Documentation=https://github.com/cloudbase/garm
+Wants=network-online.target gha-fleet-gateway.service
+After=network-online.target incus.service
+Requires=incus.service
+
+[Service]
+Type=simple
+User=garm
+Group=garm
+SupplementaryGroups=kvm
+WorkingDirectory=/var/lib/garm
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=GARM_NDDEV_QUEUE_ADMISSION_CONFIG=/etc/garm/queue-admission.json
+Environment=GARM_NDDEV_QUEUE_INTENT_FILE=/var/lib/gha-fleet/queue-intents.json
+Environment=GARM_NDDEV_QUEUE_INTENT_LOCK_FILE=/var/lib/gha-fleet/queue-intents.lock
+ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillMode=mixed
+UMask=0077
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=false
+DevicePolicy=closed
+DeviceAllow=/dev/kvm rw
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/garm /etc/gha-fleet /usr/local/libexec/gha-fleet
+ReadWritePaths=/var/lib/garm /var/lib/gha-fleet
+LimitNOFILE=65536
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

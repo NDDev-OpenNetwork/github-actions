@@ -1,0 +1,31 @@
+/bin/
+/dist/
+# `make build-<command>` writes into dist/, but `go build ./cmd/<name>` writes
+# the binary into the working directory under the package's own name, and one
+# of those was committed. Every command is named here rather than the one that
+# was hit, because the next one costs a 23 MiB blob in the history again.
+/garm-provider-incus-nddev
+/gha-benchmark
+/gha-diagnostic-exporter
+/gha-fleet
+/gha-fleet-gateway
+/gha-fleet-observer
+/coverage.out
+/*.prof
+*.test
+.DS_Store
+.env
+.env.*
+!*.example
+/benchmark/rust/target/
+/benchmark/python/.venv/
+/benchmark/python/dist/
+/benchmark/python/.pytest_cache/
+/benchmark/python/**/__pycache__/
+/benchmark/bun-next/.next/
+/benchmark/bun-next/node_modules/
+/.serena/.serena_sync_state.json
+/.serena/.auto_sync_head
+/.serena/.flow_blocker_ack.json
+/.serena/.flow_post_task_state.json
+/.serena/.flow_sync_marker

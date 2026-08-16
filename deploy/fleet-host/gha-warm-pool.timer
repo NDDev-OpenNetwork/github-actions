@@ -1,0 +1,13 @@
+[Unit]
+Description=Maintain unregistered Incus warm-runner capacity
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=30s
+RandomizedDelaySec=5s
+AccuracySec=1s
+Persistent=true
+Unit=gha-warm-pool.service
+
+[Install]
+WantedBy=timers.target

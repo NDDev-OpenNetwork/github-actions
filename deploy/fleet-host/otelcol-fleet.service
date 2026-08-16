@@ -1,0 +1,49 @@
+[Unit]
+Description=Collect NDDev GitHub Actions fleet telemetry into OpenObserve
+Documentation=https://github.com/example-user/github-actions/blob/main/docs/adr/0033-telemetry-plane.md
+After=network-online.target gha-fleet-observer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Its own account. The collector reads the observer's loopback metrics and the
+# fleet units' journal; it needs no Incus, no KVM and no fleet state, so it
+# gets none of them.
+User=otelcol
+Group=otelcol
+# The journald receiver reads the system journal, which requires membership of
+# systemd-journal and nothing else.
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/gha-fleet/otelcol-fleet.env
+ExecStart=/usr/local/libexec/gha-fleet/otelcol-contrib --config /etc/gha-fleet/otelcol-fleet.yaml
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+# Only the disk-backed sending queue is writable. It lives outside
+# /var/lib/gha-fleet on purpose: that directory is 0700 garm:garm and holds
+# the provider journal and diagnostics, so the collector must not be able to
+# traverse it and the fleet must not have to open it up.
+ReadWritePaths=/var/lib/otelcol-fleet
+# Bounded so a telemetry backlog can never compete with the jobs it measures
+# on a host the legacy runners already oversubscribe.
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target

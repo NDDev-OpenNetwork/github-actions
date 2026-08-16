@@ -1,0 +1,66 @@
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/gha-cache/zot/data",
+    "gc": true,
+    "gcDelay": "2h",
+    "gcInterval": "1h",
+    "gcTimeWindow": "01:00-08:00"
+  },
+  "http": {
+    "address": "192.0.2.1",
+    "port": "5001",
+    "realm": "nddev-cache",
+    "tls": {
+      "cert": "/run/credentials/gha-zot.service/zot-cert.pem",
+      "key": "/run/credentials/gha-zot.service/zot-key.pem"
+    },
+    "auth": {
+      "htpasswd": {
+        "path": "/run/credentials/gha-zot.service/zot.htpasswd"
+      },
+      "failDelay": 2
+    },
+    "accessControl": {
+      "repositories": {
+        "cache/example-user/github-actions/trusted/**": {
+          "policies": [
+            {
+              "users": ["gha-zot-example-user-github-actions-trusted"],
+              "actions": ["create", "read", "update", "delete"]
+            }
+          ],
+          "defaultPolicy": []
+        },
+        "cache/example-user/github-actions/untrusted/**": {
+          "policies": [
+            {
+              "users": ["gha-zot-example-user-github-actions-untrusted"],
+              "actions": ["create", "read", "update", "delete"]
+            }
+          ],
+          "defaultPolicy": []
+        },
+        "cache/example-user/github-actions/promoted/**": {
+          "policies": [
+            {
+              "users": ["gha-zot-example-user-github-actions-promoter"],
+              "actions": ["create", "read", "update", "delete"]
+            },
+            {
+              "users": ["gha-zot-example-user-github-actions-release"],
+              "actions": ["read"]
+            }
+          ],
+          "defaultPolicy": []
+        },
+        "**": {
+          "defaultPolicy": []
+        }
+      }
+    }
+  },
+  "log": {
+    "level": "error"
+  }
+}

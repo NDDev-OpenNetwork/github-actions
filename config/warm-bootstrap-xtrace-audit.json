@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T04:17:02.036345922Z",
+  "host": "server-example-legacy",
+  "repository_commit": "0927704d74c40dd884ad60e19242dbfd46ae037f",
+  "provider": {
+    "version": "v0.1.5-nddev.5",
+    "commit": "0927704d74c40dd884ad60e19242dbfd46ae037f"
+  },
+  "image_fingerprint": "d36fc3f425133fd2a5335e48fd8d2e4f8598d6ff54675b84c5523d842b93578c",
+  "workflow": {
+    "run_id": 31293871395,
+    "job_id": 93195648386,
+    "head_sha": "0927704d74c40dd884ad60e19242dbfd46ae037f",
+    "created_at": "2026-08-09T04:06:46Z",
+    "started_at": "2026-08-09T04:12:11Z",
+    "completed_at": "2026-08-09T04:12:28Z",
+    "conclusion": "success",
+    "runner_name": "nddev-tdulvsmtfgqb",
+    "runner_group": "Default",
+    "label": "nddev-linux-standard"
+  },
+  "executed_worker": {
+    "instance_name": "warm-standard-bdca2473b944",
+    "warm_agent_started_at": "2026-08-09T04:11:55.597Z",
+    "warm_agent_completed_at": "2026-08-09T04:12:02.761Z",
+    "warm_agent_duration_seconds": 7.164,
+    "returned_to_warm_pool": false,
+    "destroyed_after_job": true
+  },
+  "secret_boundary": {
+    "installer_shell": "/bin/bash",
+    "inherited_xtrace_fd": 19,
+    "inherited_xtrace_sink": "/dev/null",
+    "live_guest_journal_jwt_shape_matches": 0,
+    "local_diagnostic_bundle_jwt_shape_matches": 0,
+    "local_diagnostic_bundles_scanned": 44,
+    "executable_regression_test": "TestRenderWarmAssignmentSuppressesInheritedXtrace",
+    "scope": "JWT-shaped callback credentials; no raw credential or guest journal content is retained in this artifact"
+  },
+  "diagnostics": {
+    "archive": "runner-diagnostics-v1-warm-standard-bdca2473b944-20260809T041231.497451019Z-65624b20ff80.tar.gz",
+    "sha256": "3935878898b29120805de3e285f1c4ea51b825d32484b04dd36cbb3c445fdce8",
+    "source_bundles": 44,
+    "exported_bundles": 44,
+    "pending_bundles": 0,
+    "source_bytes": 1523288,
+    "exported_bytes": 1523288,
+    "rustfs_sync_state": "synchronized"
+  },
+  "postconditions": {
+    "observer_healthy": true,
+    "observer_fresh": true,
+    "journal_schema_version": 2,
+    "journal_warm_ready": 1,
+    "journal_claims": 0,
+    "incus_visible_instances": 1,
+    "incus_orphans": 0,
+    "incus_missing_instances": 0,
+    "root_free_percent": 40,
+    "legacy_listeners": 12,
+    "services_active": [
+      "garm",
+      "gha-fleet-gateway",
+      "gha-fleet-observer",
+      "gha-warm-pool.timer",
+      "gha-diagnostic-exporter.timer",
+      "gha-rustfs",
+      "gha-zot"
+    ]
+  },
+  "latency_sample": {
+    "eligible_for_nominal_latency_statistics": false,
+    "reason": "the job waited behind one to three retained legacy Runner.Worker processes while host load was approximately 14 to 17; this run proves the secret boundary, not warm-path latency"
+  },
+  "verdict": {
+    "inherited_xtrace_suppressed": true,
+    "callback_credential_shape_absent_from_observed_outputs": true,
+    "worker_destroyed": true,
+    "diagnostics_exported": true,
+    "production_reliability_gate_complete": false,
+    "remaining_gate": "fault injection, nominal-load latency sampling and at least 500 jobs with an infrastructure failure rate below 0.5 percent and zero orphan resources"
+  }
+}

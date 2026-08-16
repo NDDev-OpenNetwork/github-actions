@@ -1,0 +1,15 @@
+# The labels a workflow in this repository may name.
+#
+# Every published runner class belongs here, and
+# TestActionlintKnowsEveryPublishedClass holds it to
+# garmbootstrap.PublishedScaleSets() -- the class list drifted once already:
+# nddev-linux-fast was published and registered while actionlint still refused
+# it, so a workflow could not name the class the fleet was serving.
+self-hosted-runner:
+  labels:
+    - nddev-linux-standard
+    - nddev-linux-integration
+    - nddev-linux-fast
+    # Not a published class: the canary dispatches into whichever class it is
+    # testing and carries its own label for the run.
+    - nddev-canary

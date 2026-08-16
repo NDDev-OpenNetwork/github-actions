@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-09T22:06:29.453681516Z",
+  "host": "server-example-legacy",
+  "repository_merge_commit": "875b0e77a0a36a52cdd6c9022092e92b11753e4c",
+  "units": {
+    "garm_sha256": "32b9a4e286a0baa83674e9af3b34d9f04615904eac31594a8c8f64d53f3318d5",
+    "observer_sha256": "c5b0bc84d8d76c9b10c9cfa098f04dec764da3adc7a1851351398570c4199786",
+    "systemd_verify_passed": true,
+    "garm_wants_gateway": true,
+    "observer_wants_warm_timer": true
+  },
+  "transactional_rollout": {
+    "unit_install_attempts": 4,
+    "automatic_rollbacks": 3,
+    "attempt_1_operator_error": "probe used the warm-pool-only flavor flag instead of the probe profile flag",
+    "attempt_2_operator_error": "expected inactive state was read with systemctl is-active under errexit, where inactive correctly returns status 3",
+    "attempt_3_operator_error": "service active state was checked before the gateway listen socket reached readiness",
+    "attempt_4_finding": "a warm one-shot fired between timer stop and GARM stop and was terminated by the dependency transaction",
+    "rollback_bundle_sha256": [
+      "8a33ba72bf7dd030d241e992a456c93a07042f619c3a7e32b99a81dea02749f7",
+      "bf5f096b17812af99e592c7ac1662c66f7300b78d259385b539ca03080145ef4",
+      "b3ab796e2e19d38e33790ba9b97100c5d8b1149ed12636410da5174add4c10d5",
+      "477f8b6e3229e461d9b5c7018fd780867b2ceb1ed8b9308ae63d2021b8c250ff"
+    ],
+    "rollback_restored_exact_unit_hashes": true,
+    "worker_vm_recreated": false,
+    "garm_database_restore_required": false
+  },
+  "accepted_restart_proof": {
+    "ordered_stop": [
+      "gha-fleet-observer.service",
+      "gha-warm-pool.timer",
+      "gha-warm-pool.service",
+      "garm.service"
+    ],
+    "garm_started_at": "2026-08-09T22:05:12Z",
+    "gateway_started_at": "2026-08-09T22:05:12Z",
+    "observer_started_at": "2026-08-09T22:05:14Z",
+    "warm_timer_started_at": "2026-08-09T22:05:14Z",
+    "single_garm_start_restored_gateway": true,
+    "single_observer_start_restored_timer": true,
+    "garm_listener_ready": true,
+    "gateway_listener_ready": true,
+    "provider_probe_compatible": true,
+    "provider_cache_delivery_ready": true,
+    "post_restart_warm_reconcile_completed_at": [
+      "2026-08-09T22:05:44Z",
+      "2026-08-09T22:06:16Z"
+    ],
+    "garm_systemd_restarts": 0,
+    "gateway_systemd_restarts": 0,
+    "observer_systemd_restarts": 0
+  },
+  "postconditions": {
+    "observer_healthy": true,
+    "observer_fresh": true,
+    "provider_leases": 1,
+    "provider_claims": 0,
+    "queue_active": 0,
+    "queue_in_flight": 0,
+    "incus_visible_instances": 1,
+    "incus_orphan_instances": 0,
+    "incus_missing_instances": 0,
+    "diagnostic_source_bundles": 114,
+    "diagnostic_exported_bundles": 114,
+    "diagnostic_pending_bundles": 0,
+    "failed_systemd_units": 0,
+    "root_free_percent": 34,
+    "legacy_listeners": 12,
+    "example_platform_containers_healthy": true,
+    "captcha_containers_healthy": true
+  },
+  "verdict": {
+    "dependency_rollout_accepted": true,
+    "ordered_restart_recovery_accepted": true,
+    "old_runner_fleet_preserved": true,
+    "retained_applications_preserved": true
+  }
+}

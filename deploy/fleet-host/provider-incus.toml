@@ -1,0 +1,45 @@
+url = "https://127.0.0.1:8443"
+client_certificate = "/etc/garm/incus-client.crt"
+client_key = "/etc/garm/incus-client.key"
+tls_server_certificate = "/etc/garm/incus-server.crt"
+
+project_name = "gha-fleet"
+include_default_profile = false
+secure_boot = true
+instance_type = "virtual-machine"
+
+platform_config_file = "/etc/gha-fleet/platform.yaml"
+journal_file = "/var/lib/gha-fleet/provider-journal.json"
+journal_lock_file = "/var/lib/gha-fleet/provider-journal.lock"
+queue_intent_file = "/var/lib/gha-fleet/queue-intents.json"
+admission_lease_seconds = 300
+
+diagnostics_directory = "/var/lib/gha-fleet/diagnostics"
+diagnostics_retention_hours = 168
+diagnostics_max_bundle_bytes = 16777216
+diagnostics_max_total_bytes = 1073741824
+
+[worker_images.nddev-linux-standard]
+alias = "nddev-ubuntu-24.04-amd64-current"
+fingerprint = "366866d4ec6070c38351c73e6ac7cd79b2e7abaf6c3190e5388756d4e4961135"
+variant = "standard"
+runner_uid = 1001
+runner_gid = 1002
+
+[worker_images.nddev-linux-integration]
+alias = "nddev-ubuntu-24.04-amd64-docker-current"
+fingerprint = "fa25e3753bbdcdc946c3dd9a8f546b86be823fee6e89e40fe6c495ab4ae895f2"
+variant = "integration"
+runner_uid = 1001
+runner_gid = 1002
+
+# The fast class shares the standard image, alias and fingerprint: what
+# separates it is what it is denied -- no job credential and no Docker -- not
+# what is baked in. Pinning the same digest under a second flavor is what the
+# alias check in Incus.Validate permits and this is the case it permits it for.
+[worker_images.nddev-linux-fast]
+alias = "nddev-ubuntu-24.04-amd64-current"
+fingerprint = "366866d4ec6070c38351c73e6ac7cd79b2e7abaf6c3190e5388756d4e4961135"
+variant = "standard"
+runner_uid = 1001
+runner_gid = 1002

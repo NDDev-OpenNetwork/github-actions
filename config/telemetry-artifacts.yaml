@@ -1,0 +1,75 @@
+schema_version: 1
+
+# The OpenTelemetry Collector runs beside the fleet control plane on the CI
+# host, which has no container runtime in that plane, so it is pinned as a
+# release tarball exactly like the official runner and sccache. Upstream
+# publishes a checksum, a CycloneDX SBOM and a Sigstore bundle per asset; all
+# three are pinned so a build cannot be accepted on its archive digest alone.
+collector:
+  implementation: opentelemetry-collector-contrib
+  repository: open-telemetry/opentelemetry-collector-releases
+  version: v0.158.0
+  architecture: linux_amd64
+  binary_path: otelcol-contrib
+  archive:
+    name: otelcol-contrib_0.158.0_linux_amd64.tar.gz
+    url: https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.158.0/otelcol-contrib_0.158.0_linux_amd64.tar.gz
+    sha256: 7623348c295ec7b00d86c30040a30730f7e3537e813b34c880c1d5abb9bbe8d5
+  checksum:
+    name: otelcol-contrib_0.158.0_linux_amd64.tar.gz.sha256
+    url: https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.158.0/otelcol-contrib_0.158.0_linux_amd64.tar.gz.sha256
+    sha256: d8a626fcc369bb5289d3d04f72adc16ed111856718fd8ef887d063bcae20d032
+  sbom:
+    name: otelcol-contrib_0.158.0_linux_amd64.tar.gz.sbom.json
+    url: https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.158.0/otelcol-contrib_0.158.0_linux_amd64.tar.gz.sbom.json
+    sha256: 9a7eaa4f31525f0c5ab1322a8c7bb1291f11960fe5ed3ac3fe9c38c907bcc83f
+  sigstore_bundle:
+    name: otelcol-contrib_0.158.0_linux_amd64.tar.gz.sigstore.json
+    url: https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.158.0/otelcol-contrib_0.158.0_linux_amd64.tar.gz.sigstore.json
+    sha256: ce1eaf8aeac60009638254d5e121a359eb5a1a90af098c714e95ab0b1313adec
+  deployment_stage: canary
+
+# OpenObserve is the single telemetry store, on the fleet's own services host.
+# Pinned as a release tarball because every other fleet component is a
+# digest-pinned binary under systemd; adding a container runtime to a host to
+# run one service would widen its surface for nothing. It runs off the runner
+# hosts so a lost runner host does not take its own evidence with it.
+store:
+  implementation: openobserve
+  version: v0.92.0
+  archive:
+    name: openobserve-v0.92.0-linux-amd64.tar.gz
+    url: https://downloads.openobserve.ai/releases/openobserve/v0.92.0/openobserve-v0.92.0-linux-amd64.tar.gz
+    sha256: b8f95d3cea4ebca650b24df52a8232bf1da3d5293005c7942148a8d58f3c2879
+  binary_path: openobserve
+  host: server-gha-services
+  # The instance itself is the isolation boundary, so its single organization
+  # stays `default`. OpenObserve assigns a generated opaque identifier to any
+  # additional organization and that identifier, not the name, is what appears
+  # in every ingest URL — pinning one would be brittle and meaningless here.
+  organization: default
+  object_store: rustfs
+  bucket: nddev-ci-telemetry
+  streams:
+    - fleet_logs
+    - fleet_metrics
+  retention_days: 90
+  # fleet_logs is the operational stream: nine million records and the bulk of
+  # the volume, useful while someone is still debugging the week it came from.
+  # The metric streams keep the store default, because a quarter of history is
+  # what makes a capacity decision checkable -- the class sizing on 2026-08-16
+  # was derived from seven days of gha_fleet_host_* and would have been better
+  # with more.
+  stream_retention_days:
+    fleet_logs: 14
+  deployment_stage: canary
+
+# Both hosts sit in one private cloud network, so telemetry never traverses a
+# public address. The collector buffers to disk, which is what turns a store
+# outage into a delay instead of a hole in the record.
+transport:
+  protocol: otlp-http
+  source_address: 172.16.0.5
+  target_address: 172.16.0.7
+  target_port: 5090
+  queue_directory: /var/lib/otelcol-fleet/queue

@@ -1,0 +1,16 @@
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/zot-audit/data",
+    "gc": true,
+    "gcDelay": "5m",
+    "gcInterval": "5m"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "15001"
+  },
+  "log": {
+    "level": "warn"
+  }
+}
