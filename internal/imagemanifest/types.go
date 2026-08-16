@@ -73,7 +73,12 @@ type Toolchain struct {
 // representative benchmark installers short-circuit when the pinned version is
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
 // so a complete set turns per-job toolchain installation into a no-op.
-func BakedToolchains() []string { return []string{"bun", "go", "rust", "uv"} }
+// node is baked rather than installed per job because CodeQL's TypeScript
+// extractor spawns `node` by name and checks its version before parsing. There
+// is no build-mode that avoids it -- the requirement is in the parser, not in a
+// build step -- and Bun does not satisfy it, so every TypeScript consumer on
+// every class needed it before it could leave the legacy runners.
+func BakedToolchains() []string { return []string{"bun", "go", "node", "rust", "uv"} }
 
 type Guest struct {
 	BuilderDiskGiB      int               `json:"builder_disk_gib" yaml:"builder_disk_gib"`

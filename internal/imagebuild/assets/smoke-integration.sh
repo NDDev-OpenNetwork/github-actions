@@ -63,7 +63,7 @@ runner_tool_cache="$(jq -er .runner_tool_cache /etc/nddev/image-build.json)"
 [[ "${runner_tool_cache}" == /home/runner/actions-runner/_work/_tool ]]
 smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
-[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,go,rust,uv ]]
+[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,go,node,rust,uv ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -78,6 +78,16 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       test -x "${go_root}/bin/go"
       [[ "$(stat --format='%U' -- "${go_root}/bin/go")" == runner ]]
       [[ "$("${go_root}/bin/go" version)" == "go version go${expected_version} linux/amd64" ]]
+      ;;
+    node)
+      # CodeQL spawns `node` by name, so the smoke proves the PATH entry, not
+      # only the tool-cache one that setup-node would use.
+      [[ "$(node --version)" == "v${expected_version}" ]]
+      [[ "$(command -v node)" == /usr/local/bin/node ]]
+      [[ -n "$(npm --version)" ]]
+      node_root="${runner_tool_cache}/node/${expected_version}/x64"
+      test -f "${node_root}.complete"
+      test -x "${node_root}/bin/node"
       ;;
     rust)
       [[ "$(rustc --version)" == "rustc ${expected_version} "* ]]

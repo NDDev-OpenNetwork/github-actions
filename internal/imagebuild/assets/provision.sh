@@ -177,7 +177,7 @@ install -d -o runner -g runner -m 0755 \
 toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
-if [[ "$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" != bun,go,rust,uv ]]; then
+if [[ "$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" != bun,go,node,rust,uv ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -208,6 +208,38 @@ for toolchain_name in "${toolchain_names[@]}"; do
       install -o runner -g runner -m 0644 /dev/null \
         "${runner_tool_cache}/go/${toolchain_version}/x64.complete"
       [[ "$("${runner_tool_cache}/go/${toolchain_version}/x64/bin/go" version)" == "go version go${toolchain_version} linux/amd64" ]]
+      ;;
+    node)
+      tar --extract --xz --file "${toolchain_archive}" \
+        --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
+      # Two placements, because two different consumers need it.
+      #
+      # The tool cache is what actions/setup-node resolves against, so a job
+      # that asks for this version gets it without reaching the network.
+      #
+      # `node` on PATH by name is what CodeQL's TypeScript extractor needs: it
+      # spawns the binary and checks its version before parsing, and no
+      # build-mode avoids that because the requirement is in the parser rather
+      # than in a build step. Bun does not satisfy it. The payload therefore
+      # lives root-owned under /usr/local and the tool-cache entry points at
+      # it, so a job that clears its own tool cache cannot take `node` off the
+      # PATH of the job after it.
+      install -d -o root -g root -m 0755 /usr/local/lib/nodejs
+      mv -- "${toolchain_scratch}/node-v${toolchain_version}-linux-x64" \
+        "/usr/local/lib/nodejs/${toolchain_version}"
+      chown -R root:root "/usr/local/lib/nodejs/${toolchain_version}"
+      for node_binary in node npm npx; do
+        ln -sfn "/usr/local/lib/nodejs/${toolchain_version}/bin/${node_binary}" \
+          "/usr/local/bin/${node_binary}"
+      done
+      install -d -o runner -g runner -m 0755 \
+        "${runner_tool_cache}/node" "${runner_tool_cache}/node/${toolchain_version}"
+      ln -sfn "/usr/local/lib/nodejs/${toolchain_version}" \
+        "${runner_tool_cache}/node/${toolchain_version}/x64"
+      install -o runner -g runner -m 0644 /dev/null \
+        "${runner_tool_cache}/node/${toolchain_version}/x64.complete"
+      [[ "$(node --version)" == "v${toolchain_version}" ]]
+      [[ -n "$(npm --version)" ]]
       ;;
     rust)
       tar --extract --xz --file "${toolchain_archive}" \

@@ -43,6 +43,15 @@ var toolchainAssets = map[string]struct {
 		Archive: func(version string) string { return "go" + version + ".linux-amd64.tar.gz" },
 		Path:    func(version string) string { return "/dl/go" + version + ".linux-amd64.tar.gz" },
 	},
+	"node": {
+		Host: "nodejs.org",
+		Archive: func(version string) string {
+			return "node-v" + version + "-linux-x64.tar.xz"
+		},
+		Path: func(version string) string {
+			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
+		},
+	},
 	"rust": {
 		Host: "static.rust-lang.org",
 		Archive: func(version string) string {
