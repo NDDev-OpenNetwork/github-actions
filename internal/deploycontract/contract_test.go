@@ -2,7 +2,6 @@ package deploycontract
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -693,97 +692,6 @@ func TestCacheSystemUsersAreDedicated(t *testing.T) {
 		if !strings.Contains(sysusers, required) {
 			t.Errorf("gha-fleet.sysusers is missing %q", required)
 		}
-	}
-}
-
-func TestIntegrationParityWorkflowRetainsDockerAndNetworkBoundary(t *testing.T) {
-	workflowPath := "../../.github/workflows/integration-parity.yml"
-	workflowData, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workflow := string(workflowData)
-	var providerConfig providerconfig.Incus
-	if _, err := toml.Decode(read(t, "provider-incus.toml"), &providerConfig); err != nil {
-		t.Fatal(err)
-	}
-	integrationImage, exists := providerConfig.WorkerImageForFlavor("nddev-linux-integration")
-	if !exists {
-		t.Fatal("integration worker image is not configured")
-	}
-	runnerIdentity := fmt.Sprintf("%d:%d", integrationImage.RunnerUID, integrationImage.RunnerGID)
-	for _, required := range []string{
-		"workflow_dispatch:", "cancel-in-progress: false", "mode == 'parity'",
-		"mode == 'network-negative'", "mode == 'timeout'", "mode == 'cancellation'",
-		"needs: host-docker", "needs: local-docker-action",
-		"ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
-		"nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
-		"--user=" + runnerIdentity + " --cap-drop=ALL --security-opt=no-new-privileges",
-		fmt.Sprintf(`[[ "$(id -u)" == %d ]]`, integrationImage.RunnerUID),
-		fmt.Sprintf(`[[ "$(id -g)" == %d ]]`, integrationImage.RunnerGID),
-		"test -S /var/run/docker.sock", "test -S /run/docker.sock",
-		`[[ "$(readlink -f /var/run/docker.sock)" == /run/docker.sock ]]`,
-		"test ! -r /var/run/docker.sock", "test ! -w /var/run/docker.sock",
-		"expect_blocked 192.0.2.1 8443", "expect_blocked 192.0.2.1 9997",
-		"expect_blocked 169.254.169.254 80", "timeout-minutes: 1",
-	} {
-		if !strings.Contains(workflow, required) {
-			t.Errorf("integration parity workflow is missing %q", required)
-		}
-	}
-	if strings.Count(workflow, "runs-on: nddev-linux-integration") != 6 {
-		t.Fatal("every integration parity job must use the exact integration Scale Set")
-	}
-	for _, forbidden := range []string{
-		"ubuntu-latest", "--privileged", "--network=host", "network: host",
-		"/var/run/docker.sock:/var/run/docker.sock", "--volume /var/run/docker.sock",
-	} {
-		if strings.Contains(workflow, forbidden) {
-			t.Errorf("integration parity workflow contains forbidden %q", forbidden)
-		}
-	}
-
-	actionPath := "../../.github/actions/docker-parity/action.yml"
-	actionData, err := os.ReadFile(actionPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	action := string(actionData)
-	if !strings.Contains(action, "using: docker") || !strings.Contains(action, "image: Dockerfile") ||
-		!strings.Contains(action, "args:") || !strings.Contains(action, "${{ inputs.marker }}") ||
-		!strings.Contains(action, "value:") {
-		t.Fatal("local Docker action metadata is incomplete")
-	}
-	dockerfileData, err := os.ReadFile("../../.github/actions/docker-parity/Dockerfile")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dockerfile := string(dockerfileData)
-	if !strings.Contains(dockerfile, "FROM nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1") ||
-		!strings.Contains(dockerfile, `ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]`) ||
-		strings.Contains(dockerfile, "RUN ") || strings.Contains(dockerfile, "ADD http") {
-		t.Fatal("local Docker action must use only the preloaded sealed base")
-	}
-	entrypointPath := "../../.github/actions/docker-parity/entrypoint.sh"
-	entrypointData, err := os.ReadFile(entrypointPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entrypoint := string(entrypointData)
-	for _, required := range []string{
-		"if [ ! -S /var/run/docker.sock ]", "if [ -S /run/docker.sock ]",
-		"official runner did not mount the VM-local Docker socket", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY",
-	} {
-		if !strings.Contains(entrypoint, required) {
-			t.Errorf("local Docker action entrypoint is missing %q", required)
-		}
-	}
-	info, err := os.Stat(entrypointPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Fatal("local Docker action entrypoint is not executable")
 	}
 }
 

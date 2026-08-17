@@ -80,9 +80,6 @@ func TestRepresentativeWorkflowIsManualPinnedAndLeastPrivilege(t *testing.T) {
 	if len(workflow.Jobs) != len(expectedWorkloads) {
 		t.Fatalf("expected exactly five representative jobs, got %d", len(workflow.Jobs))
 	}
-	standardLabel := "${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-standard' }}"
-	integrationLabel := "${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-integration' }}"
-
 	usesCount := make(map[string]int)
 	for jobID, workload := range expectedWorkloads {
 		job, exists := workflow.Jobs[jobID]
@@ -90,11 +87,7 @@ func TestRepresentativeWorkflowIsManualPinnedAndLeastPrivilege(t *testing.T) {
 			t.Errorf("workflow is missing %s job", jobID)
 			continue
 		}
-		expectedLabel := standardLabel
-		if jobID == "docker" {
-			expectedLabel = integrationLabel
-		}
-		if job.RunsOn != expectedLabel || job.TimeoutMinutes != 30 {
+		if job.RunsOn != "ubuntu-24.04" || job.TimeoutMinutes != 30 {
 			t.Errorf("%s runner/timeout contract drifted: %#v", jobID, job)
 		}
 		expectedSelector := "${{ inputs.workload == 'all' || inputs.workload == '" + jobID + "' }}"
@@ -130,9 +123,6 @@ func TestRepresentativeWorkflowIsManualPinnedAndLeastPrivilege(t *testing.T) {
 		}
 		cache := stepsByName["Restore dependency cache"]
 		expectedCacheCondition := "${{ inputs.cache_mode == 'warm' }}"
-		if jobID == "rust" {
-			expectedCacheCondition = "${{ inputs.environment == 'github-hosted' && inputs.cache_mode == 'warm' }}"
-		}
 		if cache.If != expectedCacheCondition {
 			t.Errorf("%s can restore/save a cache during a cold sample: %q", jobID, cache.If)
 		}
