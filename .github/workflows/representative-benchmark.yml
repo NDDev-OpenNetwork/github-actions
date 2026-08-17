@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - github-hosted
-          - nddev
       cache_mode:
         description: Dependency and build cache condition
         required: true
@@ -48,7 +47,7 @@ jobs:
   go:
     name: Go build and test
     if: ${{ inputs.workload == 'all' || inputs.workload == 'go' }}
-    runs-on: ${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-standard' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NDDEV_BENCHMARK_WORKLOAD: go
@@ -123,7 +122,7 @@ jobs:
   rust:
     name: Rust build and test
     if: ${{ inputs.workload == 'all' || inputs.workload == 'rust' }}
-    runs-on: ${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-standard' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NDDEV_BENCHMARK_WORKLOAD: rust
@@ -154,7 +153,7 @@ jobs:
         run: scripts/configure-sccache.sh benchmark/rust/Cargo.lock rustc-1.97.1 benchmark
 
       - name: Restore dependency cache
-        if: ${{ inputs.environment == 'github-hosted' && inputs.cache_mode == 'warm' }}
+        if: ${{ inputs.cache_mode == 'warm' }}
         id: dependency-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -226,7 +225,7 @@ jobs:
   python-uv:
     name: Python and uv build and test
     if: ${{ inputs.workload == 'all' || inputs.workload == 'python-uv' }}
-    runs-on: ${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-standard' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NDDEV_BENCHMARK_WORKLOAD: python-uv
@@ -303,7 +302,7 @@ jobs:
   bun-next:
     name: Bun and Next build and test
     if: ${{ inputs.workload == 'all' || inputs.workload == 'bun-next' }}
-    runs-on: ${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-standard' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NDDEV_BENCHMARK_WORKLOAD: bun-next
@@ -378,7 +377,7 @@ jobs:
   docker:
     name: Docker and Compose integration
     if: ${{ inputs.workload == 'all' || inputs.workload == 'docker' }}
-    runs-on: ${{ inputs.environment == 'github-hosted' && 'ubuntu-24.04' || 'nddev-linux-integration' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NDDEV_BENCHMARK_WORKLOAD: docker
