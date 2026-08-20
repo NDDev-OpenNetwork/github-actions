@@ -1018,6 +1018,19 @@ func TestWholeAccountBootstrapWithoutTrailingSlashIsNarrowed(t *testing.T) {
 	require.Equal(t, "example-org/example-actions", identity)
 }
 
+func TestAccountOnlyRuntimeMetadataIsBoundedButCacheNeutral(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	bootstrap := validBootstrap()
+	bootstrap.RepoURL = "https://github.com/example-org"
+	metadata, err := provider.jobMetadata(bootstrap)
+	require.NoError(t, err)
+	require.Equal(t, "example-org", metadata[repositoryKey])
+
+	bootstrap.RepoURL = "https://github.com/foreign-account"
+	_, err = provider.jobMetadata(bootstrap)
+	require.Error(t, err)
+}
+
 func TestGetCreateInstanceArgsRejectsImageAliasDrift(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
