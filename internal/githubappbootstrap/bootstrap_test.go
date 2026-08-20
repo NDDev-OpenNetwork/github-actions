@@ -38,7 +38,9 @@ func TestBuildManifestIsPrivateLeastPrivilegeAndWebhookFree(t *testing.T) {
 	if len(manifest.DefaultEvents) != 0 {
 		t.Fatalf("unexpected webhook events: %v", manifest.DefaultEvents)
 	}
-	if len(manifest.DefaultPermissions) != 1 || manifest.DefaultPermissions["administration"] != "write" {
+	if len(manifest.DefaultPermissions) != 2 ||
+		manifest.DefaultPermissions["administration"] != "write" ||
+		manifest.DefaultPermissions[ActionsReadPermission] != "read" {
 		t.Fatalf("unexpected permissions: %v", manifest.DefaultPermissions)
 	}
 	for _, callback := range []string{manifest.RedirectURL, manifest.SetupURL} {
@@ -62,14 +64,14 @@ func TestValidateLeastPrivilegePermissions(t *testing.T) {
 		permissions map[string]string
 		wantError   string
 	}{
-		"exact":       {map[string]string{"administration": "write", "metadata": "read"}, ""},
-		"implicit":    {map[string]string{"administration": "write"}, ""},
-		"too weak":    {map[string]string{"administration": "read"}, "want write"},
-		"extra scope": {map[string]string{"administration": "write", "contents": "read"}, "unexpected contents=read"},
+		"exact":           {map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"}, ""},
+		"missing actions": {map[string]string{"administration": "write"}, "actions permission"},
+		"too weak":        {map[string]string{"administration": "read"}, "want write"},
+		"extra scope":     {map[string]string{"administration": "write", ActionsReadPermission: "read", "contents": "read"}, "unexpected contents=read"},
 		// An App that will not back an organization entity must not carry the
 		// organization permission either. Least privilege is symmetric.
 		"organization scope without the flag": {
-			map[string]string{"administration": "write", OrganizationRunnersPermission: "write"},
+			map[string]string{"administration": "write", ActionsReadPermission: "read", OrganizationRunnersPermission: "write"},
 			"unexpected " + OrganizationRunnersPermission + "=write",
 		},
 	} {
@@ -99,18 +101,20 @@ func TestValidateLeastPrivilegePermissionsAcceptsTheGrantedOrganizationScope(t *
 		"granted": {
 			map[string]string{
 				"administration":              "write",
+				ActionsReadPermission:         "read",
 				"metadata":                    "read",
 				OrganizationRunnersPermission: "write",
 			},
 			"",
 		},
 		"missing": {
-			map[string]string{"administration": "write", "metadata": "read"},
+			map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 			OrganizationRunnersPermission + " permission is \"\"",
 		},
 		"read only": {
 			map[string]string{
 				"administration":              "write",
+				ActionsReadPermission:         "read",
 				"metadata":                    "read",
 				OrganizationRunnersPermission: "read",
 			},
@@ -305,7 +309,7 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 					Login: "example-org",
 					Type:  "Organization",
 				},
-				Permissions: map[string]string{"administration": "write", "metadata": "read"},
+				Permissions: map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 				Events:      []string{},
 			})
 		case request.Method == http.MethodGet && request.URL.Path == "/app/installations/67890":
@@ -316,7 +320,7 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 				Account:             githubAccount{Login: "example-org", Type: "Organization"},
 				TargetType:          "Organization",
 				RepositorySelection: "selected",
-				Permissions:         map[string]string{"administration": "write", "metadata": "read"},
+				Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 			})
 		case request.Method == http.MethodPost && request.URL.Path == "/app/installations/67890/access_tokens":
 			requireBearer(t, request, "")
@@ -331,7 +335,7 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 			writeTestJSON(t, writer, installationToken{
 				Token:               "install-token",
 				ExpiresAt:           time.Now().Add(time.Hour),
-				Permissions:         map[string]string{"administration": "write", "metadata": "read"},
+				Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 				RepositorySelection: "selected",
 			})
 		case request.Method == http.MethodGet && request.URL.Path == "/installation/repositories":
@@ -453,7 +457,7 @@ func TestValidateRegistrationBindsTheOwningAccount(t *testing.T) {
 		return appRegistration{
 			ID: 12345, Slug: "example-actions-fleet", PEM: "key",
 			Owner:       githubAccount{Login: login, Type: accountType},
-			Permissions: map[string]string{"administration": "write", "metadata": "read"},
+			Permissions: map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 			Events:      []string{},
 		}
 	}
@@ -482,7 +486,7 @@ func TestValidateInstallationBindsTheSameAccount(t *testing.T) {
 			Account:             githubAccount{Login: login, Type: accountType},
 			TargetType:          targetType,
 			RepositorySelection: "all",
-			Permissions:         map[string]string{"administration": "write", "metadata": "read"},
+			Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 		}
 	}
 	if err := validateInstallation(observed("example-org", "Organization", "Organization"), 12345, "example-org", OwnerTypeOrganization, false); err != nil {
@@ -534,6 +538,7 @@ func TestVerifyInstallationRecordsTheOrganizationScopeItProved(t *testing.T) {
 	}))
 	granted := map[string]string{
 		"administration":              "write",
+		ActionsReadPermission:         "read",
 		"metadata":                    "read",
 		OrganizationRunnersPermission: "write",
 	}
@@ -561,7 +566,7 @@ func TestVerifyInstallationRecordsTheOrganizationScopeItProved(t *testing.T) {
 			writeTestJSON(t, writer, installationToken{
 				Token:               "install-token",
 				ExpiresAt:           time.Now().Add(time.Hour),
-				Permissions:         map[string]string{"administration": "write", OrganizationRunnersPermission: "write"},
+				Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", OrganizationRunnersPermission: "write"},
 				RepositorySelection: "all",
 			})
 		case request.Method == http.MethodGet && request.URL.Path == "/repos/example-guild/example-project":

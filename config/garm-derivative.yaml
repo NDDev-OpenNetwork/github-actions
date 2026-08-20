@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.48
+derivative_version: v0.2.1-nddev.49
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -67,6 +67,15 @@ patches:
   - path: third_party/garm/patches/0020-reachable-scale-set-job-reconciliation.patch
     sha256: 24661113a5fa3db00fc12f57da9764b1c5dc2c112e0a14b50eb39ffa9f6079ae
     purpose: Query scale-set protocol rows through a dedicated bounded SQL path so authoritative cleanup and live-job rehydration are reachable without leaking those rows into ordinary webhook pool consumption.
+  - path: third_party/garm/patches/0021-reap-idle-offline-jit-runner.patch
+    sha256: cb072aeacbbfa2761dc9fb9ec0799e9e2116135bdaf70372ed388205f89868f2
+    purpose: Reap a timed-out idle ephemeral runner only after the authoritative GitHub runner list proves it absent or offline, closing a permanent covered-instance capacity leak while retaining active and ambiguous runners.
+  - path: third_party/garm/patches/0022-bound-capacity-probe-burst.patch
+    sha256: d4a4f73c5a45708149edc9782c2772cede3c1bc9fcb523be07d4f9c98f51fc4b
+    purpose: Create at most one new JIT runner per scale-set reconciliation edge so a saturated fleet records one capacity probe and durable backoff instead of a target-sized herd of doomed instance rows and deletes.
+  - path: third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch
+    sha256: 45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8
+    purpose: Defer an entity's authoritative job reads for fifteen minutes after GitHub returns 403 or 429 so missing permission or rate limiting remains fail-closed without consuming API budget once per stale row every minute.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 889086c63a7d3244efb37cbd5bfbd72db1b5b1ce2078397b69f29cc5f6333792
@@ -94,7 +103,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: d0b7f57714756fe1283d815dc0ec9b624993c92aae1537a4b4638ae2e2c83ed3
+  binary_sha256: 808f77bf5f85a38b2ef4e48e69ff200cd289218ab518e3562dbbd957db485fd2
 runtime_contract:
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
@@ -117,8 +126,11 @@ runtime_contract:
   provider_retry_backoff_cap_seconds: 300
   capacity_retry_backoff_cap_seconds: 60
   capacity_retry_wake_after_delete: true
+  bounded_scale_up_capacity_probe: true
   authoritative_job_reconciliation: true
   authoritative_queue_intent_reconciliation: true
+  authoritative_idle_offline_runner_reaping: true
+  authoritative_access_refusal_backoff_seconds: 900
   job_reconciliation_interval_seconds: 30
   job_reconciliation_batch_size: 10
   official_actions_runner_unchanged: true

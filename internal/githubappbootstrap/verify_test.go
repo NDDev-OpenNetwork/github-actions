@@ -66,7 +66,7 @@ func verifyOptions(key, out string) VerifyOptions {
 func TestReVerifyingWritesTheCurrentPermissions(t *testing.T) {
 	t.Parallel()
 	api := liveInstallation(t, map[string]string{
-		"administration": "write", "metadata": "read",
+		"administration": "write", ActionsReadPermission: "read", "metadata": "read",
 		OrganizationRunnersPermission: "write",
 	})
 	defer api.Close()
@@ -109,7 +109,7 @@ func TestReVerifyingRefusesAnInstallationOnAnotherAccount(t *testing.T) {
 			TargetType:          "Organization",
 			RepositorySelection: "all",
 			Permissions: map[string]string{
-				"administration": "write", "metadata": "read",
+				"administration": "write", ActionsReadPermission: "read", "metadata": "read",
 				OrganizationRunnersPermission: "write",
 			},
 		})

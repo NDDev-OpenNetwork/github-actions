@@ -1,0 +1,89 @@
+diff --git a/workers/scaleset/idle_offline_reap_test.go b/workers/scaleset/idle_offline_reap_test.go
+new file mode 100644
+index 00000000..4ba4046c
+--- /dev/null
++++ b/workers/scaleset/idle_offline_reap_test.go
+@@ -0,0 +1,37 @@
++package scaleset
++
++import (
++	"testing"
++
++	"github.com/cloudbase/garm/params"
++)
++
++func TestTimedOutRunnerIsReapable(t *testing.T) {
++	t.Parallel()
++
++	tests := map[string]struct {
++		local   params.RunnerStatus
++		remote  params.RunnerStatus
++		present bool
++		want    bool
++	}{
++		"idle absent":        {params.RunnerIdle, params.RunnerUnknown, false, true},
++		"idle offline":       {params.RunnerIdle, params.RunnerOffline, true, true},
++		"idle online":        {params.RunnerIdle, params.RunnerIdle, true, false},
++		"pending absent":     {params.RunnerPending, params.RunnerUnknown, false, true},
++		"installing offline": {params.RunnerInstalling, params.RunnerOffline, true, true},
++		"active absent":      {params.RunnerActive, params.RunnerUnknown, false, false},
++		"active offline":     {params.RunnerActive, params.RunnerOffline, true, false},
++		"unknown absent":     {params.RunnerUnknown, params.RunnerUnknown, false, false},
++		"pending online":     {params.RunnerPending, params.RunnerIdle, true, false},
++	}
++
++	for name, test := range tests {
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			if got := timedOutRunnerIsReapable(test.local, test.remote, test.present); got != test.want {
++				t.Fatalf("timedOutRunnerIsReapable(%q, %q, %t) = %t, want %t", test.local, test.remote, test.present, got, test.want)
++			}
++		})
++	}
++}
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 8c107c5e..39ccb7e8 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -411,6 +411,25 @@ func (w *Worker) runnerRemovalAlreadyOwned(runnerName string) (bool, error) {
+ 	return providerRemovalProtected(current.Status), nil
+ }
+ 
++// timedOutRunnerIsReapable keeps timeout cleanup fail closed on GitHub state.
++// A JIT runner can connect, become idle, and then be removed by GitHub without
++// ever receiving a job. In that case the old pending/installing-only predicate
++// left both the GARM row and provider instance alive forever. An explicit
++// absent or offline GitHub observation after the scale-set timeout is
++// authoritative for an idle ephemeral runner. Active and unknown local states
++// are always retained.
++func timedOutRunnerIsReapable(local params.RunnerStatus, remote params.RunnerStatus, present bool) bool {
++	if present && remote != params.RunnerOffline {
++		return false
++	}
++	switch local {
++	case params.RunnerPending, params.RunnerInstalling, params.RunnerIdle:
++		return true
++	default:
++		return false
++	}
++}
++
+ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference) (func(), error) {
+ 	lockNames := []string{}
+ 
+@@ -429,11 +448,12 @@ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference)
+ 			continue
+ 		}
+ 
+-		if runner.RunnerStatus != params.RunnerPending && runner.RunnerStatus != params.RunnerInstalling {
+-			slog.DebugContext(w.ctx, "runner is not pending or installing; skipping", "runner_name", runner.Name)
++		ghRunner, present := runners[runner.Name]
++		if !timedOutRunnerIsReapable(runner.RunnerStatus, ghRunner.GetStatus(), present) {
++			slog.DebugContext(w.ctx, "runner is not authoritatively reapable; skipping", "runner_name", runner.Name)
+ 			continue
+ 		}
+-		if ghRunner, ok := runners[runner.Name]; !ok || ghRunner.GetStatus() == params.RunnerOffline {
++		if !present || ghRunner.GetStatus() == params.RunnerOffline {
+ 			if ok := locking.TryLock(runner.Name, w.consumerID); !ok {
+ 				slog.DebugContext(w.ctx, "runner is locked; skipping", "runner_name", runner.Name)
+ 				continue

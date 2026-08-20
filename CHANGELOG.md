@@ -50,6 +50,16 @@ Versioning.
   the existing entity query excludes every scale-set row with
   `workflow_job_id=0`. A dedicated scale-set-only SQL query makes cleanup and
   rehydration reachable without exposing those rows to webhook pool consumers.
+- Added GARM derivative `v0.2.1-nddev.49` after live `.48` made the authoritative
+  query reachable and exposed two previously masked contracts. Dedicated fleet
+  Apps now require exactly `actions:read` so queued workflow jobs can be checked
+  without workflow mutation permission. Timed-out idle JIT runners are reaped
+  only when GitHub proves them absent or offline, preventing a registered-but-
+  unused ephemeral container from retaining capacity forever. Scale-up also
+  emits one capacity probe per reconciliation edge instead of materializing an
+  entire target-sized herd before the first saturation result can back it off.
+  A denied or rate-limited authoritative read also establishes a manager-wide
+  fifteen-minute fail-closed backoff instead of retrying once per stale row.
 
 ## [0.1.1] - 2026-08-16
 

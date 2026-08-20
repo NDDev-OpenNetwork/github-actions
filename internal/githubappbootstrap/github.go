@@ -139,7 +139,10 @@ func (c githubClient) verifyInstallation(ctx context.Context, registration appRe
 	// against. Asking for less and validating for more can only fail; asking
 	// for the organization permission also proves the installation can really
 	// mint it, which is what the runner registration will need at runtime.
-	wantedTokenPermissions := map[string]string{"administration": "write"}
+	wantedTokenPermissions := map[string]string{
+		"administration":      "write",
+		ActionsReadPermission: "read",
+	}
 	if organizationRunners {
 		wantedTokenPermissions[OrganizationRunnersPermission] = "write"
 	}
@@ -289,9 +292,9 @@ func validateRegistration(registration appRegistration, owner, ownerType string,
 // account holds, so an account-wide selection is expected rather than a
 // mistake. What must never widen is the rest: the installation stays on the
 // account that owns the managed repository, carries exactly
-// administration=write plus metadata=read, subscribes to no webhook events, and
-// is proven to actually cover the repository being managed. `selected` remains
-// valid for a narrower install.
+// administration=write, actions=read and metadata=read, subscribes to no webhook
+// events, and is proven to actually cover the repository being managed.
+// `selected` remains valid for a narrower install.
 func validRepositorySelection(selection string) bool {
 	return selection == "selected" || selection == "all"
 }
@@ -330,11 +333,18 @@ func validateLeastPrivilegePermissions(permissions map[string]string, organizati
 	if permissions["administration"] != "write" {
 		return fmt.Errorf("administration permission is %q, want write", permissions["administration"])
 	}
+	if permissions[ActionsReadPermission] != "read" {
+		return fmt.Errorf("%s permission is %q, want read", ActionsReadPermission, permissions[ActionsReadPermission])
+	}
 	if organizationRunners && permissions[OrganizationRunnersPermission] != "write" {
 		return fmt.Errorf("%s permission is %q, want write", OrganizationRunnersPermission, permissions[OrganizationRunnersPermission])
 	}
 	for name, level := range permissions {
 		switch name {
+		case ActionsReadPermission:
+			if level != "read" {
+				return fmt.Errorf("%s permission is %q, want read", name, level)
+			}
 		case "administration":
 			if level != "write" {
 				return fmt.Errorf("administration permission is %q, want write", level)
