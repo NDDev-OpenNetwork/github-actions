@@ -55,6 +55,11 @@ type Declaration struct {
 // ValidateConfig proves that one deployment overlay implements this exact
 // public contract without making private topology part of the public source.
 func ValidateConfig(contract Contract, platform platformconfig.Config) error {
+	if platform.ControlPlane.ManagerVersion != contract.Artifacts.GARMVersion ||
+		platform.ControlPlane.ProviderVersion != contract.Artifacts.ProviderVersion ||
+		platform.ControlPlane.ProviderInterface != contract.Artifacts.ProviderInterface {
+		return fmt.Errorf("control-plane artifact versions differ from fleet contract v%d", contract.ContractVersion)
+	}
 	if platform.ControlPlane.WorkerKind != contract.Execution.WorkerKind ||
 		platform.Guardrails.RequireEphemeral != contract.Execution.Ephemeral ||
 		platform.Guardrails.JobsPerWorker != contract.Execution.JobsPerWorker {
