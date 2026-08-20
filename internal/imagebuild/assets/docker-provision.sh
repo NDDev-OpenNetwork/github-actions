@@ -17,6 +17,8 @@ if [[ "$(id -u)" != "0" ]]; then
 fi
 
 : "${GHA_DOCKER_ACTION_BASE_REF:?}"
+: "${GHA_DOCKER_STORAGE_DRIVER:?}"
+[[ "${GHA_DOCKER_STORAGE_DRIVER}" == "overlay2" || "${GHA_DOCKER_STORAGE_DRIVER}" == "overlayfs" ]]
 
 for package in busybox-static docker-buildx docker-compose-v2 docker.io pigz; do
   dpkg-query --show --showformat='${Status}' "${package}" | grep -qx 'install ok installed'
@@ -34,7 +36,7 @@ fi
 
 install -d -m 0755 /etc/docker
 daemon_config="$(mktemp)"
-jq -n '{
+jq -n --arg storage_driver "${GHA_DOCKER_STORAGE_DRIVER}" '({
   "default-address-pools":[{"base":"172.30.0.0/16","size":24}],
   "exec-opts":["native.cgroupdriver=systemd"],
   "features":{"buildkit":true},
@@ -42,9 +44,8 @@ jq -n '{
   "log-driver":"local",
   "log-opts":{"max-file":"3","max-size":"10m"},
   "shutdown-timeout":15,
-  "storage-driver":"overlay2",
   "userland-proxy":false
-}' >"${daemon_config}"
+} | if $storage_driver == "overlay2" then . + {"storage-driver":"overlay2"} else . end)' >"${daemon_config}"
 install -o root -g root -m 0644 "${daemon_config}" /etc/docker/daemon.json
 rm -f "${daemon_config}"
 
@@ -57,7 +58,7 @@ docker_version="$(docker version --format '{{.Server.Version}}')"
 docker_storage="$(docker info --format '{{.Driver}}')"
 docker_cgroup="$(docker info --format '{{.CgroupDriver}}')"
 [[ -n "${docker_version}" ]]
-[[ "${docker_storage}" == "overlay2" ]]
+[[ "${docker_storage}" == "${GHA_DOCKER_STORAGE_DRIVER}" ]]
 [[ "${docker_cgroup}" == "systemd" ]]
 docker buildx version >/dev/null
 docker compose version >/dev/null

@@ -15,9 +15,12 @@ import (
 )
 
 const (
-	stateSchemaVersion = 1
-	maxStateBytes      = 16 * 1024 * 1024
-	stateFilename      = "state.json"
+	stateSchemaVersion    = 1
+	maxStateBytes         = 16 * 1024 * 1024
+	stateFilename         = "state.json"
+	progressSchemaVersion = 1
+	progressFilename      = "progress.json"
+	maxProgressBytes      = 64 * 1024
 )
 
 // StageCanary is the only stage this exporter may run in while RustFS is a
@@ -58,6 +61,23 @@ type Status struct {
 	PendingBundles      int    `json:"pending_bundles"`
 	SourceBytes         int64  `json:"source_bytes"`
 	ExportedBytes       int64  `json:"exported_bytes"`
+	LastProgressAt      string `json:"-"`
+	LastFullSyncAt      string `json:"-"`
+	ScannedBundles      int    `json:"-"`
+	DeletedBundles      int    `json:"-"`
+}
+
+type Progress struct {
+	SchemaVersion   int    `json:"schema_version"`
+	ObservedAt      string `json:"observed_at"`
+	LastProgressAt  string `json:"last_progress_at,omitempty"`
+	LastFullSyncAt  string `json:"last_full_sync_at,omitempty"`
+	ScannedBundles  int    `json:"scanned_bundles"`
+	ExportedBundles int    `json:"exported_bundles"`
+	DeletedBundles  int    `json:"deleted_bundles"`
+	FailedBundles   int    `json:"failed_bundles"`
+	BacklogBundles  int    `json:"backlog_bundles"`
+	BacklogBytes    int64  `json:"backlog_bytes"`
 }
 
 type ExportRecord struct {
@@ -178,6 +198,78 @@ func (s StateStore) Save(state State) error {
 	return syncStateDirectory(s.Directory)
 }
 
+func (s StateStore) LoadProgress() (Progress, error) {
+	if err := validateStateDirectory(s.Directory); err != nil {
+		return Progress{}, err
+	}
+	return readProgress(s.Directory)
+}
+
+func readProgress(directory string) (Progress, error) {
+	filename := filepath.Join(directory, progressFilename)
+	content, err := readBoundedStateFile(filename, maxProgressBytes, "diagnostic export progress")
+	if errors.Is(err, os.ErrNotExist) {
+		return Progress{SchemaVersion: progressSchemaVersion}, nil
+	}
+	if err != nil {
+		return Progress{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var progress Progress
+	if err := decoder.Decode(&progress); err != nil {
+		return Progress{}, fmt.Errorf("decode diagnostic export progress: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF || progress.SchemaVersion != progressSchemaVersion {
+		return Progress{}, errors.New("diagnostic export progress schema is unsupported")
+	}
+	if err := progress.Validate(); err != nil {
+		return Progress{}, err
+	}
+	return progress, nil
+}
+
+func (s StateStore) SaveProgress(progress Progress) error {
+	if err := validateStateDirectory(s.Directory); err != nil {
+		return err
+	}
+	progress.SchemaVersion = progressSchemaVersion
+	if err := progress.Validate(); err != nil {
+		return err
+	}
+	content, err := json.MarshalIndent(progress, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode diagnostic export progress: %w", err)
+	}
+	content = append(content, '\n')
+	if len(content) > maxProgressBytes {
+		return errors.New("diagnostic export progress exceeds its bounded size")
+	}
+	return writeStateFile(s.Directory, progressFilename, content)
+}
+
+func (p Progress) Validate() error {
+	if p.SchemaVersion != progressSchemaVersion || p.ScannedBundles < 0 || p.ExportedBundles < 0 ||
+		p.DeletedBundles < 0 || p.FailedBundles < 0 || p.BacklogBundles < 0 || p.BacklogBytes < 0 ||
+		p.DeletedBundles > p.ExportedBundles || p.ExportedBundles > p.ScannedBundles || p.FailedBundles > p.ScannedBundles {
+		return errors.New("diagnostic export progress counters are invalid")
+	}
+	observedAt, err := parseCanonicalUTCTime(p.ObservedAt)
+	if err != nil {
+		return errors.New("diagnostic export progress observation is invalid")
+	}
+	for label, value := range map[string]string{"last_progress_at": p.LastProgressAt, "last_full_sync_at": p.LastFullSyncAt} {
+		if value == "" {
+			continue
+		}
+		parsed, err := parseCanonicalUTCTime(value)
+		if err != nil || parsed.After(observedAt) {
+			return fmt.Errorf("diagnostic export progress %s is invalid", label)
+		}
+	}
+	return nil
+}
+
 func ReadStatus(directory string) (Status, error) {
 	if err := validateReadableStateDirectory(directory); err != nil {
 		return Status{}, err
@@ -189,7 +281,63 @@ func ReadStatus(directory string) (Status, error) {
 	if state.Status.SchemaVersion != stateSchemaVersion {
 		return Status{}, errors.New("diagnostic export status is unavailable")
 	}
+	progress, err := readProgress(directory)
+	if err != nil {
+		return Status{}, err
+	}
+	state.Status.LastProgressAt = progress.LastProgressAt
+	state.Status.LastFullSyncAt = progress.LastFullSyncAt
+	state.Status.ScannedBundles = progress.ScannedBundles
+	state.Status.DeletedBundles = progress.DeletedBundles
 	return state.Status, nil
+}
+
+func readBoundedStateFile(filename string, limit int64, description string) ([]byte, error) {
+	directoryStat, err := stateDirectoryStat(filepath.Dir(filename))
+	if err != nil {
+		return nil, err
+	}
+	fd, err := unix.Open(filename, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), filename)
+	if file == nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("open %s: invalid file descriptor", description)
+	}
+	defer file.Close()
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 ||
+		stat.Uid != directoryStat.Uid || stat.Gid != directoryStat.Gid || stat.Mode&0o777 != 0o640 || stat.Size < 1 || stat.Size > limit {
+		return nil, fmt.Errorf("%s mode, type or size is unsafe", description)
+	}
+	return io.ReadAll(io.LimitReader(file, limit+1))
+}
+
+func writeStateFile(directory, name string, content []byte) error {
+	temporary, err := os.CreateTemp(directory, "."+name+"-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o640); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, filepath.Join(directory, name)); err != nil {
+		return err
+	}
+	return syncStateDirectory(directory)
 }
 
 func (s Status) ObservedTime() (time.Time, error) {
@@ -201,6 +349,20 @@ func (s Status) LastSuccessTime() (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return parseCanonicalUTCTime(s.LastSuccessAt)
+}
+
+func (s Status) LastProgressTime() (time.Time, error) {
+	if s.LastProgressAt == "" {
+		return time.Time{}, nil
+	}
+	return parseCanonicalUTCTime(s.LastProgressAt)
+}
+
+func (s Status) LastFullSyncTime() (time.Time, error) {
+	if s.LastFullSyncAt == "" {
+		return time.Time{}, nil
+	}
+	return parseCanonicalUTCTime(s.LastFullSyncAt)
 }
 
 func parseCanonicalUTCTime(value string) (time.Time, error) {

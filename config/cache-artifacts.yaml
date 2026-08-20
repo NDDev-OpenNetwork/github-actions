@@ -62,8 +62,8 @@ oci_registry:
     storage_audit_file: zot-v2.1.20-storage-audit.json
     storage_audit_sha256: f373de41eb12cc8279906032ed3139b4e394b1efe560ccbff462e9017440bde2
     authorization_audit_file: zot-v2.1.20-authz-audit.json
-    authorization_audit_sha256: 7a061ca320e25b7061054bc9a98e44cb4ba1d829d7aa0eec45b3bd2069924404
+    authorization_audit_sha256: 5daac7167fa6c98a6b1be6baa2e2509df9a7e479413bac0663f179bf02a51a7c
     reboot_audit_file: zot-v2.1.20-reboot-audit.json
-    reboot_audit_sha256: 6cd5650b17368a85de2e6b7fcc800aaa61fa99cd943c65caa452365130a18c15
+    reboot_audit_sha256: 4131f8b85b26938c130f54de4785e10442ad925e16af8211ada882a08b25e4f4
   deployment_stage: production
   production_promotion_allowed: true

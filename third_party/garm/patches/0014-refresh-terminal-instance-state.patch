@@ -1,0 +1,160 @@
+diff --git a/workers/provider/failed_scale_set_runner_cleanup_test.go b/workers/provider/failed_scale_set_runner_cleanup_test.go
+index 8710a61..ef2b93b 100644
+--- a/workers/provider/failed_scale_set_runner_cleanup_test.go
++++ b/workers/provider/failed_scale_set_runner_cleanup_test.go
+@@ -12,6 +12,9 @@ import (
+ )
+ 
+ type failedScaleSetRunnerCleanupHelper struct {
++	instance     params.Instance
++	getErr       error
++	getCalls     int
+ 	removeErr    error
+ 	removeCalls  int
+ 	removedAgent int64
+@@ -19,6 +22,11 @@ type failedScaleSetRunnerCleanupHelper struct {
+ 	status       commonParams.InstanceStatus
+ }
+ 
++func (f *failedScaleSetRunnerCleanupHelper) GetInstance(_ context.Context, _ string) (params.Instance, error) {
++	f.getCalls++
++	return f.instance, f.getErr
++}
++
+ func (f *failedScaleSetRunnerCleanupHelper) SetInstanceStatus(_ string, status commonParams.InstanceStatus, _ []byte, _ bool) error {
+ 	f.statusCalls++
+ 	f.status = status
+@@ -60,9 +68,58 @@ func failedScaleSetInstanceManager(helper providerHelper) *instanceManager {
+ 		helper:   helper,
+ 	}
+ 	manager.running.Store(true)
++	if concrete, ok := helper.(*failedScaleSetRunnerCleanupHelper); ok && concrete.instance.Name == "" {
++		concrete.instance = manager.instance
++	}
+ 	return manager
+ }
+ 
++func TestFailedScaleSetInstanceAcceptsAnAlreadyDeletedAuthoritativeRow(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{instance: params.Instance{
++		Name: "runner-failed", Status: commonParams.InstanceDeleted, ScaleSetID: 1, AgentID: 322,
++	}}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); !errors.Is(err, ErrInstanceDeleted) {
++		t.Fatalf("consolidating terminal instance: %v", err)
++	}
++	if helper.getCalls != 1 || helper.removeCalls != 0 || helper.statusCalls != 0 {
++		t.Fatalf("terminal row was mutated: get=%d remove=%d status=%d", helper.getCalls, helper.removeCalls, helper.statusCalls)
++	}
++	if manager.instance.Status != commonParams.InstanceDeleted {
++		t.Fatalf("local status=%s, want %s", manager.instance.Status, commonParams.InstanceDeleted)
++	}
++}
++
++func TestFailedScaleSetInstanceAcceptsAnAlreadyAbsentAuthoritativeRow(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{getErr: runnerErrors.ErrNotFound}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); !errors.Is(err, ErrInstanceDeleted) {
++		t.Fatalf("consolidating absent instance: %v", err)
++	}
++	if helper.getCalls != 1 || helper.removeCalls != 0 || helper.statusCalls != 0 {
++		t.Fatalf("absent row was mutated: get=%d remove=%d status=%d", helper.getCalls, helper.removeCalls, helper.statusCalls)
++	}
++}
++
++func TestFailedScaleSetInstanceAdoptsANewerNonErrorState(t *testing.T) {
++	helper := &failedScaleSetRunnerCleanupHelper{instance: params.Instance{
++		Name: "runner-failed", Status: commonParams.InstancePendingDelete, ScaleSetID: 1, AgentID: 322,
++	}}
++	manager := failedScaleSetInstanceManager(helper)
++
++	if err := manager.consolidateState(); err != nil {
++		t.Fatalf("consolidating refreshed instance: %v", err)
++	}
++	if helper.getCalls != 1 || helper.removeCalls != 0 || helper.statusCalls != 0 {
++		t.Fatalf("newer row was mutated: get=%d remove=%d status=%d", helper.getCalls, helper.removeCalls, helper.statusCalls)
++	}
++	if manager.instance.Status != commonParams.InstancePendingDelete {
++		t.Fatalf("local status=%s, want %s", manager.instance.Status, commonParams.InstancePendingDelete)
++	}
++}
++
+ func TestFailedScaleSetInstanceRemovesJITRegistrationBeforeTeardown(t *testing.T) {
+ 	helper := &failedScaleSetRunnerCleanupHelper{}
+ 	manager := failedScaleSetInstanceManager(helper)
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index ea7f29d..fde6802 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -409,6 +409,22 @@ func (i *instanceManager) consolidateState() error {
+ 		i.instance.Status = commonParams.InstanceDeleted
+ 		return ErrInstanceDeleted
+ 	case commonParams.InstanceError:
++		current, err := i.helper.GetInstance(i.ctx, i.instance.Name)
++		if err != nil {
++			if errors.Is(err, runnerErrors.ErrNotFound) {
++				return ErrInstanceDeleted
++			}
++			return fmt.Errorf("refreshing failed instance before teardown: %w", err)
++		}
++		if current.Status == commonParams.InstanceDeleted {
++			i.instance = current
++			return ErrInstanceDeleted
++		}
++		if current.Status != commonParams.InstanceError {
++			i.instance = current
++			return nil
++		}
++		i.instance = current
+ 		// Scale sets create the JIT runner registration before provider acquisition.
+ 		// Keep the DB record (and therefore AgentID) until GitHub confirms that the
+ 		// registration is gone; otherwise a provider failure can leave an
+diff --git a/workers/provider/provider_helper.go b/workers/provider/provider_helper.go
+index e950880..8e3add2 100644
+--- a/workers/provider/provider_helper.go
++++ b/workers/provider/provider_helper.go
+@@ -25,6 +25,7 @@ import (
+ )
+ 
+ type providerHelper interface {
++	GetInstance(ctx context.Context, instanceName string) (params.Instance, error)
+ 	SetInstanceStatus(instanceName string, status commonParams.InstanceStatus, providerFault []byte, force bool) error
+ 	InstanceTokenGetter() auth.InstanceTokenGetter
+ 	updateArgsFromProviderInstance(instanceName string, providerInstance commonParams.ProviderInstance) (params.Instance, error)
+@@ -33,6 +34,14 @@ type providerHelper interface {
+ 	RemoveScaleSetRunner(ctx context.Context, scaleSet params.ScaleSet, agentID int64) error
+ }
+ 
++func (p *Provider) GetInstance(ctx context.Context, instanceName string) (params.Instance, error) {
++	instance, err := p.store.GetInstance(ctx, instanceName)
++	if err != nil {
++		return params.Instance{}, fmt.Errorf("getting instance %s: %w", instanceName, err)
++	}
++	return instance, nil
++}
++
+ func (p *Provider) RemoveScaleSetRunner(ctx context.Context, scaleSet params.ScaleSet, agentID int64) error {
+ 	entity, err := scaleSet.GetEntity()
+ 	if err != nil {
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 52928fa..c7d9380 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -366,6 +366,16 @@ func (w *Worker) setRunnerDBStatus(runner string, status commonParams.InstanceSt
+ }
+ 
+ func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, agentID int64) error {
++	current, err := w.store.GetInstance(w.ctx, runnerName)
++	if err != nil {
++		if errors.Is(err, runnerErrors.ErrNotFound) {
++			return nil
++		}
++		return fmt.Errorf("refreshing runner %s before removal: %w", runnerName, err)
++	}
++	if providerRemovalProtected(current.Status) {
++		return nil
++	}
+ 	scaleSetCli, err := w.GetScaleSetClient()
+ 	if err != nil {
+ 		return fmt.Errorf("getting scale set client: %w", err)

@@ -37,7 +37,7 @@ func TestVersionMismatchStopsBeforeMutation(t *testing.T) {
 	plan := repositoryPlan(t)
 	runner := &fakeRunner{responses: map[string][]byte{"/1.0": mustJSON(t, compatibleServer("6.1.0", plan.APIAddress))}}
 	_, err := (Reconciler{Runner: runner}).Apply(context.Background(), plan)
-	if err == nil || !strings.Contains(err.Error(), `does not match pinned "6.0.0"`) {
+	if err == nil || !strings.Contains(err.Error(), `does not match pinned "6.0.6"`) {
 		t.Fatalf("expected pinned-version failure, got %v", err)
 	}
 	if len(runner.calls) != 1 || contains(runner.calls[0], "--request") {
@@ -69,7 +69,7 @@ func TestCreatePlanNeverIssuesDelete(t *testing.T) {
 
 	plan := repositoryPlan(t)
 	runner := &fakeRunner{responses: map[string][]byte{
-		"/1.0":                                        mustJSON(t, compatibleServer("6.0.0", plan.APIAddress)),
+		"/1.0":                                        mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
 		"/1.0/storage-pools?recursion=1":              {},
 		"/1.0/network-acls?recursion=1":               {},
 		"/1.0/networks?recursion=1":                   {},
@@ -104,7 +104,7 @@ func TestStorageDriftIsFailClosed(t *testing.T) {
 	plan := repositoryPlan(t)
 	storage := storageState{Name: plan.Storage.Name, Driver: "dir", Config: map[string]string{}}
 	runner := &fakeRunner{responses: map[string][]byte{
-		"/1.0":                           mustJSON(t, compatibleServer("6.0.0", plan.APIAddress)),
+		"/1.0":                           mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
 		"/1.0/storage-pools?recursion=1": mustJSON(t, []storageState{storage}),
 	}}
 	_, err := (Reconciler{Runner: runner}).Apply(context.Background(), plan)
@@ -118,6 +118,44 @@ func TestStorageDriftIsFailClosed(t *testing.T) {
 	}
 }
 
+func TestNetworkMigrationRemovesBridgeWideACL(t *testing.T) {
+	t.Parallel()
+
+	plan := repositoryPlan(t)
+	currentConfig := cloneMap(plan.Network.Config)
+	currentConfig["security.acls"] = plan.ACL.Name
+	currentConfig["security.acls.default.egress.action"] = "reject"
+	currentConfig["security.acls.default.ingress.action"] = "reject"
+	runner := &fakeRunner{responses: map[string][]byte{}}
+	result := Result{}
+	err := (Reconciler{Runner: runner}).ensureNetwork(context.Background(), plan.Network, []networkState{{
+		Name: plan.Network.Name, Type: plan.Network.Type, Managed: true,
+		Description: "Isolated public-egress bridge for disposable GitHub Actions VMs", Config: currentConfig,
+	}}, &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Changes) != 1 || result.Changes[0].Action != "update" || len(runner.calls) != 1 {
+		t.Fatalf("bridge ACL migration = changes %#v calls %#v", result.Changes, runner.calls)
+	}
+	call := runner.calls[0]
+	dataIndex := slices.Index(call, "--data")
+	if dataIndex < 0 || dataIndex+1 >= len(call) {
+		t.Fatalf("network update has no payload: %#v", call)
+	}
+	var payload struct {
+		Config map[string]string `json:"config"`
+	}
+	if err := json.Unmarshal([]byte(call[dataIndex+1]), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for key := range payload.Config {
+		if strings.HasPrefix(key, "security.acls") {
+			t.Fatalf("bridge ACL key survived migration: %s=%q", key, payload.Config[key])
+		}
+	}
+}
+
 func desiredResponses(t *testing.T, plan incusplan.Plan) map[string][]byte {
 	t.Helper()
 	profiles := make([]profileState, 0, len(plan.Profiles)+1)
@@ -126,7 +164,7 @@ func desiredResponses(t *testing.T, plan incusplan.Plan) map[string][]byte {
 		profiles = append(profiles, profileState(profile))
 	}
 	return map[string][]byte{
-		"/1.0":                                        mustJSON(t, compatibleServer("6.0.0", plan.APIAddress)),
+		"/1.0":                                        mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
 		"/1.0/storage-pools?recursion=1":              mustJSON(t, []storageState{{Name: plan.Storage.Name, Driver: plan.Storage.Driver, Config: plan.Storage.Config}}),
 		"/1.0/network-acls?recursion=1":               mustJSON(t, []aclState{{Name: plan.ACL.Name, Description: plan.ACL.Description, Config: plan.ACL.Config, Ingress: plan.ACL.Ingress, Egress: plan.ACL.Egress}}),
 		"/1.0/networks?recursion=1":                   mustJSON(t, []networkState{{Name: plan.Network.Name, Description: "Isolated public-egress bridge for disposable GitHub Actions VMs", Type: plan.Network.Type, Managed: true, Config: plan.Network.Config}}),
@@ -152,7 +190,7 @@ func compatibleServer(version, address string) serverState {
 
 func repositoryPlan(t *testing.T) incusplan.Plan {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}

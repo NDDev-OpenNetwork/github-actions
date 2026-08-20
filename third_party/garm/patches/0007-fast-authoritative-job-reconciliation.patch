@@ -1,0 +1,62 @@
+diff --git a/runner/common/pool.go b/runner/common/pool.go
+index 2b64a9e..f4b4731 100644
+--- a/runner/common/pool.go
++++ b/runner/common/pool.go
+@@ -30,7 +30,7 @@ const (
+ 	// we spin up. We cache the tools for 5 minutes. This should save us a lot of API calls
+ 	// in cases where we have a lot of runners spin up at the same time.
+ 	PoolToolUpdateInterval        = 5 * time.Minute
+-	PoolStaleJobReconcileInterval = 5 * time.Minute
++	PoolStaleJobReconcileInterval = 30 * time.Second
+ 
+ 	// BackoffTimer is the time we wait before attempting to make another request
+ 	// to the github API.
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 9f5fc19..7f6c9f3 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -1957,12 +1957,12 @@ func (r *basePoolManager) DeleteRunner(runner params.Instance, forceRemove, bypa
+ 	return nil
+ }
+ 
+-// reconcileStaleJobs checks queued jobs older than 1 hour against the GitHub API to determine
++// reconcileStaleJobs checks queued jobs older than 30 seconds against the GitHub API to determine
+ // if they are still valid. Jobs that are no longer queued on GitHub (404 or completed/in_progress)
+ // are deleted from the database. This handles cases where GARM missed a webhook update
+ // (e.g. GARM was down, GitHub had issues) and the job is stuck in queued state forever.
+-// To avoid excessive API usage, only up to 5 jobs are checked per cycle and recently checked
+-// jobs are skipped for 1 hour.
++// To avoid excessive API usage, only up to 10 jobs are checked per cycle and recently checked
++// jobs are skipped for one minute.
+ func (r *basePoolManager) reconcileStaleJobs() error {
+ 	queued, err := r.store.ListEntityJobsByStatus(r.ctx, r.entity.EntityType, r.entity.ID, params.JobStatusQueued)
+ 	if err != nil {
+@@ -1974,16 +1974,16 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 
+ 	checked := 0
+ 	for _, job := range queued {
+-		if checked >= 5 {
++		if checked >= 10 {
+ 			break
+ 		}
+ 
+-		if time.Since(job.CreatedAt) < time.Hour {
++		if time.Since(job.CreatedAt) < 30*time.Second {
+ 			continue
+ 		}
+ 
+ 		if lastChecked, ok := r.checkedJobs[job.WorkflowJobID]; ok {
+-			if time.Since(lastChecked) < time.Hour {
++			if time.Since(lastChecked) < time.Minute {
+ 				continue
+ 			}
+ 		}
+@@ -2039,7 +2039,7 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 
+ 	// Clean up entries for jobs no longer in the checked map
+ 	for jobID, lastChecked := range r.checkedJobs {
+-		if time.Since(lastChecked) > 2*time.Hour {
++		if time.Since(lastChecked) > 2*time.Minute {
+ 			delete(r.checkedJobs, jobID)
+ 		}
+ 	}

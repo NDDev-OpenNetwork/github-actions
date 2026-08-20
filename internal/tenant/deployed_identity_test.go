@@ -9,10 +9,10 @@ func TestDefaultTenantIsByteIdenticalToTheDeployedConstants(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ got, want, field string }{
-		{d.Owner, "NDDev-OpenNetwork", "owner"},
-		{d.Repository, "NDDev-OpenNetwork/github-actions", "repository"},
-		{d.AppSlug, "nddev-gha-fleet", "app slug"},
-		{d.CredentialName, "nddev-gha-fleet", "credential name"},
+		{d.Owner, "example-org", "owner"},
+		{d.Repository, "example-org/example-actions", "repository"},
+		{d.AppSlug, "example-actions-fleet", "app slug"},
+		{d.CredentialName, "example-actions-fleet", "credential name"},
 	} {
 		if c.got != c.want {
 			t.Errorf("default tenant %s is %q, deployed constant was %q", c.field, c.got, c.want)

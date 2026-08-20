@@ -307,6 +307,23 @@ func (r Reconciler) ensureNetwork(ctx context.Context, desired incusplan.Network
 		}
 		merged := cloneMap(network.Config)
 		changed := network.Description != "Isolated public-egress bridge for disposable GitHub Actions VMs"
+		// These keys were owned by the previous bridge-wide ACL model. Keeping
+		// them while profiles attach per-NIC policies makes the public ACL widen
+		// the release class, because Incus merges bridge and NIC ACLs. Absence in
+		// the desired plan therefore means explicit deletion, not preservation as
+		// an unknown provider key.
+		for _, key := range []string{
+			"security.acls",
+			"security.acls.default.egress.action",
+			"security.acls.default.ingress.action",
+		} {
+			if _, managed := desired.Config[key]; !managed {
+				if _, exists := merged[key]; exists {
+					delete(merged, key)
+					changed = true
+				}
+			}
+		}
 		for key, value := range desired.Config {
 			if merged[key] != value {
 				merged[key] = value

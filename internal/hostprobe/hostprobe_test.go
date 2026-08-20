@@ -47,6 +47,51 @@ func TestParseMeminfo(t *testing.T) {
 	}
 }
 
+func TestParsePressureAndOOMCounters(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	pressureDirectory := filepath.Join(directory, "pressure")
+	if err := os.Mkdir(pressureDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range []string{"cpu", "memory", "io"} {
+		content := "some avg10=1.25 avg60=2.50 avg300=3.75 total=4000000\n"
+		if resource != "cpu" {
+			content += "full avg10=0.25 avg60=0.50 avg300=0.75 total=1000000\n"
+		}
+		if err := os.WriteFile(filepath.Join(pressureDirectory, resource), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pressure, err := parsePressure(pressureDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pressure.Available || pressure.CPU.Some.Avg10 != 1.25 || pressure.Memory.Full.Avg300 != 0.75 ||
+		pressure.IO.Full.TotalMicros != 1000000 {
+		t.Fatalf("unexpected pressure: %#v", pressure)
+	}
+	vmstat := filepath.Join(directory, "vmstat")
+	if err := os.WriteFile(vmstat, []byte("pgfault 10\noom_kill 7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oomKills, err := parseOOMKills(vmstat)
+	if err != nil || oomKills != 7 {
+		t.Fatalf("oom kills=%d err=%v", oomKills, err)
+	}
+}
+
+func TestParsePressureRejectsMalformedAvailableData(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "cpu"), []byte("some avg10=not-a-number avg60=0 avg300=0 total=0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parsePressure(directory); err == nil {
+		t.Fatal("malformed pressure data was accepted")
+	}
+}
+
 func TestEvaluateColdPilotReady(t *testing.T) {
 	t.Parallel()
 	snapshot := readySnapshot()

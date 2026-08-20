@@ -62,7 +62,7 @@ func TestBundleRejectsExtraPermissionWhenAccountWide(t *testing.T) {
 	writePrivateJSON(t, filepath.Join(bundlePath, "installation.json"), verifiedInstallation{
 		SchemaVersion:       1,
 		AppID:               12345,
-		AppSlug:             "nddev-gha-fleet",
+		AppSlug:             "example-actions-fleet",
 		InstallationID:      67890,
 		AccountLogin:        testTenant().Owner,
 		OwnerType:           OwnerTypeOrganization,
@@ -99,7 +99,7 @@ func bundleWithSelection(t *testing.T, now time.Time, selection string) string {
 	writePrivateJSON(t, filepath.Join(bundlePath, "installation.json"), verifiedInstallation{
 		SchemaVersion:       1,
 		AppID:               12345,
-		AppSlug:             "nddev-gha-fleet",
+		AppSlug:             "example-actions-fleet",
 		InstallationID:      67890,
 		AccountLogin:        testTenant().Owner,
 		OwnerType:           OwnerTypeOrganization,

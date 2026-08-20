@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+const repositoryRoot = "../.."
+
 func TestPublicRepositoryHasNoPrivateFleetRouting(t *testing.T) {
 	t.Parallel()
 	paths, err := filepath.Glob(repositoryRoot + "/.github/workflows/*.yml")

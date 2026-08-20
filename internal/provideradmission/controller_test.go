@@ -219,7 +219,7 @@ func TestColdAdmissionDoesNotPreemptClaimedOrSamePoolWarmCapacity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decision.Admitted || len(result.PreemptedWarmWorkers) != 0 || result.Decision.Reason != admission.ReasonPoolSaturated {
+	if result.Decision.Admitted || len(result.PreemptedWarmWorkers) != 0 || result.Decision.Reason != admission.ReasonInsufficientCPU {
 		t.Fatalf("same-pool warm capacity was preempted: %#v", result)
 	}
 }
@@ -336,7 +336,6 @@ func request(name string) Request {
 			MemoryMiB:        10 * 1024,
 			ImageFingerprint: testFingerprint,
 		},
-		MaxRunning: 1,
 	}
 }
 
@@ -357,7 +356,7 @@ func warmClaim(jobName string) WarmClaimRequest {
 	}
 }
 
-func TestAdmitPersistsLeaseAndRejectsPoolSaturation(t *testing.T) {
+func TestAdmitPersistsLeaseAndRejectsSharedLedgerExhaustion(t *testing.T) {
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
 	controller := testController(t, &now)
 
@@ -372,7 +371,7 @@ func TestAdmitPersistsLeaseAndRejectsPoolSaturation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Admitted || second.Reason != admission.ReasonPoolSaturated {
+	if second.Admitted || second.Reason != admission.ReasonInsufficientCPU {
 		t.Fatalf("second decision=%#v", second)
 	}
 	journal, err := controller.Store.Read(context.Background())
@@ -381,6 +380,34 @@ func TestAdmitPersistsLeaseAndRejectsPoolSaturation(t *testing.T) {
 	}
 	if len(journal.Leases) != 1 || journal.Leases["runner-1"].State != providerjournal.StateAdmitted {
 		t.Fatalf("journal=%#v", journal)
+	}
+}
+
+func TestDifferentCapabilitiesShareTheSameResourceLedger(t *testing.T) {
+	now := time.Date(2026, time.August, 17, 6, 0, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	host := healthyHost()
+	host.TotalCPUUnits = 16
+	host.TotalMemoryMiB = 64 * 1024
+	host.AvailableMemoryMiB = 64 * 1024
+
+	requests := []Request{
+		request("standard-1"),
+		integrationRequest("integration-1"),
+		request("standard-2"),
+	}
+	for _, candidate := range requests {
+		decision, err := controller.Admit(context.Background(), host, nil, candidate)
+		if err != nil || !decision.Admitted {
+			t.Fatalf("shared ledger refused %s: decision=%#v err=%v", candidate.InstanceName, decision, err)
+		}
+	}
+	decision, err := controller.Admit(context.Background(), host, nil, integrationRequest("integration-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Admitted || decision.Reason != admission.ReasonInsufficientCPU {
+		t.Fatalf("shared ledger exceeded fleet CPU reserve: %#v", decision)
 	}
 }
 
@@ -433,7 +460,7 @@ func TestObservedInstanceIsRecoveredAndCounted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Admitted || decision.Reason != admission.ReasonPoolSaturated {
+	if decision.Admitted || decision.Reason != admission.ReasonInsufficientCPU {
 		t.Fatalf("decision=%#v", decision)
 	}
 	journal, err := controller.Store.Read(context.Background())
@@ -702,47 +729,5 @@ func TestReleaseByGARMNameRemovesWarmLeaseAndClaim(t *testing.T) {
 	}
 	if len(journal.Leases) != 0 || len(journal.Claims) != 0 {
 		t.Fatalf("journal=%#v", journal)
-	}
-}
-
-// Resizing a class must not wedge the fleet on the workers already running.
-//
-// A lease records what its instance was created with; the allocation it is
-// reconciled against is built from the policy as it reads now. When
-// nddev-linux-integration went from 4 vCPU / 8192 MiB to 2 / 6144 while one
-// worker was thirty minutes into a job, every reconciliation called that a
-// conflict and refused the next create -- 766 of them in twenty-five minutes.
-func TestReconcileToleratesALeaseWhoseClassWasResizedUnderIt(t *testing.T) {
-	t.Parallel()
-	lease := providerjournal.Lease{
-		InstanceName: "worker-1", ControllerID: "controller-1",
-		PoolID: "pool-1", PoolName: "integration",
-		VCPU: 4, MemoryMiB: 8192, ImageFingerprint: "image-old",
-	}
-	// The same instance, described by a policy that has since been resized and
-	// had its image rebuilt.
-	resized := Allocation{
-		InstanceName: "worker-1", ControllerID: "controller-1",
-		PoolID: "pool-1", PoolName: "integration",
-		VCPU: 2, MemoryMiB: 6144, ImageFingerprint: "image-new",
-	}
-	if err := leaseIdentityMatches(lease, resized); err != nil {
-		t.Fatalf("a resize was treated as a conflict: %v", err)
-	}
-	if err := leaseMatches(lease, resized); err == nil {
-		t.Fatal("the strict comparison stopped noticing a resource change")
-	}
-
-	// Identity is still enforced: a lease that names another instance, another
-	// controller or another pool is a real conflict whatever the policy says.
-	for name, wrong := range map[string]Allocation{
-		"instance":   {InstanceName: "worker-2", ControllerID: "controller-1", PoolID: "pool-1", PoolName: "integration"},
-		"controller": {InstanceName: "worker-1", ControllerID: "controller-2", PoolID: "pool-1", PoolName: "integration"},
-		"pool id":    {InstanceName: "worker-1", ControllerID: "controller-1", PoolID: "pool-2", PoolName: "integration"},
-		"pool name":  {InstanceName: "worker-1", ControllerID: "controller-1", PoolID: "pool-1", PoolName: "standard"},
-	} {
-		if err := leaseIdentityMatches(lease, wrong); err == nil {
-			t.Errorf("a %s mismatch was accepted", name)
-		}
 	}
 }

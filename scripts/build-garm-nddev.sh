@@ -19,11 +19,11 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.16"
+readonly derivative_version="v0.2.1-nddev.43"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
-readonly build_image="docker.io/library/golang@sha256:6c5605ab3a9a9fb3c4eafe5b3d63cdbf3881caf113262b67862547b54a9db599"
-readonly build_go_version="go1.26.5"
+readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
+readonly build_go_version="go1.26.6"
 readonly build_cgo_enabled="1"
 readonly build_target_os="linux"
 readonly build_target_arch="amd64"
@@ -32,32 +32,62 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="caa54233f4252f223f8f7b2461c25a10f6f1108e7815483d31331b85b7865165"
+readonly expected_binary_sha256="132182395c9b28e2ad8898630656c9b09ecde22b1bf721ddb0983fa4915c67c4"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
   "third_party/garm/patches/0003-failed-scale-set-runner-cleanup.patch"
   "third_party/garm/patches/0004-direct-jit-provider-handoff.patch"
   "third_party/garm/patches/0005-direct-jit-phase-telemetry.patch"
+  "third_party/garm/patches/0006-durable-provider-create-retry.patch"
+  "third_party/garm/patches/0007-fast-authoritative-job-reconciliation.patch"
+  "third_party/garm/patches/0008-authoritative-scale-set-job-reconciliation.patch"
+  "third_party/garm/patches/0009-precreate-provider-admission.patch"
+  "third_party/garm/patches/0010-synchronize-instance-manager-state.patch"
+  "third_party/garm/patches/0011-protect-incomplete-provider-lifecycle.patch"
+  "third_party/garm/patches/0012-require-admitted-intent-before-scale-up.patch"
+  "third_party/garm/patches/0013-wake-capacity-after-delete.patch"
+  "third_party/garm/patches/0014-refresh-terminal-instance-state.patch"
+  "third_party/garm/patches/0015-authoritative-terminal-delete.patch"
+  "third_party/garm/patches/0016-recheck-terminal-delete-conflict.patch"
+  "third_party/garm/patches/0017-authoritative-queue-intent-reconciliation.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
-  "2727ad8b3e92f7800af1251c032cd3b0a6d5b50babcbdab65bffe59a69d76131"
+  "7a4cd4efa8b2c8b072c5de78cd58f2b3367d91938425fdcd58402c77e8a8b1c6"
   "0cd77616af4160eae7be51f91340841b30e13d4b20ea5873e004c1b81d7879e1"
   "d23873baf6689c7e4cc366b14979ad86367ef9e321cb6d5d2745c78e64a3c172"
   "49de677a1c483e58cc009ef8f23d301ef4647ea01aec4100a3e6c49376f7889f"
+  "2c5ebf1cc435345cb6cc9646cacbe27206c0c17d0b30f08b5aaeb856d731974c"
+  "3c9631ee2c73eedee90fc2f26a7f87361021236b6a1bc7b7ffffa2f0d1c3c3a3"
+  "b38bc35afa7a93d703e8e141495ac9e930462feb74e941ee983e98b02d1ee565"
+  "6bd28c42a3da9de1b9839d500c2a68d8507bc6f638caf935ccb81fa0fbef5f29"
+  "be418618739cc44d0bb2481ad3d6b33f8e7e2ef6b696f70987e8d20aa4df743f"
+  "7c77950cabfd74ddd5d3d0bb65b823aa61ebc1605c3ad97e88a195a7e242f29f"
+  "5bc07422308b630f0a005ce6ae7212428ea386d235e3ac75cb71046c18713f2e"
+  "953e671d0d14dd64cdb9930ac5fa4ef6e62ba08438277e7bd385f138345c6e2e"
+  "43d3a7cf1986c1e00250053c82a0996bbf40263ab410c679258bff72cf6d1b00"
+  "50123c3502e060566b4a78f55f850ae36b37f25988d200b10c6cec414a6655ac"
+  "60254f449fd0175db2636108cc65b8ea761a7b3933b1b185d6417ba48caffecb"
+  "fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
   "third_party/garm/overlay/workers/scaleset/queue_intent_test.go"
+  "third_party/garm/overlay/workers/provider/nddev_create_retry.go"
+  "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "3b8cca7c0288aeee8fd8e05697414c0a43264c5b660d2f265226f05f32af15e1"
-  "597e04c32036d7bd71fd31b2341da54b9fbc01c910bf810f943961619f010fe8"
+  "3106a3671effb1e99f4331cf918486ff9e02b8706cafed039a73a2d26ca6d59a"
+  "0bc57d53c52686d7449ab8d9498be8356abd709f3b2cf6d75757c796e1b72d17"
+  "18709cebc5f909b762bf10bdf6cc5c8c65d651edc4cbb26132c739a19b2f2c7f"
+  "607b37300281cb85ec2b04378ed1dff1d57db278811e3d09d29867aee7ea7cad"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
   "workers/scaleset/queue_intent_test.go"
+  "workers/provider/nddev_create_retry.go"
+  "workers/provider/nddev_create_retry_test.go"
 )
 # END GENERATED REGION
 

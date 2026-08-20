@@ -5,7 +5,7 @@
 // 2d277bd, 108 commits back, waiting for "an immutable surface:5 handoff that
 // defines the supported runner label, the admission and authorization contract,
 // the rollout state, and the exact module commit with its acceptance evidence"
-// (NDDev-OpenNetwork/github-device-sync#172).
+// (example-org/github-device-sync#172).
 //
 // Almost all of it is derived. config/fleet-contract.yaml holds only what cannot
 // be: which promises are contractual, which are not, and what is still open. The

@@ -2,6 +2,7 @@ package scaleset
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,6 +119,45 @@ func newQueueIntentCoordinatorFromEnvironment() *queueIntentCoordinator {
 	}
 }
 
+// NDDevRemoveQueueIntent releases one exact journal intent after another GARM
+// subsystem has authoritatively proved the GitHub job terminal or absent. Job
+// IDs are globally stable UUIDs, but ambiguity still fails closed rather than
+// deleting more than one scale-set generation.
+func NDDevRemoveQueueIntent(ctx context.Context, jobID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !validQueueText(jobID) {
+		return false, fmt.Errorf("authoritative queue reconciliation requires an exact job ID")
+	}
+	coordinator := newQueueIntentCoordinatorFromEnvironment()
+	config, err := coordinator.loadConfig()
+	if err != nil {
+		return false, err
+	}
+	removed := false
+	err = coordinator.update(config, func(journal *queueIntentJournal, now time.Time) error {
+		matched := ""
+		for key, intent := range journal.Intents {
+			if intent.JobID != jobID {
+				continue
+			}
+			if matched != "" {
+				return fmt.Errorf("authoritative queue reconciliation is ambiguous for job %q", jobID)
+			}
+			matched = key
+		}
+		if matched == "" {
+			return nil
+		}
+		delete(journal.Intents, matched)
+		admitQueuedToBudget(journal, config, now)
+		removed = true
+		return nil
+	})
+	return removed, err
+}
+
 func (c *queueIntentCoordinator) Validate() error {
 	config, err := c.loadConfig()
 	if err != nil {
@@ -177,24 +217,9 @@ func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs
 					return fmt.Errorf("duplicate queue intent %q changed available-job metadata", intent.Key)
 				}
 				ensureRepositoryState(journal, config, intent.Repository)
-				// Redelivery is not progress for a job that has already been
-				// admitted, and must not extend its TTL: a stale acquired
-				// message would otherwise hold the global admission slot
-				// forever by refreshing itself. Observed once as an assigned
-				// intent holding a one-wide class for twenty-four hours.
-				//
-				// A job still in `queued` is the opposite case. It holds no
-				// slot, so refreshing it costs no one capacity, and GitHub
-				// redelivering it is the only evidence the queue gets that the
-				// job is still waiting rather than gone. Letting that expire
-				// made waiting fatal: the intent was dropped, nothing wrote
-				// another, and the job could never be placed again while GARM
-				// kept creating runners the provider had to refuse.
-				if waiting := journal.Intents[intent.Key]; waiting.State == queueStateQueued {
-					waiting.ExpiresAt = expiryForState(config, queueStateQueued, now)
-					waiting.UpdatedAt = now
-					journal.Intents[intent.Key] = waiting
-				}
+				// Redelivery is not progress and must not extend any state TTL.
+				// In particular, a stale acquired message cannot block the global
+				// admission slot forever by refreshing itself.
 				continue
 			}
 			journal.Intents[intent.Key] = intent
@@ -233,6 +258,30 @@ func (c *queueIntentCoordinator) HasQueuedAvailable(scaleSet params.ScaleSet, jo
 		return nil
 	})
 	return pending, err
+}
+
+// AdmittedCapacityTarget is the exact current runner target from durable queue
+// ownership. Desired runner count can lag cancellations, so it may only be an
+// upper bound on this count.
+func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet, entity params.ForgeEntity) (int, error) {
+	config, err := c.loadConfig()
+	if err != nil {
+		return 0, err
+	}
+	target := 0
+	err = c.update(config, func(journal *queueIntentJournal, _ time.Time) error {
+		for _, intent := range journal.Intents {
+			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name || intent.Owner != entity.Owner {
+				continue
+			}
+			switch intent.State {
+			case queueStateAssigned, queueStateAcquiring, queueStateAcquired, queueStateRunning:
+				target++
+			}
+		}
+		return nil
+	})
+	return target, err
 }
 
 // SelectForAcquire reserves every globally eligible candidate in this message.
@@ -358,9 +407,10 @@ func (c *queueIntentCoordinator) FailAcquire(scaleSet params.ScaleSet, selected 
 // protocol and carries only jobId reliably. Repository identity comes from the
 // canonical repository-scoped ForgeEntity; workflow metadata and the numeric
 // runnerRequestId are bound later from JobAvailable. The returned boolean is
-// true when an assigned message must remain unacknowledged until this job wins
-// the global admission slot. Organization and enterprise Scale Sets fail closed
-// because their sparse assigned message cannot identify a repository fairly.
+// JobAssigned is observation only: without RunnerRequestID it cannot own a
+// resource token. JobAvailable binds the complete identity and is the first
+// event allowed to reserve capacity. The returned boolean remains for patch
+// compatibility and is always false after the durable journal write.
 func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntity, assigned, started, completed []params.ScaleSetJobMessage) (bool, error) {
 	config, err := c.loadConfig()
 	if err != nil {
@@ -373,11 +423,11 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	if scaleSet.MaxRunners < 1 {
 		return false, fmt.Errorf("queue admission requires a scale set that admits at least one runner, got max_runners=%d", scaleSet.MaxRunners)
 	}
-	deferred := false
 	var orphanedStarts []string
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		orphanedStarts = orphanedStarts[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
+		startedKeys := make(map[string]struct{}, len(started))
 		for _, job := range completed {
 			if !validQueueText(job.JobID) {
 				return fmt.Errorf("completed job has invalid job ID")
@@ -386,6 +436,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		}
 		for _, job := range started {
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+			startedKeys[key] = struct{}{}
 			if _, completedInBatch := completedKeys[key]; completedInBatch {
 				continue
 			}
@@ -424,6 +475,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				continue
 			}
 			existing, exists := journal.Intents[intent.Key]
+			// A started event without an existing admitted intent is already
+			// acknowledged above as authoritative external state. Creating a new
+			// assigned intent for the same job later in this batch makes the next
+			// replay promote a phantom running intent with no runner request or VM.
+			if _, startedInBatch := startedKeys[intent.Key]; startedInBatch && !exists {
+				continue
+			}
 			if exists {
 				if !queueIntentCoreIdentityEqual(existing, intent) {
 					return fmt.Errorf("duplicate assigned intent %q changed immutable identity", intent.Key)
@@ -433,18 +491,15 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				journal.Intents[intent.Key] = intent
 				ensureRepositoryState(journal, config, intent.Repository)
 			}
-			if intent.State != queueStateQueued {
-				continue
-			}
-			admitted, err := tryAdmitQueueIntent(journal, config, intent.Key, now)
-			if err != nil {
-				return err
-			}
-			deferred = deferred || !admitted
 		}
 		for key := range completedKeys {
 			delete(journal.Intents, key)
 		}
+		// JobAssigned is durable before its GitHub message is acknowledged. When
+		// completion releases budget, promote the next queued intents inside the
+		// same journal transaction so no later redelivery is required to wake the
+		// fair scheduler.
+		admitQueuedToBudget(journal, config, now)
 		return nil
 	})
 	for _, key := range orphanedStarts {
@@ -453,7 +508,27 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			"key", key, "scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
 		)
 	}
-	return deferred, err
+	// A durable assigned/queued intent is the crash-safe ownership transfer.
+	// Retaining JobAssigned at GitHub only causes head-of-line redelivery and
+	// prevents later JobCompleted messages from reaching this listener.
+	return false, err
+}
+
+func admitQueuedToBudget(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
+	for {
+		globalInFlight, repositoryInFlight := queueInFlight(journal)
+		if globalInFlight >= config.MaxInFlight {
+			return
+		}
+		candidates := eligibleQueueCandidates(journal, config, repositoryInFlight, now)
+		if len(candidates) == 0 {
+			return
+		}
+		admitted, err := tryAdmitQueueIntent(journal, config, candidates[0].Key, now)
+		if err != nil || !admitted {
+			return
+		}
+	}
 }
 
 func tryAdmitQueueIntent(journal *queueIntentJournal, config queueAdmissionConfig, key string, now time.Time) (bool, error) {
@@ -546,6 +621,7 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 		return fmt.Errorf("snapshot queue-intent journal: %w", err)
 	}
 	now := c.nowUTC()
+	migrateLegacyQueueIntentOwnership(&journal, config, now)
 	cleanupExpiredQueueIntents(&journal, now)
 	if err := validateQueueBudget(&journal, config); err != nil {
 		return err
@@ -569,6 +645,29 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	journal.Generation++
 	journal.UpdatedAt = now
 	return writeQueueIntentJournal(c.journalPath, journal)
+}
+
+func migrateLegacyQueueIntentOwnership(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
+	for key, intent := range journal.Intents {
+		switch {
+		case intent.State == queueStateAssigned && intent.RunnerRequestID == 0:
+			// Before nddev.41, sparse JobAssigned consumed a slot and received the
+			// execution horizon. It is observation-only in the current model.
+			intent.State = queueStateQueued
+			intent.ExpiresAt = expiryForState(config, queueStateQueued, now)
+		case intent.State == queueStateAssigned:
+			deadline := expiryForState(config, queueStateAssigned, now)
+			if intent.ExpiresAt.After(deadline) {
+				intent.ExpiresAt = deadline
+			}
+		case intent.State == queueStateAcquired:
+			deadline := expiryForState(config, queueStateAcquired, now)
+			if intent.ExpiresAt.After(deadline) {
+				intent.ExpiresAt = deadline
+			}
+		}
+		journal.Intents[key] = intent
+	}
 }
 
 func (c queueAdmissionConfig) Validate() error {
@@ -713,7 +812,8 @@ func baseQueuePriority(scaleSetName string, job params.ScaleSetJobMessage) int {
 func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	candidates := make([]queueIntent, 0)
 	for _, intent := range journal.Intents {
-		if intent.State != queueStateQueued || inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight {
+		if intent.State != queueStateQueued || intent.RunnerRequestID <= 0 ||
+			inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight {
 			continue
 		}
 		candidates = append(candidates, intent)
@@ -805,15 +905,14 @@ func expiryForState(config queueAdmissionConfig, state queueIntentState, now tim
 	case queueStateAcquiring:
 		seconds = config.AcquiringTTLSeconds
 	case queueStateAcquired:
+		// AcquireJobs succeeded, but JobStarted has not proved execution. Bound
+		// provider/JIT/registration stalls to their explicit phase horizon.
 		seconds = config.AcquiredTTLSeconds
 	case queueStateAssigned:
-		// Assigned means "won the global slot, will be acquired next", and the
-		// gap to acquiring is seconds. It used to share the execution TTL, so an
-		// intent that never advanced -- a job GitHub had already cancelled, an
-		// acquisition that never came -- held the only slot of a one-wide class
-		// for twenty-four hours. Observed on gha-runner-1: an intent assigned at
-		// 02:09 still holding at 02:30, expiring 2026-08-16.
-		seconds = config.AcquiredTTLSeconds
+		// Assigned now means a complete JobAvailable identity reserved central
+		// capacity but not yet sent to AcquireJobs. It owns no GitHub job or
+		// provider resource and must not retain a slot for an execution horizon.
+		seconds = config.AcquiringTTLSeconds
 	case queueStateRunning:
 		// Running is the one state that legitimately lasts as long as a job.
 		seconds = config.ExecutionTTLSeconds

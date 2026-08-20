@@ -81,5 +81,5 @@ type Transport struct {
 // FleetStreams are the streams the fleet owns in the store. Keeping them named
 // here means a pipeline cannot quietly write into a stream nobody declared.
 func FleetStreams() []string {
-	return []string{"fleet_logs", "fleet_metrics"}
+	return []string{"fleet_logs", "fleet_metrics", "fleet_traces"}
 }

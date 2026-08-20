@@ -1,0 +1,23 @@
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 9aaaeeb..db13d8e 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -32,6 +32,7 @@ import (
+ 	"github.com/cloudbase/garm/params"
+ 	"github.com/cloudbase/garm/runner/common"
+ 	garmUtil "github.com/cloudbase/garm/util"
++	providerWorker "github.com/cloudbase/garm/workers/provider"
+ )
+ 
+ func NewWorker(ctx context.Context, store dbCommon.Store, scaleSet params.ScaleSet, provider common.Provider) (*Worker, error) {
+@@ -813,6 +814,10 @@ func (w *Worker) handleScaleUp() {
+ 		slog.DebugContext(w.ctx, "target is less than or equal to current; not scaling up")
+ 		return
+ 	}
++	if err := providerWorker.NDDevScaleSetCreateAllowed(w.ctx, w.scaleSet, w.entity); err != nil {
++		slog.DebugContext(w.ctx, "provider retry preflight deferred scale up", "error", err)
++		return
++	}
+ 
+ 	controllerConfig, err := w.store.ControllerInfo()
+ 	if err != nil {

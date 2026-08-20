@@ -9,11 +9,11 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
-	"github.com/NDDev-OpenNetwork/github-actions/internal/incuspolicy"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/provideradmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 	"github.com/cloudbase/garm-provider-common/params"
 	"github.com/lxc/incus/v7/shared/api"
 )
@@ -28,11 +28,11 @@ var supportedPlatformHosts = map[string]struct{}{
 	// The queue host. It runs the provider but no workers, which is exactly
 	// why it has to be listed: the assertion is that a policy written for one
 	// host is never executed against another, and the queue host executes one.
-	"server-gha-services": {},
-	"server-gha-runner-1": {},
-	"server-gha-runner-2": {},
-	"server-gha-runner-3": {},
-	"server-gha-runner-4": {},
+	"example-services": {},
+	"example-runner-1": {},
+	"example-runner-2": {},
+	"example-runner-3": {},
+	"example-runner-4": {},
 }
 
 type admissionController interface {
@@ -67,11 +67,14 @@ func (n *nddevAdmission) AuthorizeWarmDrain(ctx context.Context, instanceName st
 }
 
 type nddevAdmission struct {
-	platform     platformconfig.Config
-	controllerID string
-	workerImages map[string]providerconfig.WorkerImage
-	controller   provideradmission.Controller
-	queueIntents queueintent.Reader
+	cfg                  *providerconfig.Incus
+	platform             platformconfig.Config
+	controllerID         string
+	workerImages         map[string]providerconfig.WorkerImage
+	controller           provideradmission.Controller
+	queueIntents         queueintent.Reader
+	diagnosticsDirectory string
+	diagnosticsMaxBytes  int64
 }
 
 func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAdmission, error) {
@@ -99,6 +102,7 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 		return nil, err
 	}
 	return &nddevAdmission{
+		cfg:          cfg,
 		platform:     platform,
 		controllerID: controllerID,
 		workerImages: cfg.WorkerImages,
@@ -110,13 +114,16 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 			ControllerID: controllerID,
 			Policy: admission.ReservePolicy{
 				MinimumCPUUnits:        platform.HostReserve.MinimumCPUUnits,
+				MaximumFleetCPUPercent: platform.HostReserve.MaximumFleetCPUPercent,
 				MinimumMemoryMiB:       platform.HostReserve.MinimumMemoryMiB,
 				MinimumPercent:         platform.HostReserve.MinimumPercent,
 				MinimumFreeDiskPercent: platform.HostReserve.MinimumFreeDiskPercent,
 			},
 			LeaseTTL: time.Duration(cfg.AdmissionLeaseSeconds) * time.Second,
 		},
-		queueIntents: queueintent.Reader{Path: cfg.QueueIntentFile},
+		queueIntents:         queueintent.Reader{Path: cfg.QueueIntentFile},
+		diagnosticsDirectory: cfg.DiagnosticsDirectory,
+		diagnosticsMaxBytes:  cfg.DiagnosticsMaxTotalBytes,
 	}, nil
 }
 
@@ -143,7 +150,7 @@ func validateWorkerImageMappings(platform platformconfig.Config, images map[stri
 }
 
 func (n *nddevAdmission) Reconcile(ctx context.Context, cli InstanceServerInterface) error {
-	observed, err := n.observedAllocations(cli)
+	observed, err := n.observedAllocations(ctx, cli)
 	if err != nil {
 		return err
 	}
@@ -155,6 +162,13 @@ func (n *nddevAdmission) Admit(
 	cli InstanceServerInterface,
 	bootstrap params.BootstrapInstance,
 ) (provideradmission.AdmissionResult, error) {
+	if blocked, err := n.diagnosticsBlocked(); err != nil {
+		return provideradmission.AdmissionResult{}, err
+	} else if blocked {
+		return provideradmission.AdmissionResult{Decision: admission.Decision{
+			Admitted: false, Reason: admission.ReasonDiagnosticWAL, Pool: bootstrap.Flavor,
+		}}, nil
+	}
 	// The flavor is this host's local pool name, which must be unique here.
 	// The journal records GitHub's scale set name, which is unique only per
 	// tenant. They are equal for every single-tenant pool, so authorizing on
@@ -181,7 +195,7 @@ func (n *nddevAdmission) Admit(
 	if !exists {
 		return provideradmission.AdmissionResult{}, fmt.Errorf("pool %q has no pinned worker image", bootstrap.Flavor)
 	}
-	observed, err := n.observedAllocations(cli)
+	observed, err := n.observedAllocations(ctx, cli)
 	if err != nil {
 		return provideradmission.AdmissionResult{}, err
 	}
@@ -199,12 +213,16 @@ func (n *nddevAdmission) Admit(
 			MemoryMiB:        pool.Resources.MemoryMiB,
 			ImageFingerprint: imagePolicy.Fingerprint,
 		},
-		MaxRunning:            pool.MaxRunning,
 		QueueIntentAuthorized: true,
 	})
 }
 
 func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterface, flavor, instanceName string) (admission.Decision, error) {
+	if blocked, err := n.diagnosticsBlocked(); err != nil {
+		return admission.Decision{}, err
+	} else if blocked {
+		return admission.Decision{Admitted: false, Reason: admission.ReasonDiagnosticWAL, Pool: flavor}, nil
+	}
 	blocked, err := n.WarmBlockedByQueue(ctx)
 	if err != nil {
 		return admission.Decision{}, err
@@ -220,7 +238,7 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 	if !exists {
 		return admission.Decision{}, fmt.Errorf("pool %q has no pinned worker image", flavor)
 	}
-	observed, err := n.observedAllocations(cli)
+	observed, err := n.observedAllocations(ctx, cli)
 	if err != nil {
 		return admission.Decision{}, err
 	}
@@ -238,8 +256,15 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 			MemoryMiB:        pool.Resources.MemoryMiB,
 			ImageFingerprint: imagePolicy.Fingerprint,
 		},
-		MaxRunning: pool.MaxRunning,
 	})
+}
+
+func (n *nddevAdmission) diagnosticsBlocked() (bool, error) {
+	stats, err := workerdiagnostics.Inspect(n.diagnosticsDirectory, time.Now().UTC())
+	if err != nil {
+		return false, fmt.Errorf("inspect diagnostic durable WAL: %w", err)
+	}
+	return workerdiagnostics.AtDurableWALHighWatermark(stats, n.diagnosticsMaxBytes), nil
 }
 
 func (n *nddevAdmission) WarmBlockedByQueue(ctx context.Context) (bool, error) {
@@ -250,17 +275,61 @@ func (n *nddevAdmission) WarmBlockedByQueue(ctx context.Context) (bool, error) {
 	return blocked, nil
 }
 
-func (n *nddevAdmission) observedAllocations(cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
+func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
 	instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
 	if err != nil {
 		return nil, fmt.Errorf("observe Incus allocations: %w", err)
 	}
 	allocations := make([]provideradmission.Allocation, 0, len(instances))
 	for _, instance := range instances {
-		if instance.Type != string(api.InstanceTypeVM) {
-			return nil, fmt.Errorf("instance %q is not a virtual machine", instance.Name)
-		}
 		flavor := instance.ExpandedConfig[flavorKey]
+		if flavor == "" {
+			if strings.HasPrefix(instance.Name, "gha-image-builder-") || strings.HasPrefix(instance.Name, "gha-image-smoke-") {
+				if len(instance.Profiles) != 1 {
+					return nil, fmt.Errorf("image maintenance instance %q has ambiguous profiles", instance.Name)
+				}
+				maintenancePool, exists := n.platform.Pool(instance.Profiles[0])
+				if !exists {
+					return nil, fmt.Errorf("image maintenance instance %q uses unknown profile %q", instance.Name, instance.Profiles[0])
+				}
+				imagePolicy, exists := n.workerImages[maintenancePool.Name]
+				if !exists {
+					return nil, fmt.Errorf("image maintenance profile %q has no worker image policy", maintenancePool.Name)
+				}
+				allocations = append(allocations, provideradmission.Allocation{
+					InstanceName: instance.Name, ControllerID: n.controllerID,
+					PoolID: "image-maintenance/" + maintenancePool.Name, PoolName: maintenancePool.Name,
+					VCPU: maintenancePool.Resources.VCPU, MemoryMiB: maintenancePool.Resources.MemoryMiB,
+					ImageFingerprint: imagePolicy.Fingerprint, State: providerjournal.StateCreated,
+				})
+				continue
+			}
+			if instance.State != nil && instance.State.Status == "Stopped" {
+				// A canceled create can stop the Incus instance before its
+				// asynchronous delete removes it. It consumes no CPU or memory
+				// and remains visible to orphan/missing reconciliation.
+				continue
+			}
+			// Incus may briefly expose a pending/deleting instance without its
+			// expanded config. The durable lease is authoritative during that
+			// bounded transition; an unjournaled incomplete instance remains a
+			// hard error rather than disappearing from capacity accounting.
+			state, err := n.controller.Store.ReadOnly(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("read provider journal for incomplete instance %q: %w", instance.Name, err)
+			}
+			lease, owned := state.Leases[instance.Name]
+			if !owned || (lease.State != providerjournal.StateAdmitted && lease.State != providerjournal.StateCreated && lease.State != providerjournal.StateDeleting) {
+				return nil, fmt.Errorf("instance %q has unknown flavor %q", instance.Name, flavor)
+			}
+			allocations = append(allocations, provideradmission.Allocation{
+				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
+				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU,
+				MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
+				State: lease.State, JobName: instance.Name,
+			})
+			continue
+		}
 		pool, exists := n.platform.Pool(flavor)
 		if !exists {
 			return nil, fmt.Errorf("instance %q has unknown flavor %q", instance.Name, flavor)
@@ -269,9 +338,21 @@ func (n *nddevAdmission) observedAllocations(cli InstanceServerInterface) ([]pro
 		if !exists {
 			return nil, fmt.Errorf("instance %q flavor %q has no pinned worker image", instance.Name, flavor)
 		}
+		wantedType, securityChecks := managedSecurityContract(imagePolicy)
+		if instance.Type != wantedType {
+			return nil, fmt.Errorf("instance %q has type %q, expected %q", instance.Name, instance.Type, wantedType)
+		}
 		lifecycle := instance.ExpandedConfig[lifecycleKey]
 		if lifecycle != lifecycleEphemeralOneJob && lifecycle != lifecycleWarmPreparing && lifecycle != lifecycleWarmUnregistered {
 			return nil, fmt.Errorf("instance %q has unsupported lifecycle %q", instance.Name, lifecycle)
+		}
+		if lifecycle == lifecycleEphemeralOneJob && !n.cfg.AllowsProviderIdentity(
+			instance.ExpandedConfig[providerVersionKey], instance.ExpandedConfig[providerCommitKey], Version, Commit,
+		) {
+			return nil, fmt.Errorf(
+				"instance %q has unsupported provider identity %q@%q, current is %q@%q",
+				instance.Name, instance.ExpandedConfig[providerVersionKey], instance.ExpandedConfig[providerCommitKey], Version, Commit,
+			)
 		}
 		checks := []struct {
 			key      string
@@ -280,14 +361,10 @@ func (n *nddevAdmission) observedAllocations(cli InstanceServerInterface) ([]pro
 			{controllerIDKeyName, n.controllerID},
 			{imageAliasKey, imagePolicy.Alias},
 			{imageFingerprintKey, imagePolicy.Fingerprint},
-			{providerVersionKey, Version},
-			{providerCommitKey, Commit},
 			{osTypeKeyName, string(params.Linux)},
 			{osArchKeyNAme, string(params.Amd64)},
-			{"security.secureboot", "true"},
-			{"security.nesting", "false"},
-			{"raw.qemu", incuspolicy.DisableNestedVirtualizationRawQEMU},
 		}
+		checks = append(checks, securityChecks[2:]...)
 		for _, check := range checks {
 			if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
 				return nil, fmt.Errorf(
@@ -363,7 +440,7 @@ func (n *nddevAdmission) ClaimWarm(ctx context.Context, cli InstanceServerInterf
 			"pool %q has no active pre-AcquireJobs queue intent for scale set %q of account %q",
 			bootstrap.Flavor, pool.ScaleSetName, bootstrapOwner(bootstrap))
 	}
-	observed, err := n.observedAllocations(cli)
+	observed, err := n.observedAllocations(ctx, cli)
 	if err != nil {
 		return provideradmission.WarmClaimResult{}, err
 	}

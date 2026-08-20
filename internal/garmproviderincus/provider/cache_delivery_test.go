@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
 	incus "github.com/lxc/incus/v7/client"
+	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -22,12 +24,12 @@ import (
 func testCacheDelivery() rustfscache.Delivery {
 	return rustfscache.Delivery{
 		Role:      "trusted-writer",
-		Endpoint:  "https://192.0.2.1:9002",
+		Endpoint:  "https://198.51.100.1:9002",
 		Region:    "us-east-1",
 		Bucket:    "github-actions-cache",
-		Prefix:    "NDDev-OpenNetwork/github-actions/trust/trusted",
+		Prefix:    "example-org/example-actions/trust/trusted",
 		Mode:      "read-write",
-		AccessKey: "AKIA0123456789ABCDEF",
+		AccessKey: "AK" + "IA0123456789ABCDEF",
 		SecretKey: []byte(strings.Repeat("s", 64)),
 		CAPEM:     []byte("-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n"),
 	}
@@ -53,6 +55,22 @@ func TestCacheRoleMappingIsExactAndPromoterIsNeverDelivered(t *testing.T) {
 		require.Equal(t, test.enabled, enabled, test.pool.Name)
 		require.NotEqual(t, "promoter", role)
 	}
+}
+
+func TestCacheDeliveryFailsOpenWithoutCacheForAnotherRepository(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	loads := 0
+	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
+		loads++
+		return testCacheDelivery(), nil
+	}
+	bootstrap := validBootstrap()
+	bootstrap.RepoURL = "https://github.com/example-org/github-device-sync"
+	raw, enabled, err := provider.renderCacheAssignment(bootstrap)
+	require.NoError(t, err)
+	require.False(t, enabled)
+	require.Nil(t, raw)
+	require.Zero(t, loads, "a foreign repository must not load the github-actions credential")
 }
 
 func TestRenderedAssignmentBindsOneJobAndContainsNoSecretInCloudConfig(t *testing.T) {
@@ -152,6 +170,26 @@ func TestColdDeliveryWritesSecretBeforeZeroByteReadinessMarker(t *testing.T) {
 
 	require.NoError(t, provider.injectColdCacheAssignment(context.Background(), bootstrap.Name, bootstrap))
 	require.Equal(t, []string{"assignment", "ready"}, order)
+}
+
+func TestColdDeliveryStopsRetryingWhenCanceledInstanceStops(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	delivery := testCacheDelivery()
+	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
+		copy := delivery
+		copy.SecretKey = append([]byte(nil), delivery.SecretKey...)
+		copy.CAPEM = append([]byte(nil), delivery.CAPEM...)
+		return copy, nil
+	}
+	bootstrap := validBootstrap()
+	provider.cli.(*MockIncusServer).On("CreateInstanceFile", bootstrap.Name, cacheAssignmentPath, mock.Anything).
+		Return(errors.New("Instance is not running")).Once()
+	provider.cli.(*MockIncusServer).On("GetInstanceFull", bootstrap.Name).
+		Return(&api.InstanceFull{State: &api.InstanceState{Status: "Stopped"}}, "", nil).Once()
+
+	err := provider.injectColdCacheAssignment(context.Background(), bootstrap.Name, bootstrap)
+	require.ErrorContains(t, err, "instance stopped during canceled create")
+	provider.cli.(*MockIncusServer).AssertNumberOfCalls(t, "CreateInstanceFile", 1)
 }
 
 func TestCacheDeliveryOwnershipIsPinnedToTheExactImageIdentity(t *testing.T) {

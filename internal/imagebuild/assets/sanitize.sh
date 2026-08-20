@@ -9,10 +9,15 @@ report_error() {
   exit "$rc"
 }
 
-trap 'report_error "$?" "${BASH_LINENO[0]}" "$BASH_COMMAND"' ERR
+trap 'report_error "$?" "${BASH_LINENO[0]:-unknown}" "$BASH_COMMAND"' ERR
 
 if [[ "$(id -u)" != "0" ]]; then
   echo "sanitize must run as root" >&2
+  exit 1
+fi
+: "${GHA_INSTANCE_TYPE:?}"
+if [[ "${GHA_INSTANCE_TYPE}" != "virtual-machine" && "${GHA_INSTANCE_TYPE}" != "container" ]]; then
+  echo "unsupported instance type ${GHA_INSTANCE_TYPE}" >&2
   exit 1
 fi
 
@@ -85,5 +90,7 @@ if compgen -G '/etc/ssh/ssh_host_*' >/dev/null; then
 fi
 
 sync
-fstrim --verbose /
+if [[ "${GHA_INSTANCE_TYPE}" == "virtual-machine" ]]; then
+  fstrim --verbose /
+fi
 sync

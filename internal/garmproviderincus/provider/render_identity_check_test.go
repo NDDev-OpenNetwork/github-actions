@@ -11,9 +11,9 @@ import (
 // spacing, ordering or quoting, the guest is running something else.
 func TestRenderedRoleClauseIsWhatTheGuestUsedToCarry(t *testing.T) {
 	t.Parallel()
-	want := `    (.role == "trusted-writer" and .mode == "read-write" and .prefix_root == "NDDev-OpenNetwork/github-actions/trust/trusted") or
-    (.role == "untrusted-writer" and .mode == "read-write" and .prefix_root == "NDDev-OpenNetwork/github-actions/trust/untrusted") or
-    (.role == "release-reader" and .mode == "read-only" and .prefix_root == "NDDev-OpenNetwork/github-actions/trust/promoted")`
+	want := `    (.role == "trusted-writer" and .mode == "read-write" and .prefix_root == "example-org/example-actions/trust/trusted") or
+    (.role == "untrusted-writer" and .mode == "read-write" and .prefix_root == "example-org/example-actions/trust/untrusted") or
+    (.role == "release-reader" and .mode == "read-only" and .prefix_root == "example-org/example-actions/trust/promoted")`
 
 	if got := cacheRoleJQClause(); got != want {
 		t.Fatalf("rendered clause differs from what the guest carried:\ngot:\n%s\nwant:\n%s", got, want)

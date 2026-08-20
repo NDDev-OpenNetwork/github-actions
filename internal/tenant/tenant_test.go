@@ -55,3 +55,26 @@ func TestAnUnknownTenantIsRefusedRatherThanDefaulted(t *testing.T) {
 		t.Fatalf("empty id resolved to %+v, %v; want the default tenant", selected, err)
 	}
 }
+
+func TestRepositoryEntitySelectionIsClosedAndExact(t *testing.T) {
+	selected, err := ByID(DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	almaty, err := WithRepository(selected, "example-org/example-library")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if almaty.Repository != "example-org/example-library" || selected.Repository != "example-org/example-actions" {
+		t.Fatalf("repository selection mutated the registry or chose the wrong target: selected=%q almaty=%q", selected.Repository, almaty.Repository)
+	}
+	for _, repository := range []string{
+		"example-org/public-repository",
+		"another-owner/almaty-libraries",
+		"example-org/example-library/extra",
+	} {
+		if _, err := WithRepository(selected, repository); err == nil {
+			t.Errorf("unreviewed repository %q was accepted", repository)
+		}
+	}
+}

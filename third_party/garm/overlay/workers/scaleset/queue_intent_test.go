@@ -1,6 +1,7 @@
 package scaleset
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,107 @@ import (
 
 	"github.com/cloudbase/garm/params"
 )
+
+func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
+	now := time.Date(2026, 8, 19, 7, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(101, "owner", "repository", now)
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("observed JobAssigned charged capacity: target=%d err=%v", target, err)
+	}
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	target, err = coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 1 {
+		t.Fatalf("available intent was not reserved: target=%d err=%v", target, err)
+	}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	target, err = coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("completed intent target=%d err=%v", target, err)
+	}
+}
+
+func TestAuthoritativeReconciliationReleasesOneExactIntentIdempotently(t *testing.T) {
+	now := time.Now().UTC()
+	coordinator := testQueueCoordinator(t, &now, nil)
+	t.Setenv(queueConfigEnvironment, coordinator.configPath)
+	t.Setenv(queueFileEnvironment, coordinator.journalPath)
+	t.Setenv(queueLockEnvironment, coordinator.lockPath)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(501, "owner", "repository", now)
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := NDDevRemoveQueueIntent(context.Background(), job.JobID)
+	if err != nil || !removed {
+		t.Fatalf("first reconciliation removed=%t err=%v", removed, err)
+	}
+	removed, err = NDDevRemoveQueueIntent(context.Background(), job.JobID)
+	if err != nil || removed {
+		t.Fatalf("idempotent reconciliation removed=%t err=%v", removed, err)
+	}
+}
+
+func TestStartupMigratesLegacyAssignedOwnershipAndPhaseTTLs(t *testing.T) {
+	now := time.Date(2026, 8, 20, 6, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinatorOfWidth(t, &now, nil, 3, 3)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	jobs := []params.ScaleSetJobMessage{
+		testQueueJob(601, "owner", "repository", now.Add(-time.Hour)),
+		testQueueJob(602, "owner", "repository", now.Add(-time.Hour)),
+		testQueueJob(603, "owner", "repository", now.Add(-time.Hour)),
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, job := range jobs {
+		intent, err := queueIntentFromJob(scaleSet, job, now.Add(-time.Hour), 24*time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		intent.State = queueStateAssigned
+		if index == 0 {
+			intent.RunnerRequestID = 0
+		}
+		if index == 2 {
+			intent.State = queueStateAcquired
+		}
+		journal.Intents[intent.Key] = intent
+	}
+	if err := writeQueueIntentJournal(coordinator.journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := migrated.Intents[queueIntentKey(11, jobs[0].JobID)]
+	reserved := migrated.Intents[queueIntentKey(11, jobs[1].JobID)]
+	acquired := migrated.Intents[queueIntentKey(11, jobs[2].JobID)]
+	if observed.State != queueStateQueued || observed.ExpiresAt.After(now.Add(10*time.Minute)) {
+		t.Fatalf("legacy observation = %#v", observed)
+	}
+	if reserved.State != queueStateAssigned || reserved.ExpiresAt.After(now.Add(2*time.Minute)) {
+		t.Fatalf("legacy reservation = %#v", reserved)
+	}
+	if acquired.State != queueStateAcquired || acquired.ExpiresAt.After(now.Add(10*time.Minute)) {
+		t.Fatalf("legacy acquisition = %#v", acquired)
+	}
+}
 
 func TestQueueCoordinatorSelectsPriorityBeforeAcquireJobs(t *testing.T) {
 	now := time.Date(2026, 8, 9, 14, 0, 0, 0, time.UTC)
@@ -322,10 +424,53 @@ func TestQueueCoordinatorRecordsABatchedAssignedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a batched assigned message was refused: %v", err)
 	}
-	// Both are recorded, and at most one holds the slot, so the second is
-	// deferred rather than lost.
-	if !deferred {
-		t.Fatal("a two-job assigned batch reported nothing deferred; the second job would be acknowledged unplaced")
+	// Both are durable observations before acknowledgement. Neither owns a slot
+	// until JobAvailable supplies a runner request ID.
+	if deferred {
+		t.Fatal("a durable assigned batch was retained and would block completion messages")
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[queueIntentState]int{}
+	for _, intent := range journal.Intents {
+		states[intent.State]++
+	}
+	if states[queueStateAssigned] != 0 || states[queueStateQueued] != 2 {
+		t.Fatalf("batched assigned state = %#v", states)
+	}
+}
+
+func TestQueueCoordinatorCompletionPromotesQueuedIntentWithoutRedelivery(t *testing.T) {
+	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-fast")
+	jobs := []params.ScaleSetJobMessage{
+		testQueueJob(101, "owner", "one", now.Add(-2*time.Minute)),
+		testQueueJob(102, "owner", "one", now.Add(-time.Minute)),
+	}
+	available := append([]params.ScaleSetJobMessage(nil), jobs...)
+	for index := range jobs {
+		jobs[index].RunnerRequestID = 0
+		jobs[index].MessageType = params.MessageTypeJobAssigned
+	}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, testQueueEntityForJob(jobs[0]), jobs, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.ObserveAvailable(scaleSet, available); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, testQueueEntityForJob(jobs[0]), nil, nil, jobs[:1]); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), jobs[1].JobID)]
+	if len(journal.Intents) != 1 || remaining.State != queueStateAssigned {
+		t.Fatalf("completion did not promote queued intent: %#v", journal.Intents)
 	}
 }
 
@@ -351,6 +496,36 @@ func TestQueueCoordinatorAcknowledgesAStartedJobWithNoIntent(t *testing.T) {
 		scaleSet, testQueueEntityForJob(orphan), nil, []params.ScaleSetJobMessage{orphan}, nil,
 	); err != nil {
 		t.Fatalf("a started job with no intent was refused, which poisons the queue: %v", err)
+	}
+}
+
+func TestQueueCoordinatorDoesNotRecreateAnOrphanStartedIntentFromSameBatch(t *testing.T) {
+	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(999, "example-org", "gone", now.Add(-time.Hour))
+	assigned := job
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.OwnerName = ""
+	assigned.RepositoryName = ""
+	started := assigned
+	started.MessageType = params.MessageTypeJobStarted
+
+	for range 2 {
+		if _, err := coordinator.ObserveLifecycle(
+			scaleSet, testQueueEntityForJob(job), []params.ScaleSetJobMessage{assigned},
+			[]params.ScaleSetJobMessage{started}, nil,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(11, job.JobID)]; exists {
+		t.Fatal("orphan started event recreated a phantom running intent")
 	}
 }
 
@@ -615,7 +790,7 @@ func TestQueueCoordinatorAdmitsLiveAssignedUUIDWithoutRunnerRequestID(t *testing
 	}
 	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
 	intent := journal.Intents[key]
-	if intent.JobID != job.JobID || intent.RunnerRequestID != 0 || intent.State != queueStateAssigned {
+	if intent.JobID != job.JobID || intent.RunnerRequestID != 0 || intent.State != queueStateQueued {
 		t.Fatalf("live assigned intent = %#v", intent)
 	}
 	available := testQueueJob(101, "example-user", "github-actions", now.Add(-time.Second))
@@ -779,7 +954,7 @@ func TestOrganizationEntityIsAdmittedAndBindsItsRepositoryLater(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound := journal.Intents[key]
-	if bound.Repository != "example-guild/ai_stp" {
+	if bound.Repository != "example-guild/example-project" {
 		t.Fatalf("bound repository = %q", bound.Repository)
 	}
 	if bound.RunnerRequestID != 301 {
@@ -796,13 +971,13 @@ func TestOrganizationIntentRefusesARepositoryOutsideItsAccount(t *testing.T) {
 		Owner: "example-guild", Repository: "example-guild",
 	}
 	foreign := admitted
-	foreign.Repository = "NDDev-OpenNetwork/github-actions"
+	foreign.Repository = "example-org/example-actions"
 	if queueIntentCoreIdentityEqual(admitted, foreign) {
 		t.Fatal("an intent admitted for one account bound a repository owned by another")
 	}
 
 	sameAccount := admitted
-	sameAccount.Repository = "example-guild/ai_stp"
+	sameAccount.Repository = "example-guild/example-project"
 	if !queueIntentCoreIdentityEqual(admitted, sameAccount) {
 		t.Fatal("the account's own repository was refused")
 	}
@@ -822,7 +997,7 @@ func TestRepositoryEntityStillBindsAtAssignment(t *testing.T) {
 	coordinator := testQueueCoordinator(t, &now, nil)
 	scaleSet := testQueueScaleSet(22, "nddev-linux-standard")
 
-	job := testQueueJob(302, "NDDev-OpenNetwork", "github-actions", now.Add(-time.Second))
+	job := testQueueJob(302, "example-org", "github-actions", now.Add(-time.Second))
 	entity := testQueueEntityForJob(job)
 	assigned := job
 	assigned.MessageType = params.MessageTypeJobAssigned
@@ -839,16 +1014,14 @@ func TestRepositoryEntityStillBindsAtAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := journal.Intents[queueIntentKey(22, assigned.JobID)]
-	if intent.Repository != "NDDev-OpenNetwork/github-actions" || !queueIntentRepositoryBound(intent) {
+	if intent.Repository != "example-org/example-actions" || !queueIntentRepositoryBound(intent) || intent.State != queueStateQueued {
 		t.Fatalf("repository entity intent = %q, want it bound at assignment", intent.Repository)
 	}
 }
 
-// An intent that wins the slot and never advances used to hold it for the
-// execution TTL -- twenty-four hours -- because assigned shared running's
-// expiry. On a one-wide class that freezes everything behind it. Observed on
-// gha-runner-1 after a wave of jobs was cancelled before placement (#275).
-func TestAssignedIntentExpiresLongBeforeARunningOne(t *testing.T) {
+// Reservations and acquisitions before JobStarted use phase TTLs; only a
+// running job may use the execution horizon.
+func TestOnlyRunningIntentsUseTheExecutionHorizon(t *testing.T) {
 	now := time.Date(2026, 8, 9, 14, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
 	config, err := coordinator.loadConfig()
@@ -856,98 +1029,15 @@ func TestAssignedIntentExpiresLongBeforeARunningOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	assigned := expiryForState(config, queueStateAssigned, now)
+	acquired := expiryForState(config, queueStateAcquired, now)
 	running := expiryForState(config, queueStateRunning, now)
-	if !assigned.Before(running) {
-		t.Fatalf("assigned expires at %s and running at %s; an intent that never advances holds the slot as long as one that is doing work",
-			assigned, running)
+	if !assigned.Before(acquired) || !acquired.Before(running) {
+		t.Fatalf("lifecycle expiries are not phase-specific: assigned=%s acquired=%s running=%s", assigned, acquired, running)
 	}
-	if got := assigned.Sub(now); got > 30*time.Minute {
-		t.Fatalf("an assigned intent holds the slot for %s; the gap to acquiring is seconds", got)
+	if got := assigned.Sub(now); got != time.Duration(config.AcquiringTTLSeconds)*time.Second {
+		t.Fatalf("assigned reservation lifetime=%s, want acquiring TTL", got)
 	}
-}
-
-// A job that is still waiting must survive its own TTL. GitHub redelivering an
-// unacquired message is the only evidence the queue gets that the job has not
-// gone away, and dropping the intent used to make the job permanently
-// unplaceable: nothing wrote another, while GARM kept creating runners the
-// provider had to refuse. Waiting holds no admission slot, so refreshing it
-// costs no one capacity.
-func TestQueueCoordinatorRefreshesAWaitingIntentOnRedelivery(t *testing.T) {
-	now := time.Now().UTC()
-	// Width zero for the class: the job is recorded and never admitted, which
-	// is exactly the state that used to expire into nothing.
-	coordinator := testQueueCoordinatorOfWidth(t, &now, map[string]queueRepositoryPolicy{
-		"owner/waiting": {Weight: 1, MaxInFlight: 1},
-	}, 1, 1)
-	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
-	holder := testQueueJob(101, "owner", "holder", now.Add(-time.Minute))
-	waiting := testQueueJob(102, "owner", "waiting", now.Add(-time.Minute))
-	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{holder, waiting}); err != nil {
-		t.Fatal(err)
-	}
-	before, err := readQueueIntentJournal(coordinator.journalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := queueIntentKey(int64(scaleSet.ScaleSetID), waiting.JobID)
-	queued, exists := before.Intents[key]
-	if !exists || queued.State != queueStateQueued {
-		t.Fatalf("waiting job is not queued: %#v", before.Intents)
-	}
-
-	// Nine minutes later the message is redelivered, one minute before the
-	// 600-second queued TTL would have dropped it.
-	now = now.Add(9 * time.Minute)
-	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{holder, waiting}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := readQueueIntentJournal(coordinator.journalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	refreshed, exists := after.Intents[key]
-	if !exists {
-		t.Fatal("a redelivered waiting job lost its intent")
-	}
-	if !refreshed.ExpiresAt.After(queued.ExpiresAt) {
-		t.Fatalf("waiting intent was not refreshed: %s then %s", queued.ExpiresAt, refreshed.ExpiresAt)
-	}
-	if refreshed.State != queueStateQueued {
-		t.Fatalf("refresh changed the state to %q", refreshed.State)
-	}
-}
-
-// The other half, and the reason the refresh is scoped to one state. An intent
-// that has already been admitted holds the slot, so refreshing it on
-// redelivery is how a stale message once held a one-wide class for
-// twenty-four hours.
-func TestQueueCoordinatorDoesNotRefreshAnAdmittedIntentOnRedelivery(t *testing.T) {
-	now := time.Now().UTC()
-	coordinator := testQueueCoordinator(t, &now, map[string]queueRepositoryPolicy{})
-	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
-	job := testQueueJob(101, "owner", "admitted", now.Add(-time.Minute))
-	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
-		t.Fatal(err)
-	}
-	before, err := readQueueIntentJournal(coordinator.journalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
-	admitted, exists := before.Intents[key]
-	if !exists || admitted.State == queueStateQueued {
-		t.Fatalf("job was not admitted: %#v", before.Intents)
-	}
-
-	now = now.Add(time.Minute)
-	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := readQueueIntentJournal(coordinator.journalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after.Intents[key].ExpiresAt.Equal(admitted.ExpiresAt) {
-		t.Fatalf("an admitted intent was refreshed: %s then %s", admitted.ExpiresAt, after.Intents[key].ExpiresAt)
+	if got := acquired.Sub(now); got != time.Duration(config.AcquiredTTLSeconds)*time.Second {
+		t.Fatalf("acquired lifetime=%s, want acquired TTL", got)
 	}
 }

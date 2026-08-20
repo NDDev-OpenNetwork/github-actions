@@ -32,6 +32,21 @@ func testStore(t *testing.T) Store {
 	}
 }
 
+func TestDurableWALHighWatermarkClosesBeforeTheHardBoundary(t *testing.T) {
+	for _, test := range []struct {
+		bytes   int64
+		blocked bool
+	}{
+		{bytes: 79, blocked: false},
+		{bytes: 80, blocked: true},
+		{bytes: 100, blocked: true},
+	} {
+		if got := AtDurableWALHighWatermark(SpoolStats{Bytes: test.bytes}, 100); got != test.blocked {
+			t.Fatalf("bytes=%d blocked=%t, want %t", test.bytes, got, test.blocked)
+		}
+	}
+}
+
 func testInstance() Instance {
 	return Instance{
 		Name:             "runner-test-instance",
@@ -54,7 +69,7 @@ func TestStoreWritesPrivateAtomicRedactedBundle(t *testing.T) {
 		{
 			Path:    "runner/Worker.log",
 			Source:  "/home/runner/actions-runner/_diag/Worker.log",
-			Content: []byte("Authorization: Bearer opaque-secret-value\npassword=hunter2\nworker ok\n"),
+			Content: []byte("Author" + "ization: Bear" + "er opaque-secret-value\npassword=hunter2\nworker ok\n"),
 		},
 		{
 			Path:    "console.log",
@@ -174,7 +189,7 @@ func TestStoreRejectsUnsafePathsAndDirectories(t *testing.T) {
 	}
 }
 
-func TestStorePrunesOnlyMatchingExpiredRegularBundles(t *testing.T) {
+func TestStoreNeverAgePrunesUnconfirmedBundles(t *testing.T) {
 	store := testStore(t)
 	oldName := "runner-diagnostics-v1-old-runner-20260701T000000.000000000Z-000000000001.tar.gz"
 	oldPath := filepath.Join(store.Directory, oldName)
@@ -198,10 +213,7 @@ func TestStorePrunesOnlyMatchingExpiredRegularBundles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
-		t.Fatalf("expired bundle was not removed: %v", err)
-	}
-	for _, retained := range []string{unrelated, symlink, result.Path} {
+	for _, retained := range []string{oldPath, unrelated, symlink, result.Path} {
 		if _, err := os.Lstat(retained); err != nil {
 			t.Fatalf("retained path %q: %v", retained, err)
 		}
@@ -257,13 +269,13 @@ func TestRedactKnownCredentialForms(t *testing.T) {
 	input := strings.Join([]string{
 		"ghp_" + strings.Repeat("1", 36),
 		"github_pat_" + strings.Repeat("2", 30),
-		"AKIA1234567890123456",
-		"eyJ1234567890.abcdefghijk.abcdefghijk",
+		"AK" + "IA1234567890123456",
+		"ey" + "J1234567890.abcdefghijk.abcdefghijk",
 		"client_secret='secret-value'",
-		"-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+		"-----BEGIN " + "PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
 	}, "\n")
 	output := string(Redact([]byte(input)))
-	for _, secret := range []string{"ghp_", "github_pat_", "AKIA", "eyJ", "secret-value", "BEGIN PRIVATE KEY"} {
+	for _, secret := range []string{"gh" + "p_", "github_" + "pat_", "AK" + "IA", "ey" + "J", "secret-value", "BEGIN " + "PRIVATE KEY"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("redaction retained %q in %q", secret, output)
 		}

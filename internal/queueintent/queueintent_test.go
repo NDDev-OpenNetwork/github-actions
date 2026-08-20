@@ -58,15 +58,15 @@ func TestReaderReturnsOnlyActiveIntentsInDeterministicOrder(t *testing.T) {
 		snapshot.Active[1].Key != "github-scale-set-job:v2:11:11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("unexpected active snapshot: %#v", snapshot)
 	}
-	active, err := reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-standard")
+	active, err := reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-standard")
 	if err != nil || active {
 		t.Fatalf("standard intent = %t, %v", active, err)
 	}
-	active, err = reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-release")
+	active, err = reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-release")
 	if err != nil || !active {
 		t.Fatalf("release intent = %t, %v", active, err)
 	}
-	active, err = reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-integration")
+	active, err = reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-integration")
 	if err != nil || active {
 		t.Fatalf("expired integration intent = %t, %v", active, err)
 	}
@@ -110,7 +110,7 @@ func TestReaderAuthorizesAssignedUUIDWithoutRunnerRequestID(t *testing.T) {
   }
 }`)
 	reader := Reader{Path: path, Now: func() time.Time { return now }}
-	authorized, err := reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-standard")
+	authorized, err := reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-standard")
 	if err != nil || !authorized {
 		t.Fatalf("assigned live UUID authorized=%t err=%v", authorized, err)
 	}

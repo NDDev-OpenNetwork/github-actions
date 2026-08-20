@@ -1,0 +1,82 @@
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index 78465f5..a939cf3 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -349,11 +349,13 @@ func (i *instanceManager) consolidateState() error {
+ 		if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstanceCreating, nil, false); err != nil {
+ 			return fmt.Errorf("setting instance status to creating: %w", err)
+ 		}
++		i.instance.Status = commonParams.InstanceCreating
+ 		if err := i.handleCreateInstanceInProvider(i.instance); err != nil {
+ 			slog.ErrorContext(i.ctx, "creating instance in provider", "error", err)
+ 			if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstanceError, []byte(err.Error()), true); err != nil {
+ 				return fmt.Errorf("setting instance status to error: %w", err)
+ 			}
++			i.instance.Status = commonParams.InstanceError
+ 		}
+ 	case commonParams.InstanceRunning:
+ 		// Nothing to do. The provider finished creating the instance.
+@@ -380,6 +382,7 @@ func (i *instanceManager) consolidateState() error {
+ 			}
+ 			return fmt.Errorf("setting instance status to deleting: %w", err)
+ 		}
++		i.instance.Status = commonParams.InstanceDeleting
+ 
+ 		if err := i.handleDeleteInstanceInProvider(i.instance); err != nil {
+ 			slog.ErrorContext(i.ctx, "deleting instance in provider", "error", err, "forced", i.instance.Status == commonParams.InstancePendingForceDelete)
+@@ -389,6 +392,7 @@ func (i *instanceManager) consolidateState() error {
+ 				if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstancePendingDelete, []byte(err.Error()), true); err != nil {
+ 					return fmt.Errorf("setting instance status to error: %w", err)
+ 				}
++				i.instance.Status = commonParams.InstancePendingDelete
+ 
+ 				return fmt.Errorf("error removing instance. Will retry: %w", err)
+ 			}
+@@ -399,6 +403,7 @@ func (i *instanceManager) consolidateState() error {
+ 				return fmt.Errorf("setting instance status to deleted: %w", err)
+ 			}
+ 		}
++		i.instance.Status = commonParams.InstanceDeleted
+ 		return ErrInstanceDeleted
+ 	case commonParams.InstanceError:
+ 		// Scale sets create the JIT runner registration before provider acquisition.
+@@ -417,6 +422,7 @@ func (i *instanceManager) consolidateState() error {
+ 		if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstancePendingDelete, nil, true); err != nil {
+ 			return fmt.Errorf("setting instance status to error: %w", err)
+ 		}
++		i.instance.Status = commonParams.InstancePendingDelete
+ 	case commonParams.InstanceDeleted:
+ 		return ErrInstanceDeleted
+ 	}
+diff --git a/workers/provider/failed_scale_set_runner_cleanup_test.go b/workers/provider/failed_scale_set_runner_cleanup_test.go
+index 2688918..7ee986e 100644
+--- a/workers/provider/failed_scale_set_runner_cleanup_test.go
++++ b/workers/provider/failed_scale_set_runner_cleanup_test.go
+@@ -76,6 +76,9 @@ func TestFailedScaleSetInstanceRemovesJITRegistrationBeforeTeardown(t *testing.T
+ 	if helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
+ 		t.Fatalf("status calls=%d status=%s", helper.statusCalls, helper.status)
+ 	}
++	if manager.instance.Status != commonParams.InstancePendingDelete {
++		t.Fatalf("local status=%s, want %s", manager.instance.Status, commonParams.InstancePendingDelete)
++	}
+ }
+ 
+ func TestFailedScaleSetInstanceRetainsAgentIDUntilTransientRemovalConverges(t *testing.T) {
+@@ -98,6 +101,9 @@ func TestFailedScaleSetInstanceRetainsAgentIDUntilTransientRemovalConverges(t *t
+ 	if helper.removeCalls != 2 || helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
+ 		t.Fatalf("remove calls=%d status calls=%d status=%s", helper.removeCalls, helper.statusCalls, helper.status)
+ 	}
++	if manager.instance.Status != commonParams.InstancePendingDelete {
++		t.Fatalf("local status=%s, want %s", manager.instance.Status, commonParams.InstancePendingDelete)
++	}
+ }
+ 
+ func TestFailedScaleSetInstanceAcceptsAlreadyAbsentJITRegistration(t *testing.T) {
+@@ -110,4 +116,7 @@ func TestFailedScaleSetInstanceAcceptsAlreadyAbsentJITRegistration(t *testing.T)
+ 	if helper.statusCalls != 1 || helper.status != commonParams.InstancePendingDelete {
+ 		t.Fatalf("status calls=%d status=%s", helper.statusCalls, helper.status)
+ 	}
++	if manager.instance.Status != commonParams.InstancePendingDelete {
++		t.Fatalf("local status=%s, want %s", manager.instance.Status, commonParams.InstancePendingDelete)
++	}
+ }

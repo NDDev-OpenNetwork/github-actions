@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -54,4 +55,47 @@ func VerifyIncusVM(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return versions, nil
+}
+
+// VerifyIncusContainer proves the local Incus control socket and subordinate
+// ID helpers required for an unprivileged system-container build exist. It
+// deliberately does not require QEMU firmware or modules.
+func VerifyIncusContainer(context.Context) (map[string]string, error) {
+	result := make(map[string]string, 3)
+	for _, command := range []string{"incus", "newuidmap", "newgidmap"} {
+		path, err := exec.LookPath(command)
+		if err != nil {
+			return nil, fmt.Errorf("required Incus container command %q is unavailable", command)
+		}
+		result[command] = path
+	}
+	info, err := os.Stat("/var/lib/incus/unix.socket")
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("incus local control socket is unavailable")
+	}
+	return result, nil
+}
+
+// VerifyNestedDocker proves the host module that exposes bridge netfilter
+// controls inside an unprivileged nested container is loaded.
+func VerifyNestedDocker(context.Context) error {
+	return verifyNestedDockerAt("/")
+}
+
+func verifyNestedDockerAt(root string) error {
+	module := filepath.Join(root, "sys", "module", "br_netfilter")
+	if info, err := os.Stat(module); err != nil || !info.IsDir() {
+		return fmt.Errorf("required host kernel module br_netfilter is not loaded")
+	}
+	for _, name := range []string{"bridge-nf-call-arptables", "bridge-nf-call-ip6tables", "bridge-nf-call-iptables"} {
+		control := filepath.Join(root, "proc", "sys", "net", "bridge", name)
+		value, err := os.ReadFile(control)
+		if err != nil {
+			return fmt.Errorf("br_netfilter %s control is unavailable", name)
+		}
+		if strings.TrimSpace(string(value)) != "0" {
+			return fmt.Errorf("br_netfilter %s must be 0 so Incus ACLs remain the single bridge filter", name)
+		}
+	}
+	return nil
 }

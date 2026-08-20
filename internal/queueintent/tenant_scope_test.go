@@ -39,7 +39,7 @@ func TestActiveForScaleSetSeparatesAccountsSharingAClassName(t *testing.T) {
 	if err != nil || !authorized {
 		t.Fatalf("the tenant that owns the intent was refused: %t, %v", authorized, err)
 	}
-	authorized, err = reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-integration")
+	authorized, err = reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-integration")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,17 +52,17 @@ func TestRepositoryForScaleSetNarrowsOrganizationIntent(t *testing.T) {
 	reader := Reader{Path: writeFixture(t, `{
   "schema_version":1,"generation":1,"updated_at":"2026-01-01T00:00:00Z",
   "intents":{"github-scale-set-job:v2:2:22222222-2222-4222-8222-222222222222":{"key":"github-scale-set-job:v2:2:22222222-2222-4222-8222-222222222222","scale_set_id":2,"job_id":"22222222-2222-4222-8222-222222222222","runner_request_id":7,
-    "scale_set_name":"nddev-linux-standard","owner":"NDDev-OpenNetwork",
-    "repository":"NDDev-OpenNetwork/github-actions","workflow_ref":"x","event_name":"workflow_dispatch",
+    "scale_set_name":"nddev-linux-standard","owner":"example-org",
+    "repository":"example-org/example-actions","workflow_ref":"x","event_name":"workflow_dispatch",
     "queue_time":"2026-01-01T00:00:00Z","state":"acquired","priority":1,
     "updated_at":"2026-01-01T00:00:00Z","expires_at":"2099-01-01T00:00:00Z"}},
-  "repositories":{"NDDev-OpenNetwork":{"repository":"NDDev-OpenNetwork","weight":1,"pass":1}}
+  "repositories":{"example-org":{"repository":"example-org","weight":1,"pass":1}}
 }`)}
-	repository, err := reader.RepositoryForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-standard")
+	repository, err := reader.RepositoryForScaleSet(context.Background(), "example-org", "nddev-linux-standard")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repository != "NDDev-OpenNetwork/github-actions" {
+	if repository != "example-org/example-actions" {
 		t.Fatalf("repository = %q", repository)
 	}
 }
@@ -70,7 +70,7 @@ func TestRepositoryForScaleSetNarrowsOrganizationIntent(t *testing.T) {
 // A journal written before the tenant field existed described the fleet's own
 // tenant, so reading it must keep meaning that rather than becoming unowned.
 func TestIntentWithoutOwnerReadsAsTheFleetsOwn(t *testing.T) {
-	if got := (Intent{}).OwnerAccount(); got != "NDDev-OpenNetwork" {
+	if got := (Intent{}).OwnerAccount(); got != "example-org" {
 		t.Fatalf("absent owner = %q, want the fleet's own account", got)
 	}
 	if got := (Intent{Owner: "example-media"}).OwnerAccount(); got != "example-media" {

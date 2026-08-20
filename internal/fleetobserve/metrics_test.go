@@ -6,19 +6,31 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
 
 func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 	collector := healthyCollector(t)
 	snapshot := collector.Collect(t.Context())
+	snapshot.Host.Memory.OOMKillsTotal = 2
+	snapshot.Host.Pressure = hostprobe.Pressure{
+		Available: true,
+		CPU:       hostprobe.PressureResource{Some: hostprobe.PressureWindow{Avg10: 1.25, TotalMicros: 2_000_000}},
+	}
 	metrics := RenderPrometheus(snapshot, observationTime.Add(5*time.Second), 45*time.Second)
 	for _, wanted := range []string{
 		"gha_fleet_observer_up 1\n",
 		"gha_fleet_platform_healthy 1\n",
 		"gha_fleet_legacy_runner_listeners 12\n",
+		"gha_fleet_host_oom_kills_total 2\n",
+		"gha_fleet_host_psi_available 1\n",
+		`gha_fleet_host_psi_stall_percent{mode="some",resource="cpu",window_seconds="10"} 1.25`,
+		`gha_fleet_host_psi_stall_seconds_total{mode="some",resource="cpu"} 2`,
 		`gha_fleet_pool_pilot_ready{pool="nddev-linux-standard"} 1`,
+		`gha_fleet_pool_container_admission_ready{pool="nddev-linux-standard"} 1`,
 		`gha_fleet_provider_journal_leases_by_state{state="created"} 1`,
+		`gha_fleet_provider_lease_oldest_state_age_seconds{state="created"} 1`,
 		"gha_fleet_provider_warm_preemptions 0\n",
 		"# TYPE gha_fleet_provider_warm_preemptions_total counter\n",
 		"gha_fleet_provider_warm_preemptions_total 0\n",
@@ -27,6 +39,7 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_queue_intents_in_flight 0\n",
 		"gha_fleet_queue_uncovered_running 0\n",
 		`gha_fleet_queue_intents_by_state{state="queued"} 0`,
+		`gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"} 0`,
 		`gha_fleet_queue_intents_by_priority{priority="0"} 0`,
 		`gha_fleet_queue_intents_by_scale_set{scale_set="nddev-linux-integration"} 0`,
 		"gha_fleet_incus_orphan_instances 0\n",
@@ -39,6 +52,8 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_diagnostic_export_local_bundle_delta 0\n",
 		"gha_fleet_diagnostic_export_observed_age_seconds 5\n",
 		"gha_fleet_diagnostic_export_last_success_age_seconds 5\n",
+		"gha_fleet_diagnostic_export_last_progress_age_seconds -1\n",
+		"gha_fleet_diagnostic_export_last_full_sync_age_seconds -1\n",
 		`gha_fleet_service_up{service="gha-zot"} 1`,
 	} {
 		if !strings.Contains(metrics, wanted) {

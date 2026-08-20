@@ -25,6 +25,10 @@ func diagnosticFixtureForIdentity(t *testing.T, pool, scaleSet string) (Config, 
 }
 
 func diagnosticFixtureForScope(t *testing.T, pool, scaleSet, poolID, repository string) (Config, string) {
+	return diagnosticFixtureForTrust(t, pool, scaleSet, poolID, repository, "trusted")
+}
+
+func diagnosticFixtureForTrust(t *testing.T, pool, scaleSet, poolID, repository, trust string) (Config, string) {
 	t.Helper()
 	directory := filepath.Join(t.TempDir(), "diagnostics")
 	if err := os.Mkdir(directory, 0o700); err != nil {
@@ -45,6 +49,7 @@ func diagnosticFixtureForScope(t *testing.T, pool, scaleSet, poolID, repository 
 	}
 	result, err := store.Write(context.Background(), workerdiagnostics.Instance{
 		Name:             "runner-export-test",
+		Trust:            trust,
 		ControllerID:     "controller-test",
 		PoolID:           poolID,
 		PoolName:         pool,
@@ -63,6 +68,49 @@ func diagnosticFixtureForScope(t *testing.T, pool, scaleSet, poolID, repository 
 		t.Fatal(err)
 	}
 	return config, filepath.Base(result.Path)
+}
+
+func TestReadBundleSeparatesTrustDomains(t *testing.T) {
+	config, name := diagnosticFixtureForTrust(
+		t, "nddev-linux-release", "nddev-linux-release", "pool-test",
+		validConfig().Repositories[1], "release",
+	)
+	config.Pools = []string{"nddev-linux-integration", "nddev-linux-release", "nddev-linux-standard"}
+	bundle, err := ReadBundle(context.Background(), config, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bundle.ObjectKey, "/trust/release/") || strings.Contains(bundle.ObjectKey, "/trust/trusted/") {
+		t.Fatalf("release object key = %q", bundle.ObjectKey)
+	}
+}
+
+func TestReadBundleRejectsUnknownTrustDomain(t *testing.T) {
+	config, name := diagnosticFixtureForTrust(
+		t, "nddev-linux-standard", "nddev-linux-standard", "pool-test",
+		validConfig().Repositories[1], "unreviewed",
+	)
+	if _, err := ReadBundle(context.Background(), config, name); err == nil ||
+		!strings.Contains(err.Error(), "outside the configured repository or pool") {
+		t.Fatalf("unknown trust error = %v", err)
+	}
+}
+
+func TestLegacyBundleWithoutTrustRemainsTrusted(t *testing.T) {
+	config := validConfig()
+	instance := workerdiagnostics.Instance{
+		PoolID:     "pool-test",
+		PoolName:   "nddev-linux-standard",
+		ScaleSet:   "nddev-linux-standard",
+		Repository: config.Repositories[1],
+	}
+	key, err := objectKey(config, instance, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(key, "/trust/trusted/") {
+		t.Fatalf("legacy object key = %q", key)
+	}
 }
 
 func TestReadBundleAcceptsUnassignedWarmScopeAndSeparatesObjectKey(t *testing.T) {
@@ -104,7 +152,7 @@ func TestReadBundleSeparatesReviewedTenantScopes(t *testing.T) {
 		prefix   string
 	}{
 		{"example-media", "diagnostics/v1/account/example-media/"},
-		{"example-guild/ai_stp", "diagnostics/v1/repository/example-guild/ai_stp/"},
+		{"example-guild/example-project", "diagnostics/v1/repository/example-guild/example-project/"},
 	} {
 		config, name := diagnosticFixtureForScope(
 			t, "nddev-linux-standard", "nddev-linux-standard", "pool-test", test.identity,
@@ -276,15 +324,22 @@ func TestSafeArchivePathRejectsTraversalAndDegenerateNames(t *testing.T) {
 	}
 }
 
-func TestListBundlesBoundsAllDirectoryEntries(t *testing.T) {
-	config, _ := diagnosticFixture(t)
-	for index := 0; index < maxSourceEntries; index++ {
-		filename := filepath.Join(config.SourceDirectory, fmt.Sprintf("ignored-%04d", index))
-		if err := os.WriteFile(filename, nil, 0o600); err != nil {
+func TestListBundlesDoesNotRejectLargeBacklogAboveFormerBoundary(t *testing.T) {
+	config, original := diagnosticFixture(t)
+	content, err := os.ReadFile(filepath.Join(config.SourceDirectory, original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 10000; index++ {
+		filename := filepath.Join(config.SourceDirectory, fmt.Sprintf(
+			"runner-diagnostics-v1-backlog-%08dT000000.000000000Z-%012x.tar.gz", index, index,
+		))
+		if err := os.WriteFile(filename, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := ListBundles(config); err == nil || !strings.Contains(err.Error(), "entry boundary") {
-		t.Fatalf("directory entry boundary error = %v", err)
+	batch, total, _, err := ListBundleBatch(context.Background(), config, maxBundlesPerRun)
+	if err != nil || total != 10001 || len(batch) != maxBundlesPerRun {
+		t.Fatalf("large directory batch=%d total=%d err=%v", len(batch), total, err)
 	}
 }

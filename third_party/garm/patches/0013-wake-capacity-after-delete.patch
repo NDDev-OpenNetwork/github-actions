@@ -1,0 +1,18 @@
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index dd2291f..3bb1d48 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -329,6 +329,13 @@ func (i *instanceManager) handleDeleteInstanceInProvider(instance params.Instanc
+ 	if err := i.provider.DeleteInstance(i.ctx, identifier, deleteInstanceParams); err != nil {
+ 		return fmt.Errorf("deleting instance in provider: %w", err)
+ 	}
++	// A failed create has no provider ID and its not-found cleanup releases no
++	// capacity. Waking on that path cancels the backoff that failure just wrote.
++	if instance.ProviderID != "" {
++		if err := NDDevProviderCapacityReleased(i.ctx); err != nil {
++			slog.ErrorContext(i.ctx, "clearing provider capacity backoff after deletion", "error", err)
++		}
++	}
+ 	return nil
+ }
+ 

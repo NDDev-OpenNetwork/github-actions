@@ -1,0 +1,82 @@
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index c7d9380..8c107c5 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -387,12 +387,30 @@ func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, ag
+ 	}
+ 	instance, err := w.setRunnerDBStatus(runnerName, commonParams.InstancePendingDelete)
+ 	if err != nil {
+-		return fmt.Errorf("updating runner %s: %w", instance.Name, err)
++		terminal, refreshErr := w.runnerRemovalAlreadyOwned(runnerName)
++		if refreshErr != nil {
++			return errors.Join(fmt.Errorf("updating runner %s: %w", runnerName, err), refreshErr)
++		}
++		if terminal {
++			return nil
++		}
++		return fmt.Errorf("updating runner %s: %w", runnerName, err)
+ 	}
+ 	w.runners[instance.ID] = instance
+ 	return nil
+ }
+ 
++func (w *Worker) runnerRemovalAlreadyOwned(runnerName string) (bool, error) {
++	current, err := w.store.GetInstance(w.ctx, runnerName)
++	if err != nil {
++		if errors.Is(err, runnerErrors.ErrNotFound) {
++			return true, nil
++		}
++		return false, fmt.Errorf("refreshing runner %s after pending-delete conflict: %w", runnerName, err)
++	}
++	return providerRemovalProtected(current.Status), nil
++}
++
+ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference) (func(), error) {
+ 	lockNames := []string{}
+ 
+diff --git a/workers/scaleset/terminal_delete_conflict_test.go b/workers/scaleset/terminal_delete_conflict_test.go
+new file mode 100644
+index 0000000..af36d01
+--- /dev/null
++++ b/workers/scaleset/terminal_delete_conflict_test.go
+@@ -0,0 +1,40 @@
++package scaleset
++
++import (
++	"context"
++	"testing"
++
++	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
++	commonParams "github.com/cloudbase/garm-provider-common/params"
++	dbMocks "github.com/cloudbase/garm/database/common/mocks"
++	"github.com/cloudbase/garm/params"
++	"github.com/stretchr/testify/mock"
++)
++
++func TestPendingDeleteConflictAcceptsOnlyAuthoritativeRemovalState(t *testing.T) {
++	for _, test := range []struct {
++		name     string
++		instance params.Instance
++		err      error
++		terminal bool
++	}{
++		{name: "deleted", instance: params.Instance{Name: "runner", Status: commonParams.InstanceDeleted}, terminal: true},
++		{name: "deleting", instance: params.Instance{Name: "runner", Status: commonParams.InstanceDeleting}, terminal: true},
++		{name: "absent", err: runnerErrors.ErrNotFound, terminal: true},
++		{name: "pending delete", instance: params.Instance{Name: "runner", Status: commonParams.InstancePendingDelete}, terminal: true},
++		{name: "error", instance: params.Instance{Name: "runner", Status: commonParams.InstanceError}},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			store := dbMocks.NewStore(t)
++			store.EXPECT().GetInstance(mock.Anything, "runner").Return(test.instance, test.err).Once()
++			worker := &Worker{ctx: context.Background(), store: store}
++			terminal, err := worker.runnerRemovalAlreadyOwned("runner")
++			if err != nil {
++				t.Fatal(err)
++			}
++			if terminal != test.terminal {
++				t.Fatalf("terminal=%t, want %t", terminal, test.terminal)
++			}
++		})
++	}
++}

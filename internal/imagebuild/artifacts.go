@@ -25,6 +25,7 @@ type Artifacts struct {
 	Signature     string `json:"signature"`
 	Metadata      string `json:"metadata"`
 	Disk          string `json:"disk"`
+	Rootfs        string `json:"rootfs,omitempty"`
 	Runner        string `json:"runner"`
 	CompilerCache string `json:"compiler_cache"`
 	// Toolchains maps each pinned toolchain name to its verified local archive.
@@ -57,10 +58,14 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 		Checksums:     filepath.Join(directory, plan.Source.ChecksumsFile),
 		Signature:     filepath.Join(directory, plan.Source.SignatureFile),
 		Metadata:      filepath.Join(directory, plan.Source.MetadataFile),
-		Disk:          filepath.Join(directory, plan.Source.DiskFile),
 		Runner:        filepath.Join(directory, plan.Runner.Archive),
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),
+	}
+	if plan.Image.EffectiveType() == "container" {
+		artifacts.Rootfs = filepath.Join(directory, plan.Source.RootfsFile)
+	} else {
+		artifacts.Disk = filepath.Join(directory, plan.Source.DiskFile)
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = filepath.Join(directory, toolchain.Archive)
@@ -86,10 +91,13 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	if err != nil {
 		return Artifacts{}, err
 	}
-	for name, pinned := range map[string]string{
-		plan.Source.MetadataFile: plan.Source.MetadataSHA256,
-		plan.Source.DiskFile:     plan.Source.DiskSHA256,
-	} {
+	sourceChecksums := map[string]string{plan.Source.MetadataFile: plan.Source.MetadataSHA256}
+	if plan.Image.EffectiveType() == "container" {
+		sourceChecksums[plan.Source.RootfsFile] = plan.Source.RootfsSHA256
+	} else {
+		sourceChecksums[plan.Source.DiskFile] = plan.Source.DiskSHA256
+	}
+	for name, pinned := range sourceChecksums {
 		if signed := checksums[name]; signed != pinned {
 			return Artifacts{}, fmt.Errorf("signed checksum for %s is %q, pinned %q", name, signed, pinned)
 		}
@@ -97,7 +105,11 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	if _, err := download(ctx, client, joinURL(plan.Source.BaseURL, plan.Source.MetadataFile), artifacts.Metadata, plan.Source.MetadataSHA256, 32<<20); err != nil {
 		return Artifacts{}, fmt.Errorf("download source metadata: %w", err)
 	}
-	if _, err := download(ctx, client, joinURL(plan.Source.BaseURL, plan.Source.DiskFile), artifacts.Disk, plan.Source.DiskSHA256, 2<<30); err != nil {
+	if plan.Image.EffectiveType() == "container" {
+		if _, err := download(ctx, client, joinURL(plan.Source.BaseURL, plan.Source.RootfsFile), artifacts.Rootfs, plan.Source.RootfsSHA256, 2<<30); err != nil {
+			return Artifacts{}, fmt.Errorf("download source rootfs: %w", err)
+		}
+	} else if _, err := download(ctx, client, joinURL(plan.Source.BaseURL, plan.Source.DiskFile), artifacts.Disk, plan.Source.DiskSHA256, 2<<30); err != nil {
 		return Artifacts{}, fmt.Errorf("download source disk: %w", err)
 	}
 	if _, err := download(ctx, client, plan.Runner.DownloadURL, artifacts.Runner, plan.Runner.SHA256, 512<<20); err != nil {

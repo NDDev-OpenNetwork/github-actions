@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,11 +17,11 @@ import (
 
 func testImagePlan(t *testing.T) imageplan.Plan {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := imagemanifest.Load(filepath.Join("..", "..", "config", "golden-image.yaml"))
+	manifest, err := imagemanifest.Load(filepath.Join("..", "..", "config", "golden-image-container.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,11 +34,11 @@ func testImagePlan(t *testing.T) imageplan.Plan {
 
 func testIntegrationImagePlan(t *testing.T) imageplan.Plan {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := imagemanifest.Load(filepath.Join("..", "..", "config", "golden-image-integration.yaml"))
+	manifest, err := imagemanifest.Load(filepath.Join("..", "..", "config", "golden-image-container-integration.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +47,55 @@ func testIntegrationImagePlan(t *testing.T) imageplan.Plan {
 		t.Fatal(err)
 	}
 	return plan
+}
+
+func testContainerImagePlan(t *testing.T) imageplan.Plan {
+	t.Helper()
+	cfg, err := config.Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := imagemanifest.Load(filepath.Join("..", "..", "config", "golden-image-container.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := imageplan.Build(cfg, manifest, "nddev-linux-container-canary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+func TestContainerBuilderUsesRootfsAndNeverRequestsVM(t *testing.T) {
+	plan := testContainerImagePlan(t)
+	orchestrator := &Orchestrator{}
+	args := orchestrator.instanceInitArgs(plan, strings.Repeat("a", 64), "container-builder", 12)
+	if slices.Contains(args, "--vm") {
+		t.Fatalf("container builder requested VM mode: %v", args)
+	}
+	joined := strings.Join(args, " ")
+	for _, required := range []string{
+		"--config security.privileged=false",
+		"--config security.nesting=false",
+		"--config security.syscalls.intercept.mknod=false",
+		"--config security.syscalls.intercept.setxattr=false",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("container builder args missing %q: %v", required, args)
+		}
+	}
+	artifacts := Artifacts{
+		Directory: "/var/tmp/gha-fleet-image-test", Checksums: "/var/tmp/gha-fleet-image-test/SHA256SUMS",
+		Signature: "/var/tmp/gha-fleet-image-test/SHA256SUMS.gpg", Metadata: "/var/tmp/gha-fleet-image-test/" + plan.Source.MetadataFile,
+		Rootfs: "/var/tmp/gha-fleet-image-test/" + plan.Source.RootfsFile, Runner: "/var/tmp/gha-fleet-image-test/" + plan.Runner.Archive,
+		CompilerCache: "/var/tmp/gha-fleet-image-test/" + plan.CompilerCache.Archive, Toolchains: map[string]string{}, VerifiedBy: plan.Source.SignerFingerprint,
+	}
+	for _, toolchain := range plan.Toolchains {
+		artifacts.Toolchains[toolchain.Name] = artifacts.Directory + "/" + toolchain.Archive
+	}
+	if err := validateArtifactPaths(plan, artifacts); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRecipeFingerprintIsDeterministic(t *testing.T) {
@@ -62,7 +112,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:6301f2542e405bc07ae59c9594548e1499f80e7b79bb879481c5619b9dc7748a" {
+	if first != "sha256:3d29edfb4c37654e75ad9d4985d4c55e4a94575b2499bbc55bf69880329990b7" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -106,6 +156,10 @@ func TestVerifyTargetImageRequiresExplicitVariantForEveryWorkerClass(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
+		artifactSHA256 := plan.Source.DiskSHA256
+		if plan.Image.EffectiveType() == "container" {
+			artifactSHA256 = plan.Source.RootfsSHA256
+		}
 		properties := map[string]string{
 			"user.nddev.manifest_fingerprint":    plan.ManifestFingerprint,
 			"user.nddev.recipe_sha256":           strings.TrimPrefix(recipe, "sha256:"),
@@ -115,7 +169,7 @@ func TestVerifyTargetImageRequiresExplicitVariantForEveryWorkerClass(t *testing.
 			"user.nddev.sccache.archive_sha256":  plan.CompilerCache.ArchiveSHA256,
 			"user.nddev.sccache.binary_sha256":   plan.CompilerCache.BinarySHA256,
 			"user.nddev.source.release":          plan.Source.ReleaseID,
-			"user.nddev.source.disk_sha256":      plan.Source.DiskSHA256,
+			"user.nddev.source.artifact_sha256":  artifactSHA256,
 			"user.nddev.package_manifest_sha256": strings.Repeat("a", 64),
 			"user.nddev.image.variant":           plan.Variant,
 			"user.nddev.docker-action-base":      plan.DockerActionBaseRef,
@@ -123,7 +177,7 @@ func TestVerifyTargetImageRequiresExplicitVariantForEveryWorkerClass(t *testing.
 		maps.Copy(properties, toolchainProperties(plan))
 		image := imageState{
 			Architecture: plan.Image.Architecture,
-			Type:         "virtual-machine",
+			Type:         plan.Image.EffectiveType(),
 			Properties:   properties,
 		}
 		if err := verifyTargetImage(image, plan, recipe); err != nil {
@@ -244,7 +298,7 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 		}
 	}
 	dockerProvision, _ := scripts.ReadFile("assets/docker-provision.sh")
-	for _, invariant := range []string{"overlay2", "native.cgroupdriver=systemd", "docker buildx version", "docker compose version", "docker import", "--network none"} {
+	for _, invariant := range []string{"overlay2", "overlayfs", "GHA_DOCKER_STORAGE_DRIVER", "native.cgroupdriver=systemd", "docker buildx version", "docker compose version", "docker import", "--network none"} {
 		if !strings.Contains(string(dockerProvision), invariant) {
 			t.Fatalf("Docker provision script misses %s", invariant)
 		}
@@ -317,9 +371,11 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 	command := exec.Command("bash", "-ceu", prefix+"\nexit 0\n")
 	command.Env = append(os.Environ(),
 		"GHA_RUNNER_VERSION=v2.336.0",
-		"GHA_PUBLIC_HOST_ADDRESS=192.0.2.1",
+		"GHA_PUBLIC_HOST_ADDRESS=198.51.100.1",
 		"GHA_EXPECTED_ROOT_DISK_GIB=70",
 		"GHA_DOCKER_ACTION_BASE_REF=example.invalid/action-base:test",
+		"GHA_DOCKER_STORAGE_DRIVER=overlay2",
+		"GHA_INSTANCE_TYPE=virtual-machine",
 		"GHA_SCCACHE_VERSION=v0.17.0",
 		"GHA_SCCACHE_BINARY_SHA256="+strings.Repeat("a", 64),
 		"GHA_TOOLCHAINS_B64="+base64.StdEncoding.EncodeToString([]byte("[]")),
@@ -330,16 +386,31 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 	}
 }
 
-func TestInstanceInitArgsDisableNestedVirtualization(t *testing.T) {
+func TestDockerStorageDriverMatchesIsolationBackend(t *testing.T) {
+	t.Parallel()
+	vm := testImagePlan(t)
+	vm.Image.Type = "virtual-machine"
+	if got := dockerStorageDriver(vm); got != "overlay2" {
+		t.Fatalf("VM Docker storage driver = %q", got)
+	}
+	container := vm
+	container.Image.Type = "container"
+	if got := dockerStorageDriver(container); got != "overlayfs" {
+		t.Fatalf("container Docker storage driver = %q", got)
+	}
+}
+
+func TestInstanceInitArgsPinContainerIsolation(t *testing.T) {
 	t.Parallel()
 
 	plan := testImagePlan(t)
 	args := (&Orchestrator{}).instanceInitArgs(plan, strings.Repeat("a", 64), "probe", plan.BuilderDiskGiB)
-	want := "--config raw.qemu=-cpu host,-vmx,-svm"
-	if !strings.Contains(strings.Join(args, " "), want) {
-		t.Fatalf("instance init args %q do not contain %q", args, want)
+	for _, want := range []string{"--config security.privileged=false", "--config security.nesting=false"} {
+		if !strings.Contains(strings.Join(args, " "), want) {
+			t.Fatalf("instance init args %q do not contain %q", args, want)
+		}
 	}
-	if !strings.Contains(strings.Join(args, " "), "--device root,size=20GiB") {
+	if !strings.Contains(strings.Join(args, " "), "--device root,size=12GiB") {
 		t.Fatalf("builder init args do not contain bounded root disk: %q", args)
 	}
 	smokeArgs := (&Orchestrator{}).instanceInitArgs(plan, strings.Repeat("b", 64), "smoke", 0)
@@ -358,6 +429,7 @@ func TestValidateArtifactPathsRejectsSubstitution(t *testing.T) {
 		Signature:     filepath.Join(directory, plan.Source.SignatureFile),
 		Metadata:      filepath.Join(directory, plan.Source.MetadataFile),
 		Disk:          filepath.Join(directory, plan.Source.DiskFile),
+		Rootfs:        filepath.Join(directory, plan.Source.RootfsFile),
 		Runner:        filepath.Join(directory, plan.Runner.Archive),
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),

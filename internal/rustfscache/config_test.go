@@ -28,7 +28,7 @@ func TestConfigRejectsTrustContractDrift(t *testing.T) {
 		"bucket":   func(config *Config) { config.Bucket = "other-cache" },
 		"quota":    func(config *Config) { config.QuotaBytes-- },
 		"prefix": func(config *Config) {
-			config.Identities[0].Prefix = "NDDev-OpenNetwork/github-actions/trust/other"
+			config.Identities[0].Prefix = "example-org/example-actions/trust/other"
 		},
 		"mode": func(config *Config) { config.Identities[0].Mode = "read-only" },
 		"retention": func(config *Config) {
@@ -128,7 +128,7 @@ func testConfig(t *testing.T, directory string) Config {
 	t.Helper()
 	return Config{
 		SchemaVersion:        SchemaVersion,
-		Endpoint:             "https://192.0.2.1:9002",
+		Endpoint:             "https://198.51.100.1:9002",
 		Region:               "us-east-1",
 		CAFile:               filepath.Join(directory, "ca.pem"),
 		RootAccessKeyFile:    filepath.Join(directory, "root-access-key"),
@@ -137,10 +137,10 @@ func testConfig(t *testing.T, directory string) Config {
 		Bucket:               "github-actions-cache",
 		QuotaBytes:           64 * 1024 * 1024 * 1024,
 		Identities: []Identity{
-			{Role: "trusted-writer", Policy: "gha-cache-github-actions-trusted", Prefix: "NDDev-OpenNetwork/github-actions/trust/trusted", Mode: "read-write", RetentionDays: 30},
-			{Role: "untrusted-writer", Policy: "gha-cache-github-actions-untrusted", Prefix: "NDDev-OpenNetwork/github-actions/trust/untrusted", Mode: "read-write", RetentionDays: 7},
-			{Role: "promoter", Policy: "gha-cache-github-actions-promoter", Prefix: "NDDev-OpenNetwork/github-actions/trust/promoted", Mode: "read-write", RetentionDays: 90},
-			{Role: "release-reader", Policy: "gha-cache-github-actions-release", Prefix: "NDDev-OpenNetwork/github-actions/trust/promoted", Mode: "read-only", RetentionDays: 90},
+			{Role: "trusted-writer", Policy: "gha-cache-github-actions-trusted", Prefix: "example-org/example-actions/trust/trusted", Mode: "read-write", RetentionDays: 30},
+			{Role: "untrusted-writer", Policy: "gha-cache-github-actions-untrusted", Prefix: "example-org/example-actions/trust/untrusted", Mode: "read-write", RetentionDays: 7},
+			{Role: "promoter", Policy: "gha-cache-github-actions-promoter", Prefix: "example-org/example-actions/trust/promoted", Mode: "read-write", RetentionDays: 90},
+			{Role: "release-reader", Policy: "gha-cache-github-actions-release", Prefix: "example-org/example-actions/trust/promoted", Mode: "read-only", RetentionDays: 90},
 		},
 	}
 }

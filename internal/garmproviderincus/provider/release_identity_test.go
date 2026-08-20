@@ -21,7 +21,7 @@ func TestAdmissionRefusesAPolicyPinningADifferentProvider(t *testing.T) {
 	t.Cleanup(func() { Version = original })
 
 	cfg := &providerconfig.Incus{
-		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "server-gha-runner-1.yaml"),
+		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "example-runner-1.yaml"),
 	}
 
 	// A stamped binary whose version is not the one the policy pins.
@@ -44,7 +44,7 @@ func TestAdmissionRefusesAnUnstampedBuild(t *testing.T) {
 	t.Cleanup(func() { Version = original })
 
 	cfg := &providerconfig.Incus{
-		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "server-gha-runner-1.yaml"),
+		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "example-runner-1.yaml"),
 	}
 
 	Version = providerrelease.DevelopmentVersion
@@ -69,7 +69,7 @@ func TestAdmissionAcceptsTheProviderThePolicyPins(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &providerconfig.Incus{
-		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "server-gha-runner-1.yaml"),
+		PlatformConfigFile: filepath.Join("..", "..", "..", "config", "example-runner-1.yaml"),
 	}
 
 	Version = manifest.DerivativeVersion

@@ -13,7 +13,7 @@ fi
 : "${GHA_MANIFEST_FINGERPRINT:?}"
 : "${GHA_RECIPE_FINGERPRINT:?}"
 : "${GHA_SOURCE_RELEASE_ID:?}"
-: "${GHA_SOURCE_DISK_SHA256:?}"
+: "${GHA_SOURCE_ARTIFACT_SHA256:?}"
 : "${GHA_WARM_AGENT_B64:?}"
 : "${GHA_SCCACHE_VERSION:?}"
 : "${GHA_SCCACHE_ARCHIVE:?}"
@@ -43,6 +43,7 @@ chmod 0440 /etc/sudoers.d/90-nddev-runner
 visudo --check --file=/etc/sudoers.d/90-nddev-runner
 
 install -d -o root -g root -m 0755 /usr/local/libexec
+install -d -o runner -g runner -m 0700 /home/runner/.gha-cache
 printf '%s' "${GHA_WARM_AGENT_B64}" | base64 --decode >/usr/local/libexec/gha-warm-agent
 chown root:root /usr/local/libexec/gha-warm-agent
 chmod 0755 /usr/local/libexec/gha-warm-agent
@@ -177,7 +178,8 @@ install -d -o runner -g runner -m 0755 \
 toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
-if [[ "$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" != bun,go,node,rust,uv ]]; then
+toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
+if [[ "${toolchain_set}" != bun,gh,go,rust,uv && "${toolchain_set}" != bun,gh,go,node22,node24,node25,rust,uv ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -191,13 +193,21 @@ for toolchain_name in "${toolchain_names[@]}"; do
   [[ "${toolchain_sha256}" =~ ^[0-9a-f]{64}$ ]]
   echo "${toolchain_sha256}  ${toolchain_archive}" | sha256sum --check --strict
   toolchain_scratch="$(mktemp -d /var/tmp/gha-toolchain.XXXXXXXXXX)"
-  case "${toolchain_name}" in
-    bun)
+	case "${toolchain_name}" in
+	  bun)
       unzip -q "${toolchain_archive}" -d "${toolchain_scratch}"
       install -o root -g root -m 0755 \
         "${toolchain_scratch}/bun-linux-x64/bun" /usr/local/bin/bun
-      [[ "$(bun --version)" == "${toolchain_version}" ]]
-      ;;
+	    [[ "$(bun --version)" == "${toolchain_version}" ]]
+	    ;;
+	  gh)
+	    tar --extract --gzip --file "${toolchain_archive}" \
+	      --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
+	    install -o root -g root -m 0755 \
+	      "${toolchain_scratch}/gh_${toolchain_version}_linux_amd64/bin/gh" /usr/local/bin/gh
+	    [[ "$(gh --version | head -n 1)" == "gh version ${toolchain_version} "* ]]
+	    gh attestation --help >/dev/null
+	    ;;
     go)
       tar --extract --gzip --file "${toolchain_archive}" \
         --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
@@ -209,44 +219,24 @@ for toolchain_name in "${toolchain_names[@]}"; do
         "${runner_tool_cache}/go/${toolchain_version}/x64.complete"
       [[ "$("${runner_tool_cache}/go/${toolchain_version}/x64/bin/go" version)" == "go version go${toolchain_version} linux/amd64" ]]
       ;;
-    node)
+    node22|node24|node25)
       tar --extract --xz --file "${toolchain_archive}" \
         --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
-      # Two placements, because two different consumers need it.
-      #
-      # The tool cache is what actions/setup-node resolves against, so a job
-      # that asks for this version gets it without reaching the network.
-      #
-      # `node` on PATH by name is what CodeQL's TypeScript extractor needs: it
-      # spawns the binary and checks its version before parsing, and no
-      # build-mode avoids that because the requirement is in the parser rather
-      # than in a build step. Bun does not satisfy it. The payload therefore
-      # lives root-owned under /usr/local and the tool-cache entry points at
-      # it, so a job that clears its own tool cache cannot take `node` off the
-      # PATH of the job after it.
-      install -d -o root -g root -m 0755 /usr/local/lib/nodejs
-      mv -- "${toolchain_scratch}/node-v${toolchain_version}-linux-x64" \
-        "/usr/local/lib/nodejs/${toolchain_version}"
-      chown -R root:root "/usr/local/lib/nodejs/${toolchain_version}"
-      for node_binary in node npm npx; do
-        ln -sfn "/usr/local/lib/nodejs/${toolchain_version}/bin/${node_binary}" \
-          "/usr/local/bin/${node_binary}"
-      done
-      # A real copy rather than a link into /usr/local, because the tool cache
-      # must be owned by the runner end to end -- sanitize refuses an entry it
-      # does not own, and a job has to be able to manage its own cache. The
-      # duplicate is the price of keeping both invariants: the runner owns its
-      # cache, and the PATH copy is root-owned so clearing that cache cannot
-      # take `node` away from the job after it.
-      install -d -o runner -g runner -m 0755 \
-        "${runner_tool_cache}/node" "${runner_tool_cache}/node/${toolchain_version}"
-      cp -a "/usr/local/lib/nodejs/${toolchain_version}" \
-        "${runner_tool_cache}/node/${toolchain_version}/x64"
-      chown -R runner:runner "${runner_tool_cache}/node/${toolchain_version}"
-      install -o runner -g runner -m 0644 /dev/null \
-        "${runner_tool_cache}/node/${toolchain_version}/x64.complete"
-      [[ "$(node --version)" == "v${toolchain_version}" ]]
-      [[ -n "$(npm --version)" ]]
+      node_root="${runner_tool_cache}/node/${toolchain_version}"
+      install -d -o runner -g runner -m 0755 "${runner_tool_cache}/node" "${node_root}"
+      mv -- "${toolchain_scratch}/node-v${toolchain_version}-linux-x64" "${node_root}/x64"
+      chown -R runner:runner "${node_root}"
+      install -o runner -g runner -m 0644 /dev/null "${node_root}/x64.complete"
+      [[ "$("${node_root}/x64/bin/node" --version)" == "v${toolchain_version}" ]]
+      if [[ "${toolchain_name}" == node24 ]]; then
+        for executable in node npm npx corepack; do
+          test -e "${node_root}/x64/bin/${executable}"
+          ln -sfn "${node_root}/x64/bin/${executable}" "/usr/local/bin/${executable}"
+        done
+        [[ "$(node --version)" == "v${toolchain_version}" ]]
+        npm --version >/dev/null
+        corepack --version >/dev/null
+      fi
       ;;
     rust)
       tar --extract --xz --file "${toolchain_archive}" \
@@ -271,12 +261,8 @@ for toolchain_name in "${toolchain_names[@]}"; do
   rmdir "${toolchain_scratch}"
   rm -f -- "${toolchain_archive}"
 done
-# Naming the entry matters: the check has to say which path is wrong, or a
-# toolchain that lands one directory off looks identical to one that is not
-# owned at all.
-unowned_tool_cache_entry="$(find "${runner_tool_cache}" -maxdepth 3 ! -user runner -printf '%p (%u)\n' -quit)"
-if [[ -n "${unowned_tool_cache_entry}" ]]; then
-  echo "runner tool cache contains an entry the runner does not own: ${unowned_tool_cache_entry}" >&2
+if find "${runner_tool_cache}" -maxdepth 3 ! -user runner -print -quit | grep -q .; then
+  echo "runner tool cache contains an entry the runner does not own" >&2
   exit 1
 fi
 
@@ -289,14 +275,14 @@ jq -n \
   --arg runner_version "${GHA_RUNNER_VERSION}" \
   --arg runner_sha256 "${GHA_RUNNER_SHA256}" \
   --arg source_release "${GHA_SOURCE_RELEASE_ID}" \
-  --arg source_disk_sha256 "${GHA_SOURCE_DISK_SHA256}" \
+  --arg source_artifact_sha256 "${GHA_SOURCE_ARTIFACT_SHA256}" \
   --arg package_manifest_sha256 "${package_sha}" \
   --arg sccache_version "${GHA_SCCACHE_VERSION}" \
   --arg sccache_archive_sha256 "${GHA_SCCACHE_ARCHIVE_SHA256}" \
   --arg sccache_binary_sha256 "${GHA_SCCACHE_BINARY_SHA256}" \
   --argjson toolchains "$(jq -c 'map({key:.name,value:{version:.version,archive_sha256:.archive_sha256}}) | from_entries' <<<"${toolchain_manifest}")" \
   --arg runner_tool_cache "${runner_tool_cache}" \
-  '{schema_version:2, manifest_fingerprint:$manifest, recipe_fingerprint:$recipe, runner_version:$runner_version, runner_sha256:$runner_sha256, source_release:$source_release, source_disk_sha256:$source_disk_sha256, package_manifest_sha256:$package_manifest_sha256, sccache_version:$sccache_version, sccache_archive_sha256:$sccache_archive_sha256, sccache_binary_sha256:$sccache_binary_sha256, runner_tool_cache:$runner_tool_cache, toolchains:$toolchains}' \
+  '{schema_version:3, manifest_fingerprint:$manifest, recipe_fingerprint:$recipe, runner_version:$runner_version, runner_sha256:$runner_sha256, source_release:$source_release, source_artifact_sha256:$source_artifact_sha256, package_manifest_sha256:$package_manifest_sha256, sccache_version:$sccache_version, sccache_archive_sha256:$sccache_archive_sha256, sccache_binary_sha256:$sccache_binary_sha256, runner_tool_cache:$runner_tool_cache, toolchains:$toolchains}' \
   > /etc/nddev/image-build.json
 chmod 0644 /etc/nddev/image-build.json /etc/nddev/packages.tsv
 
@@ -309,8 +295,10 @@ if find "${cache_root}" -type f \( -name .runner -o -name .credentials -o -name 
   exit 1
 fi
 test -x /usr/local/libexec/gha-warm-agent
+test "$(stat --format='%U:%G:%a:%F' /home/runner/.gha-cache)" = 'runner:runner:700:directory'
 test -x /usr/local/bin/sccache
 test -x /usr/local/bin/bun
+test -x /usr/local/bin/gh
 test -x /usr/local/bin/uv
 test -x /usr/local/bin/uvx
 test -x /usr/local/bin/rustc

@@ -1,5 +1,5 @@
 schema_version: 1
-endpoint: https://192.0.2.1:9002
+endpoint: https://198.51.100.1:9002
 region: us-east-1
 ca_file: /etc/gha-fleet/trust/rustfs-ca.pem
 root_access_key_file: /etc/gha-fleet/secrets/rustfs-access-key
@@ -11,21 +11,21 @@ quota_bytes: 68719476736
 identities:
   - role: trusted-writer
     policy: gha-cache-github-actions-trusted
-    prefix: NDDev-OpenNetwork/github-actions/trust/trusted
+    prefix: example-org/example-actions/trust/trusted
     mode: read-write
     retention_days: 30
   - role: untrusted-writer
     policy: gha-cache-github-actions-untrusted
-    prefix: NDDev-OpenNetwork/github-actions/trust/untrusted
+    prefix: example-org/example-actions/trust/untrusted
     mode: read-write
     retention_days: 7
   - role: promoter
     policy: gha-cache-github-actions-promoter
-    prefix: NDDev-OpenNetwork/github-actions/trust/promoted
+    prefix: example-org/example-actions/trust/promoted
     mode: read-write
     retention_days: 90
   - role: release-reader
     policy: gha-cache-github-actions-release
-    prefix: NDDev-OpenNetwork/github-actions/trust/promoted
+    prefix: example-org/example-actions/trust/promoted
     mode: read-only
     retention_days: 90

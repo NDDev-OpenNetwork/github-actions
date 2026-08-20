@@ -31,6 +31,8 @@ type Summary struct {
 	PendingBundles  int   `json:"pending_bundles"`
 	SourceBytes     int64 `json:"source_bytes"`
 	ExportedBytes   int64 `json:"exported_bytes"`
+	ScannedBundles  int   `json:"scanned_bundles"`
+	DeletedBundles  int   `json:"deleted_bundles"`
 }
 
 type Exporter struct {
@@ -67,21 +69,21 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	names, err := ListBundles(e.Config)
+	progress, err := e.State.LoadProgress()
+	if err != nil {
+		return Summary{}, err
+	}
+	names, _, _, err := ListBundleBatch(ctx, e.Config, maxBundlesPerRun)
 	if err != nil {
 		return Summary{}, e.saveFailure(state, now, Summary{}, "source-list", 1, err)
 	}
-	present := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		present[name] = struct{}{}
-	}
-	for name := range state.Exports {
-		if _, exists := present[name]; !exists {
-			delete(state.Exports, name)
-		}
+	// Confirmation records are crash markers, not an archive index. Never let
+	// historical exports make state grow with the lifetime of the fleet.
+	if len(state.Exports) > maxBundlesPerRun {
+		state.Exports = make(map[string]ExportRecord)
 	}
 
-	summary := Summary{SourceBundles: len(names)}
+	summary := Summary{ScannedBundles: len(names)}
 	firstFailure := ""
 	var firstFailureCause error
 	failures := 0
@@ -111,6 +113,16 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 			now.Sub(verifiedAt) < remoteRevalidationInterval {
 			summary.ExportedBundles++
 			summary.ExportedBytes += bundleBytes
+			if err := RemoveBundle(e.Config, bundle); err != nil {
+				if firstFailure == "" {
+					firstFailure = "source-remove"
+					firstFailureCause = err
+				}
+				failures++
+				continue
+			}
+			delete(state.Exports, name)
+			summary.DeletedBundles++
 			continue
 		}
 		remote, err := e.Store.Head(ctx, e.Config.Bucket, bundle.ObjectKey)
@@ -154,13 +166,32 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 			SHA256: bundle.SHA256, ObjectKey: bundle.ObjectKey, Bytes: bundleBytes,
 			ExportedAt: exportedAt, LastVerifiedAt: now.Format(time.RFC3339Nano),
 		}
+		// Persist confirmation before unlink. If the process crashes after this
+		// save, the next invocation verifies the record and finishes removal.
+		state.Status.ObservedAt = now.Format(time.RFC3339Nano)
+		if err := e.State.Save(state); err != nil {
+			return summary, err
+		}
+		if err := RemoveBundle(e.Config, bundle); err != nil {
+			if firstFailure == "" {
+				firstFailure = "source-remove"
+				firstFailureCause = err
+			}
+			failures++
+			continue
+		}
+		delete(state.Exports, name)
+		summary.DeletedBundles++
 		summary.ExportedBundles++
 		summary.ExportedBytes += bundleBytes
 	}
-	summary.PendingBundles = summary.SourceBundles - summary.ExportedBundles
-	if summary.PendingBundles < failures {
-		summary.PendingBundles = failures
+	_, remainingBundles, remainingBytes, scanErr := ListBundleBatch(ctx, e.Config, 1)
+	if scanErr != nil {
+		return summary, e.saveFailure(state, now, summary, "source-rescan", 1, scanErr)
 	}
+	summary.SourceBundles = remainingBundles
+	summary.PendingBundles = remainingBundles
+	summary.SourceBytes = remainingBytes
 	status := Status{
 		SchemaVersion: stateSchemaVersion, DeploymentStage: e.Config.DeploymentStage,
 		ObservedAt: now.Format(time.RFC3339Nano), LastSuccessAt: state.Status.LastSuccessAt,
@@ -170,12 +201,29 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 	}
 	if failures == 0 && summary.PendingBundles == 0 {
 		status.LastSuccessAt = now.Format(time.RFC3339Nano)
-	} else {
+	} else if failures != 0 {
 		status.LastErrorCode = firstFailure
 		status.ConsecutiveFailures = state.Status.ConsecutiveFailures + 1
 	}
 	state.Status = status
 	if err := e.State.Save(state); err != nil {
+		return summary, err
+	}
+	progress.SchemaVersion = progressSchemaVersion
+	progress.ObservedAt = now.Format(time.RFC3339Nano)
+	progress.ScannedBundles = summary.ScannedBundles
+	progress.ExportedBundles = summary.ExportedBundles
+	progress.DeletedBundles = summary.DeletedBundles
+	progress.FailedBundles = failures
+	progress.BacklogBundles = summary.PendingBundles
+	progress.BacklogBytes = summary.SourceBytes
+	if summary.DeletedBundles > 0 {
+		progress.LastProgressAt = now.Format(time.RFC3339Nano)
+	}
+	if failures == 0 && summary.PendingBundles == 0 {
+		progress.LastFullSyncAt = now.Format(time.RFC3339Nano)
+	}
+	if err := e.State.SaveProgress(progress); err != nil {
 		return summary, err
 	}
 	if status.LastErrorCode != "" {

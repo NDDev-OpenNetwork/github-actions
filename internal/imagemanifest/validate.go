@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	aliasPattern          = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{2,127}$`)
+	aliasPattern          = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{2,63}$`)
 	filePattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
 	packagePattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]{0,99}$`)
 	packageVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+:~_-]{0,127}$`)
@@ -38,16 +38,37 @@ var toolchainAssets = map[string]struct {
 			return "/oven-sh/bun/releases/download/bun-v" + version + "/bun-linux-x64.zip"
 		},
 	},
+	"gh": {
+		Host: "github.com",
+		Archive: func(version string) string {
+			return "gh_" + version + "_linux_amd64.tar.gz"
+		},
+		Path: func(version string) string {
+			return "/cli/cli/releases/download/v" + version + "/gh_" + version + "_linux_amd64.tar.gz"
+		},
+	},
 	"go": {
 		Host:    "go.dev",
 		Archive: func(version string) string { return "go" + version + ".linux-amd64.tar.gz" },
 		Path:    func(version string) string { return "/dl/go" + version + ".linux-amd64.tar.gz" },
 	},
-	"node": {
-		Host: "nodejs.org",
-		Archive: func(version string) string {
-			return "node-v" + version + "-linux-x64.tar.xz"
+	"node22": {
+		Host:    "nodejs.org",
+		Archive: func(version string) string { return "node-v" + version + "-linux-x64.tar.xz" },
+		Path: func(version string) string {
+			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
 		},
+	},
+	"node24": {
+		Host:    "nodejs.org",
+		Archive: func(version string) string { return "node-v" + version + "-linux-x64.tar.xz" },
+		Path: func(version string) string {
+			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
+		},
+	},
+	"node25": {
+		Host:    "nodejs.org",
+		Archive: func(version string) string { return "node-v" + version + "-linux-x64.tar.xz" },
 		Path: func(version string) string {
 			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
 		},
@@ -105,6 +126,10 @@ func (m Manifest) Validate() error {
 	if m.Image.OS != "ubuntu" {
 		add("image.os", "must be ubuntu")
 	}
+	imageType := m.Image.EffectiveType()
+	if imageType != "virtual-machine" && imageType != "container" {
+		add("image.type", "must be virtual-machine or container")
+	}
 	if m.Image.Release != "24.04" {
 		add("image.release", "must be 24.04")
 	}
@@ -119,7 +144,6 @@ func (m Manifest) Validate() error {
 		"source.checksums_file":  m.Source.ChecksumsFile,
 		"source.signature_file":  m.Source.SignatureFile,
 		"source.metadata_file":   m.Source.MetadataFile,
-		"source.disk_file":       m.Source.DiskFile,
 		"runner.archive":         m.Runner.Archive,
 		"compiler_cache.archive": m.CompilerCache.Archive,
 	} {
@@ -131,7 +155,26 @@ func (m Manifest) Validate() error {
 		add("source", "must use Canonical SHA256SUMS and SHA256SUMS.gpg")
 	}
 	validateSHA(add, "source.metadata_sha256", m.Source.MetadataSHA256)
-	validateSHA(add, "source.disk_sha256", m.Source.DiskSHA256)
+	if imageType == "container" {
+		if m.Source.DiskFile != "" || m.Source.DiskSHA256 != "" {
+			add("source.disk_file", "must be empty for a container image")
+		}
+		if m.Source.RootfsFile != "ubuntu-24.04-server-cloudimg-amd64-root.tar.xz" {
+			add("source.rootfs_file", "must be the pinned Canonical container rootfs")
+		}
+		if !filePattern.MatchString(m.Source.RootfsFile) || path.Base(m.Source.RootfsFile) != m.Source.RootfsFile {
+			add("source.rootfs_file", "must be a plain filename")
+		}
+		validateSHA(add, "source.rootfs_sha256", m.Source.RootfsSHA256)
+	} else {
+		if !filePattern.MatchString(m.Source.DiskFile) || path.Base(m.Source.DiskFile) != m.Source.DiskFile {
+			add("source.disk_file", "must be a plain filename")
+		}
+		validateSHA(add, "source.disk_sha256", m.Source.DiskSHA256)
+		if m.Source.RootfsFile != "" || m.Source.RootfsSHA256 != "" {
+			add("source.rootfs_file", "must be empty for a virtual-machine image")
+		}
+	}
 	if m.Source.KeyringPath != "/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg" {
 		add("source.keyring_path", "must use the Ubuntu cloud image keyring")
 	}

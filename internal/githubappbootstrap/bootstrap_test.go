@@ -28,9 +28,9 @@ func TestBuildManifestIsPrivateLeastPrivilegeAndWebhookFree(t *testing.T) {
 	t.Parallel()
 
 	manifest := buildManifest(Options{
-		Repository:  "NDDev-OpenNetwork/github-actions",
-		AppName:     "nddev-gha-fleet",
-		HomepageURL: "https://github.com/NDDev-OpenNetwork/github-actions",
+		Repository:  "example-org/example-actions",
+		AppName:     "example-actions-fleet",
+		HomepageURL: "https://github.com/example-org/example-actions",
 	}, "http://127.0.0.1:43210")
 	if manifest.Public || manifest.HookAttributes.Active || manifest.RequestOAuth || manifest.SetupOnUpdate {
 		t.Fatalf("unsafe manifest switches: %#v", manifest)
@@ -194,10 +194,10 @@ func TestRunnerCompletesVerifiedManifestFlow(t *testing.T) {
 	}
 	result, err := runner.Run(ctx, Options{
 		ListenAddress:   "127.0.0.1:0",
-		Repository:      "NDDev-OpenNetwork/github-actions",
+		Repository:      "example-org/example-actions",
 		OwnerType:       OwnerTypeOrganization,
-		AppName:         "nddev-gha-fleet",
-		HomepageURL:     "https://github.com/NDDev-OpenNetwork/github-actions",
+		AppName:         "example-actions-fleet",
+		HomepageURL:     "https://github.com/example-org/example-actions",
 		OutputDirectory: outputDirectory,
 		OpenBrowser:     true,
 	}, &bootstrapOutput)
@@ -207,7 +207,7 @@ func TestRunnerCompletesVerifiedManifestFlow(t *testing.T) {
 	if err := <-browserDone; err != nil {
 		t.Fatal(err)
 	}
-	if result.AppID != 12345 || result.InstallationID != 67890 || result.Repository != "NDDev-OpenNetwork/github-actions" || result.RepositorySelection != "selected" {
+	if result.AppID != 12345 || result.InstallationID != 67890 || result.Repository != "example-org/example-actions" || result.RepositorySelection != "selected" {
 		t.Fatalf("unexpected verified result: %#v", result)
 	}
 	if !strings.Contains(bootstrapOutput.String(), "http://127.0.0.1:") {
@@ -240,10 +240,10 @@ func TestValidateOptionsRejectsExistingOutputAndNonLoopback(t *testing.T) {
 
 	base := Options{
 		ListenAddress:   "127.0.0.1:0",
-		Repository:      "NDDev-OpenNetwork/github-actions",
+		Repository:      "example-org/example-actions",
 		OwnerType:       OwnerTypeOrganization,
-		AppName:         "nddev-gha-fleet",
-		HomepageURL:     "https://github.com/NDDev-OpenNetwork/github-actions",
+		AppName:         "example-actions-fleet",
+		HomepageURL:     "https://github.com/example-org/example-actions",
 		OutputDirectory: filepath.Join(t.TempDir(), "new"),
 	}
 	unsafe := base
@@ -281,7 +281,7 @@ func TestGitHubClientRefusesRedirectsWithAppCredentials(t *testing.T) {
 	defer origin.Close()
 	client := newGitHubClient(origin.Client())
 	client.baseURL = origin.URL
-	if _, err := client.convertManifest(context.Background(), "test-code", "NDDev-OpenNetwork", OwnerTypeOrganization, false); err == nil || !strings.Contains(err.Error(), "HTTP 302") {
+	if _, err := client.convertManifest(context.Background(), "test-code", "example-org", OwnerTypeOrganization, false); err == nil || !strings.Contains(err.Error(), "HTTP 302") {
 		t.Fatalf("redirect response was accepted: %v", err)
 	}
 	if redirected.Load() {
@@ -298,11 +298,11 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 			writer.WriteHeader(http.StatusCreated)
 			writeTestJSON(t, writer, appRegistration{
 				ID:   12345,
-				Slug: "nddev-gha-fleet",
+				Slug: "example-actions-fleet",
 				Name: "NDDev GARM fleet",
 				PEM:  privateKeyPEM,
 				Owner: githubAccount{
-					Login: "NDDev-OpenNetwork",
+					Login: "example-org",
 					Type:  "Organization",
 				},
 				Permissions: map[string]string{"administration": "write", "metadata": "read"},
@@ -313,7 +313,7 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 			writeTestJSON(t, writer, installation{
 				ID:                  67890,
 				AppID:               12345,
-				Account:             githubAccount{Login: "NDDev-OpenNetwork", Type: "Organization"},
+				Account:             githubAccount{Login: "example-org", Type: "Organization"},
 				TargetType:          "Organization",
 				RepositorySelection: "selected",
 				Permissions:         map[string]string{"administration": "write", "metadata": "read"},
@@ -338,7 +338,7 @@ func fakeGitHubAPI(t *testing.T, privateKeyPEM string) *httptest.Server {
 			requireBearer(t, request, "install-token")
 			writeTestJSON(t, writer, map[string]any{
 				"total_count":  1,
-				"repositories": []map[string]string{{"full_name": "NDDev-OpenNetwork/github-actions"}},
+				"repositories": []map[string]string{{"full_name": "example-org/example-actions"}},
 			})
 		default:
 			http.Error(writer, `{"message":"not found"}`, http.StatusNotFound)
@@ -380,7 +380,7 @@ func driveManifestBrowser(startURL string) error {
 		return err
 	}
 	response.Body.Close()
-	wantInstallURL := "https://github.com/apps/nddev-gha-fleet/installations/new?state=" + url.QueryEscape(state)
+	wantInstallURL := "https://github.com/apps/example-actions-fleet/installations/new?state=" + url.QueryEscape(state)
 	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != wantInstallURL {
 		return fmt.Errorf("unexpected manifest callback redirect: %d %s", response.StatusCode, response.Header.Get("Location"))
 	}
@@ -439,7 +439,7 @@ func assertMode(t *testing.T, path string, wanted os.FileMode) {
 // operator to is part of the recovery contract, not a cosmetic detail.
 func TestManifestActionURLFollowsTheOwningAccount(t *testing.T) {
 	t.Parallel()
-	if got := manifestActionURL("NDDev-OpenNetwork", OwnerTypeOrganization); got != "https://github.com/organizations/NDDev-OpenNetwork/settings/apps/new" {
+	if got := manifestActionURL("example-org", OwnerTypeOrganization); got != "https://github.com/organizations/example-org/settings/apps/new" {
 		t.Fatalf("organization form is %q", got)
 	}
 	if got := manifestActionURL("example-user", OwnerTypeUser); got != "https://github.com/settings/apps/new" {
@@ -451,23 +451,23 @@ func TestValidateRegistrationBindsTheOwningAccount(t *testing.T) {
 	t.Parallel()
 	complete := func(login, accountType string) appRegistration {
 		return appRegistration{
-			ID: 12345, Slug: "nddev-gha-fleet", PEM: "key",
+			ID: 12345, Slug: "example-actions-fleet", PEM: "key",
 			Owner:       githubAccount{Login: login, Type: accountType},
 			Permissions: map[string]string{"administration": "write", "metadata": "read"},
 			Events:      []string{},
 		}
 	}
-	if err := validateRegistration(complete("NDDev-OpenNetwork", "Organization"), "NDDev-OpenNetwork", OwnerTypeOrganization, false); err != nil {
+	if err := validateRegistration(complete("example-org", "Organization"), "example-org", OwnerTypeOrganization, false); err != nil {
 		t.Fatalf("the deployed organization App was rejected: %v", err)
 	}
 	for name, registration := range map[string]appRegistration{
 		"personal owner where an organization is expected": complete("example-user", "User"),
 		"another organization":                             complete("someone-else", "Organization"),
-		"right login, wrong account kind":                  complete("NDDev-OpenNetwork", "User"),
+		"right login, wrong account kind":                  complete("example-org", "User"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if err := validateRegistration(registration, "NDDev-OpenNetwork", OwnerTypeOrganization, false); err == nil {
+			if err := validateRegistration(registration, "example-org", OwnerTypeOrganization, false); err == nil {
 				t.Fatal("registration was accepted")
 			}
 		})
@@ -485,17 +485,17 @@ func TestValidateInstallationBindsTheSameAccount(t *testing.T) {
 			Permissions:         map[string]string{"administration": "write", "metadata": "read"},
 		}
 	}
-	if err := validateInstallation(observed("NDDev-OpenNetwork", "Organization", "Organization"), 12345, "NDDev-OpenNetwork", OwnerTypeOrganization, false); err != nil {
+	if err := validateInstallation(observed("example-org", "Organization", "Organization"), 12345, "example-org", OwnerTypeOrganization, false); err != nil {
 		t.Fatalf("the deployed organization installation was rejected: %v", err)
 	}
 	for name, candidate := range map[string]installation{
 		"installed on a personal account": observed("example-user", "User", "User"),
 		"installed on another org":        observed("someone-else", "Organization", "Organization"),
-		"target type disagrees":           observed("NDDev-OpenNetwork", "Organization", "User"),
+		"target type disagrees":           observed("example-org", "Organization", "User"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if err := validateInstallation(candidate, 12345, "NDDev-OpenNetwork", OwnerTypeOrganization, false); err == nil {
+			if err := validateInstallation(candidate, 12345, "example-org", OwnerTypeOrganization, false); err == nil {
 				t.Fatal("installation was accepted")
 			}
 		})
@@ -506,9 +506,9 @@ func TestValidateOptionsRequiresADeclaredOwnerKind(t *testing.T) {
 	t.Parallel()
 	base := Options{
 		ListenAddress:   "127.0.0.1:0",
-		Repository:      "NDDev-OpenNetwork/github-actions",
-		AppName:         "nddev-gha-fleet",
-		HomepageURL:     "https://github.com/NDDev-OpenNetwork/github-actions",
+		Repository:      "example-org/example-actions",
+		AppName:         "example-actions-fleet",
+		HomepageURL:     "https://github.com/example-org/example-actions",
 		OutputDirectory: filepath.Join(t.TempDir(), "new"),
 	}
 	if err := validateOptions(base); err == nil || !strings.Contains(err.Error(), "owner type") {
@@ -564,8 +564,8 @@ func TestVerifyInstallationRecordsTheOrganizationScopeItProved(t *testing.T) {
 				Permissions:         map[string]string{"administration": "write", OrganizationRunnersPermission: "write"},
 				RepositorySelection: "all",
 			})
-		case request.Method == http.MethodGet && request.URL.Path == "/repos/example-guild/ai_stp":
-			writeTestJSON(t, writer, installationRepository{FullName: "example-guild/ai_stp"})
+		case request.Method == http.MethodGet && request.URL.Path == "/repos/example-guild/example-project":
+			writeTestJSON(t, writer, installationRepository{FullName: "example-guild/example-project"})
 		default:
 			http.Error(writer, `{"message":"not found"}`, http.StatusNotFound)
 		}
@@ -576,14 +576,14 @@ func TestVerifyInstallationRecordsTheOrganizationScopeItProved(t *testing.T) {
 	client.baseURL = api.URL
 	registration := appRegistration{
 		ID:          12345,
-		Slug:        "guild-gha-fleet",
+		Slug:        "example-guild-fleet",
 		PEM:         privateKeyPEM,
 		Owner:       githubAccount{Login: "example-guild", Type: "Organization"},
 		Permissions: granted,
 	}
 
 	verified, err := client.verifyInstallation(
-		t.Context(), registration, 67890, "example-guild/ai_stp", OwnerTypeOrganization, true,
+		t.Context(), registration, 67890, "example-guild/example-project", OwnerTypeOrganization, true,
 	)
 	if err != nil {
 		t.Fatalf("organization installation refused: %v", err)

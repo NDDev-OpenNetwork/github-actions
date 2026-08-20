@@ -1,5 +1,0 @@
-u garm - "GARM runner manager" /var/lib/garm /usr/sbin/nologin
-u gha-gateway - "GARM worker gateway" /nonexistent /usr/sbin/nologin
-u gha-rustfs - "GitHub Actions RustFS cache" /var/lib/gha-cache/rustfs /usr/sbin/nologin
-u gha-zot - "GitHub Actions Zot registry" /var/lib/gha-cache/zot /usr/sbin/nologin
-u otelcol - "NDDev fleet telemetry collector" /var/lib/otelcol-fleet -

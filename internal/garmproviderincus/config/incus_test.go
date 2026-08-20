@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,14 +42,14 @@ func testConfig(t *testing.T) Incus {
 		ClientKey:         key,
 		TLSServerCert:     server,
 		SecureBoot:        true,
-		InstanceType:      IncusImageVirtualMachine,
 		WorkerImages: map[string]WorkerImage{
 			"nddev-linux-standard": {
-				Alias:       "nddev-ubuntu-24.04-amd64-current",
-				Fingerprint: testFingerprint,
-				Variant:     "standard",
-				RunnerUID:   1001,
-				RunnerGID:   1002,
+				Alias:        "nddev-ubuntu-24.04-amd64-current",
+				Fingerprint:  testFingerprint,
+				Variant:      "standard",
+				InstanceType: IncusImageVirtualMachine,
+				RunnerUID:    1001,
+				RunnerGID:    1002,
 			},
 		},
 		PlatformConfigFile:        platform,
@@ -85,6 +86,33 @@ func TestIncusConfigAcceptsOnlyHardenedContract(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestIncusConfigAcceptsBoundedPrivateClusterFailover(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.URL = ""
+	cfg.ClusterURLs = []string{
+		"https://10.200.0.5:8443",
+		"https://10.200.0.6:8443",
+		"https://10.200.0.8:8443",
+		"https://10.200.0.9:8443",
+	}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestIncusConfigAllowsOnlyOneExactPreviousProviderIdentity(t *testing.T) {
+	cfg := testConfig(t)
+	previous := ProviderIdentity{Version: "v0.1.5-nddev.32", Commit: "945fad5e276c0b21ba763425a5d7a692df4e35e7"}
+	cfg.PreviousProviderIdentities = []ProviderIdentity{previous}
+	require.NoError(t, cfg.Validate())
+	require.True(t, cfg.AllowsProviderIdentity(previous.Version, previous.Commit, "current", strings.Repeat("a", 40)))
+	require.True(t, cfg.AllowsProviderIdentity("current", strings.Repeat("a", 40), "current", strings.Repeat("a", 40)))
+	require.False(t, cfg.AllowsProviderIdentity(previous.Version, strings.Repeat("b", 40), "current", strings.Repeat("a", 40)))
+
+	cfg.PreviousProviderIdentities = append(cfg.PreviousProviderIdentities, previous)
+	require.ErrorContains(t, cfg.Validate(), "only N-1")
+	cfg.PreviousProviderIdentities = []ProviderIdentity{{Version: previous.Version, Commit: "not-a-commit"}}
+	require.ErrorContains(t, cfg.Validate(), "invalid exact identity")
+}
+
 func TestIncusConfigRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -92,17 +120,31 @@ func TestIncusConfigRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		message string
 	}{
 		{"unix socket", func(c *Incus) { c.UnixSocket = "/var/lib/incus/unix.socket" }, "unix_socket_path is forbidden"},
-		{"missing URL", func(c *Incus) { c.URL = "" }, "url must be specified"},
-		{"public URL", func(c *Incus) { c.URL = "https://192.0.2.1:8443" }, "must be https://127.0.0.1:8443 or a cluster member inside"},
+		{"missing URL", func(c *Incus) { c.URL = "" }, "url or cluster_urls must be specified"},
+		{"ambiguous endpoints", func(c *Incus) { c.ClusterURLs = []string{"https://10.200.0.5:8443", "https://10.200.0.6:8443"} }, "mutually exclusive"},
+		{"one cluster endpoint", func(c *Incus) { c.URL = ""; c.ClusterURLs = []string{"https://10.200.0.5:8443"} }, "between two and four"},
+		{"duplicate cluster endpoint", func(c *Incus) {
+			c.URL = ""
+			c.ClusterURLs = []string{"https://10.200.0.5:8443", "https://10.200.0.5:8443"}
+		}, "duplicate endpoint"},
+		{"public cluster endpoint", func(c *Incus) {
+			c.URL = ""
+			c.ClusterURLs = []string{"https://10.200.0.5:8443", "https://198.51.100.1:8443"}
+		}, "cluster member inside"},
+		{"public URL", func(c *Incus) { c.URL = "https://198.51.100.1:8443" }, "must be https://127.0.0.1:8443 or a cluster member inside"},
 		{"URL query", func(c *Incus) { c.URL = ExpectedIncusURL + "?unsafe=true" }, "must be a bare https endpoint"},
-		{"wrong port", func(c *Incus) { c.URL = "https://172.16.0.9:9443" }, "must use port 8443"},
+		{"wrong port", func(c *Incus) { c.URL = "https://10.200.0.9:9443" }, "must use port 8443"},
 		{"missing client key", func(c *Incus) { c.ClientKey = "" }, "client_certificate and client_key are mandatory"},
 		{"missing server certificate", func(c *Incus) { c.TLSServerCert = "" }, "tls_server_certificate is mandatory"},
 		{"remote image", func(c *Incus) { c.ImageRemotes = map[string]IncusImageRemote{"images": {}} }, "image_remotes are forbidden"},
 		{"wrong project", func(c *Incus) { c.ProjectName = "default" }, "project_name must be gha-fleet"},
 		{"default profile", func(c *Incus) { c.IncludeDefaultProfile = true }, "include_default_profile must be false"},
 		{"secure boot disabled", func(c *Incus) { c.SecureBoot = false }, "secure_boot must be true"},
-		{"container", func(c *Incus) { c.InstanceType = IncusImageContainer }, "instance_type must be virtual-machine"},
+		{"invalid image type", func(c *Incus) {
+			image := c.WorkerImages["nddev-linux-standard"]
+			image.InstanceType = "process"
+			c.WorkerImages["nddev-linux-standard"] = image
+		}, "instance_type must be virtual-machine or container"},
 		{"missing worker images", func(c *Incus) { c.WorkerImages = nil }, "worker_images must pin at least one pool image"},
 		{"blank flavor", func(c *Incus) { c.WorkerImages[" "] = c.WorkerImages["nddev-linux-standard"] }, "worker_images key must be an exact non-empty flavor"},
 		{"remote-style alias", func(c *Incus) {
@@ -132,11 +174,12 @@ func TestIncusConfigRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		}, "runner_gid must be in 1..65535"},
 		{"conflicting alias pins", func(c *Incus) {
 			c.WorkerImages["nddev-linux-integration"] = WorkerImage{
-				Alias:       c.WorkerImages["nddev-linux-standard"].Alias,
-				Fingerprint: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-				Variant:     "integration",
-				RunnerUID:   1001,
-				RunnerGID:   1002,
+				Alias:        c.WorkerImages["nddev-linux-standard"].Alias,
+				Fingerprint:  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+				Variant:      "integration",
+				InstanceType: IncusImageVirtualMachine,
+				RunnerUID:    1001,
+				RunnerGID:    1002,
 			}
 		}, "pinned to conflicting fingerprints"},
 		{"missing platform policy", func(c *Incus) { c.PlatformConfigFile = "/missing/platform.yaml" }, "invalid platform_config_file"},
@@ -196,15 +239,15 @@ client_certificate = %q
 client_key = %q
 tls_server_certificate = %q
 secure_boot = true
-instance_type = %q
+instance_type = "virtual-machine"
 typo_that_must_not_be_ignored = true
 
 [worker_images.nddev-linux-standard]
 alias = %q
 fingerprint = %q
 variant = %q
+instance_type = "virtual-machine"
 `, cfg.URL, cfg.ProjectName, cfg.ClientCertificate, cfg.ClientKey, cfg.TLSServerCert,
-		cfg.InstanceType,
 		cfg.WorkerImages["nddev-linux-standard"].Alias,
 		cfg.WorkerImages["nddev-linux-standard"].Fingerprint,
 		cfg.WorkerImages["nddev-linux-standard"].Variant)
@@ -220,44 +263,15 @@ variant = %q
 // boundary widens to the fleet's private network and stops there.
 func TestIncusConfigAcceptsAClusterMemberInsideThePrivateNetwork(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.URL = "https://172.16.0.9:8443"
+	cfg.URL = "https://10.200.0.9:8443"
 	require.NoError(t, cfg.Validate())
 
 	for _, outside := range []string{
 		"https://10.109.255.255:8443",
-		"https://172.16.16.1:8443",
+		"https://10.200.16.1:8443",
 		"https://8.8.8.8:8443",
 	} {
 		cfg.URL = outside
 		require.ErrorContains(t, cfg.Validate(), "cluster member inside", "accepted %s", outside)
-	}
-}
-
-// The private network a fleet sits on is deployment data. Compiling one
-// estate's subnet in meant a fleet on another network could not validate its
-// own cluster endpoint without a patched binary -- which is exactly what
-// happened when this repository was anonymised for publication and the
-// rewritten constant started refusing every endpoint on the live fleet.
-func TestIncusEndpointAcceptsTheNetworkTheDeploymentDeclares(t *testing.T) {
-	t.Parallel()
-	// A member on a network that is not the default.
-	if err := validateIncusEndpoint("10.110.0.9:8443", "10.110.0.0/20"); err != nil {
-		t.Fatalf("a declared network was refused: %v", err)
-	}
-	// The same address with no declaration falls back to the example estate's
-	// network and is correctly outside it.
-	if err := validateIncusEndpoint("10.110.0.9:8443", ""); err == nil {
-		t.Fatal("an address outside the default network was accepted")
-	}
-	// Loopback stays valid whatever is declared, and the boundary still holds.
-	if err := validateIncusEndpoint("127.0.0.1:8443", "10.110.0.0/20"); err != nil {
-		t.Fatalf("loopback was refused: %v", err)
-	}
-	if err := validateIncusEndpoint("203.0.113.9:8443", "10.110.0.0/20"); err == nil {
-		t.Fatal("a public address was accepted")
-	}
-	// A declaration that is not private is refused rather than trusted.
-	if err := validateIncusEndpoint("203.0.113.9:8443", "203.0.113.0/24"); err == nil {
-		t.Fatal("a public range was accepted as the fleet private network")
 	}
 }

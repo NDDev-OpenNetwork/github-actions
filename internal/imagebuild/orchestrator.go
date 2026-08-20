@@ -134,6 +134,13 @@ func RecipeFingerprint(plan imageplan.Plan) (string, error) {
 		return "", err
 	}
 	parts = append(parts, warmAgent)
+	if imageType(plan) == "container" {
+		containerProvision, err := scripts.ReadFile("assets/container-provision.sh")
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, containerProvision)
+	}
 	if plan.Variant == "integration" {
 		dockerProvision, err := scripts.ReadFile("assets/docker-provision.sh")
 		if err != nil {
@@ -289,7 +296,6 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		"checksums":      plan.Source.ChecksumsFile,
 		"signature":      plan.Source.SignatureFile,
 		"metadata":       plan.Source.MetadataFile,
-		"disk":           plan.Source.DiskFile,
 		"runner":         plan.Runner.Archive,
 		"compiler-cache": plan.CompilerCache.Archive,
 	}
@@ -297,9 +303,15 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		"checksums":      artifacts.Checksums,
 		"signature":      artifacts.Signature,
 		"metadata":       artifacts.Metadata,
-		"disk":           artifacts.Disk,
 		"runner":         artifacts.Runner,
 		"compiler-cache": artifacts.CompilerCache,
+	}
+	if imageType(plan) == "container" {
+		wanted["rootfs"] = plan.Source.RootfsFile
+		actual["rootfs"] = artifacts.Rootfs
+	} else {
+		wanted["disk"] = plan.Source.DiskFile
+		actual["disk"] = artifacts.Disk
 	}
 	for _, toolchain := range plan.Toolchains {
 		path, ok := artifacts.Toolchains[toolchain.Name]
@@ -402,19 +414,34 @@ func (o Orchestrator) ensureSourceImage(ctx context.Context, plan imageplan.Plan
 		if err != nil {
 			return "", fmt.Errorf("inspect source image: %w", err)
 		}
-		if image.Type != "virtual-machine" || image.Architecture != plan.Image.Architecture || image.Properties["user.nddev.source.disk_sha256"] != plan.Source.DiskSHA256 || image.Properties["user.nddev.source.metadata_sha256"] != plan.Source.MetadataSHA256 {
+		if image.Type != imageType(plan) || image.Architecture != plan.Image.Architecture || image.Properties["user.nddev.source.metadata_sha256"] != plan.Source.MetadataSHA256 {
 			return "", fmt.Errorf("source alias %q does not match the pinned Canonical artifacts", plan.Image.SourceAlias)
+		}
+		artifactSHA256 := image.Properties["user.nddev.source.artifact_sha256"]
+		// Images imported before the container source contract used the
+		// VM-specific property name. Accept it only for VM sources and only
+		// when it equals the currently pinned disk digest; new imports always
+		// write the type-neutral property above.
+		if artifactSHA256 == "" && imageType(plan) == "virtual-machine" {
+			artifactSHA256 = image.Properties["user.nddev.source.disk_sha256"]
+		}
+		if artifactSHA256 != sourceArtifactSHA256(plan) {
+			return "", fmt.Errorf("source alias %q does not match the pinned Canonical source artifact", plan.Image.SourceAlias)
 		}
 		return existing, nil
 	}
-	args := o.incus(plan.Project, "image", "import", artifacts.Metadata, artifacts.Disk,
+	sourceArtifact := artifacts.Disk
+	if imageType(plan) == "container" {
+		sourceArtifact = artifacts.Rootfs
+	}
+	args := o.incus(plan.Project, "image", "import", artifacts.Metadata, sourceArtifact,
 		"--alias", plan.Image.SourceAlias,
 		"description=Canonical Ubuntu 24.04 cloud image "+plan.Source.ReleaseID,
 		"os=Ubuntu", "release=24.04", "variant=cloud",
 		"user.nddev.managed=true",
 		"user.nddev.source.release="+plan.Source.ReleaseID,
-		"user.nddev.source.disk_sha256="+plan.Source.DiskSHA256,
 		"user.nddev.source.metadata_sha256="+plan.Source.MetadataSHA256)
+	args = append(args, "user.nddev.source.artifact_sha256="+sourceArtifactSHA256(plan))
 	if _, err := o.Runner.Run(ctx, args...); err != nil {
 		return "", fmt.Errorf("import pinned Canonical source image: %w", err)
 	}
@@ -440,16 +467,46 @@ func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, arti
 	}()
 
 	if _, err = o.Runner.Run(ctx, o.instanceInitArgs(plan, sourceFingerprint, plan.BuilderName, plan.BuilderDiskGiB)...); err != nil {
-		return "", "", fmt.Errorf("initialize image builder VM: %w", err)
+		return "", "", fmt.Errorf("initialize image builder: %w", err)
 	}
 	created = true
 	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "start", plan.BuilderName)...); err != nil {
-		return "", "", fmt.Errorf("start image builder VM: %w", err)
+		return "", "", fmt.Errorf("start image builder: %w", err)
 	}
 	if err = o.waitAgent(ctx, plan.Project, plan.BuilderName); err != nil {
 		return "", "", err
 	}
-	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "exec", plan.BuilderName, "--", "cloud-init", "status", "--wait")...); err != nil {
+	if imageType(plan) == "container" {
+		if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, nil, `set -Eeuo pipefail
+for attempt in $(seq 1 30); do
+  if systemctl show --property=Version >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+systemctl show --property=Version >/dev/null
+install -d -m 0755 /etc/systemd/network
+cat >/etc/systemd/network/10-eth0.network <<'EOF'
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=ipv6
+IPv6AcceptRA=no
+EOF
+systemctl restart systemd-networkd.service systemd-resolved.service
+for attempt in $(seq 1 30); do
+  if ip -4 address show dev eth0 | grep -q 'inet ' && getent hosts archive.ubuntu.com >/dev/null; then
+    exit 0
+  fi
+  sleep 1
+done
+echo 'container network did not acquire IPv4 and DNS' >&2
+exit 1`); err != nil {
+			return "", "", fmt.Errorf("prepare container builder network: %w", err)
+		}
+	} else if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "exec", plan.BuilderName, "--", "cloud-init", "status", "--wait")...); err != nil {
 		return "", "", fmt.Errorf("wait for builder cloud-init: %w", err)
 	}
 	destination := plan.BuilderName + "/var/tmp/" + plan.Runner.Archive
@@ -490,7 +547,7 @@ func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, arti
 		"GHA_MANIFEST_FINGERPRINT":   plan.ManifestFingerprint,
 		"GHA_RECIPE_FINGERPRINT":     recipe,
 		"GHA_SOURCE_RELEASE_ID":      plan.Source.ReleaseID,
-		"GHA_SOURCE_DISK_SHA256":     plan.Source.DiskSHA256,
+		"GHA_SOURCE_ARTIFACT_SHA256": sourceArtifactSHA256(plan),
 		"GHA_WARM_AGENT_B64":         base64.StdEncoding.EncodeToString(warmAgent),
 		"GHA_SCCACHE_VERSION":        plan.CompilerCache.Version,
 		"GHA_SCCACHE_ARCHIVE":        guestCompilerCacheArchive,
@@ -502,10 +559,17 @@ func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, arti
 	if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, environment, string(provision)); err != nil {
 		return "", "", fmt.Errorf("provision image builder: %w", err)
 	}
+	if imageType(plan) == "container" {
+		containerProvision, _ := scripts.ReadFile("assets/container-provision.sh")
+		if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, nil, string(containerProvision)); err != nil {
+			return "", "", fmt.Errorf("provision container bootstrap: %w", err)
+		}
+	}
 	if plan.Variant == "integration" {
 		dockerProvision, _ := scripts.ReadFile("assets/docker-provision.sh")
 		if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, map[string]string{
 			"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
+			"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
 		}, string(dockerProvision)); err != nil {
 			return "", "", fmt.Errorf("provision Docker integration image: %w", err)
 		}
@@ -527,7 +591,7 @@ func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, arti
 			return "", "", fmt.Errorf("seal Docker integration image: %w", err)
 		}
 	}
-	if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, nil, string(sanitize)); err != nil {
+	if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, map[string]string{"GHA_INSTANCE_TYPE": imageType(plan)}, string(sanitize)); err != nil {
 		return "", "", fmt.Errorf("sanitize image builder: %w", err)
 	}
 	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "stop", plan.BuilderName, "--timeout", "60")...); err != nil {
@@ -545,7 +609,7 @@ func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, arti
 		"user.nddev.sccache.archive_sha256=" + plan.CompilerCache.ArchiveSHA256,
 		"user.nddev.sccache.binary_sha256=" + plan.CompilerCache.BinarySHA256,
 		"user.nddev.source.release=" + plan.Source.ReleaseID,
-		"user.nddev.source.disk_sha256=" + plan.Source.DiskSHA256,
+		"user.nddev.source.artifact_sha256=" + sourceArtifactSHA256(plan),
 		"user.nddev.package_manifest_sha256=" + packageSHA,
 		"user.nddev.image.variant=" + plan.Variant,
 	}
@@ -602,7 +666,7 @@ func verifyTargetImage(image imageState, plan imageplan.Plan, recipe string) err
 		"user.nddev.sccache.archive_sha256": plan.CompilerCache.ArchiveSHA256,
 		"user.nddev.sccache.binary_sha256":  plan.CompilerCache.BinarySHA256,
 		"user.nddev.source.release":         plan.Source.ReleaseID,
-		"user.nddev.source.disk_sha256":     plan.Source.DiskSHA256,
+		"user.nddev.source.artifact_sha256": sourceArtifactSHA256(plan),
 		"user.nddev.image.variant":          plan.Variant,
 	}
 	if plan.Variant == "integration" {
@@ -611,7 +675,7 @@ func verifyTargetImage(image imageState, plan imageplan.Plan, recipe string) err
 	for key, value := range toolchainProperties(plan) {
 		wanted[key] = value
 	}
-	if image.Type != "virtual-machine" || image.Architecture != plan.Image.Architecture {
+	if image.Type != imageType(plan) || image.Architecture != plan.Image.Architecture {
 		return fmt.Errorf("immutable target alias points to the wrong image type or architecture")
 	}
 	for key, value := range wanted {
@@ -635,11 +699,11 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		}
 	}()
 	if _, err = o.Runner.Run(ctx, o.instanceInitArgs(plan, fingerprint, plan.SmokeName, 0)...); err != nil {
-		return nil, fmt.Errorf("initialize image smoke VM: %w", err)
+		return nil, fmt.Errorf("initialize image smoke instance: %w", err)
 	}
 	created = true
 	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "start", plan.SmokeName)...); err != nil {
-		return nil, fmt.Errorf("start image smoke VM: %w", err)
+		return nil, fmt.Errorf("start image smoke instance: %w", err)
 	}
 	if err = o.waitAgent(ctx, plan.Project, plan.SmokeName); err != nil {
 		return nil, err
@@ -662,6 +726,7 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		return nil, err
 	}
 	output, err := o.runGuest(ctx, plan.Project, plan.SmokeName, map[string]string{
+		"GHA_INSTANCE_TYPE":          imageType(plan),
 		"GHA_RUNNER_VERSION":         plan.Runner.Version,
 		"GHA_SCCACHE_VERSION":        plan.CompilerCache.Version,
 		"GHA_SCCACHE_BINARY_SHA256":  plan.CompilerCache.BinarySHA256,
@@ -669,6 +734,7 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		"GHA_PUBLIC_HOST_ADDRESS":    plan.PublicHostAddress,
 		"GHA_EXPECTED_ROOT_DISK_GIB": fmt.Sprintf("%d", plan.SmokeRootDiskGiB),
 		"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
+		"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
 	}, string(smoke))
 	if err != nil {
 		return nil, fmt.Errorf("execute image smoke test: %w", err)
@@ -779,7 +845,11 @@ func (o Orchestrator) incus(project string, args ...string) []string {
 }
 
 func (o *Orchestrator) instanceInitArgs(plan imageplan.Plan, fingerprint, name string, rootDiskGiB int) []string {
-	args := o.incus(plan.Project, "init", fingerprint, name, "--vm", "--profile", plan.Profile)
+	args := o.incus(plan.Project, "init", fingerprint, name)
+	if imageType(plan) == "virtual-machine" {
+		args = append(args, "--vm")
+	}
+	args = append(args, "--profile", plan.Profile)
 	// Pin the build to the member it just verified is empty. Without this the
 	// placement scriptlet would choose, and it would rightly choose whichever
 	// member has the most free memory -- which is not necessarily this one.
@@ -798,6 +868,24 @@ func (o *Orchestrator) instanceInitArgs(plan imageplan.Plan, fingerprint, name s
 		args = append(args, "--config", key+"="+plan.InstanceConfig[key])
 	}
 	return args
+}
+
+func sourceArtifactSHA256(plan imageplan.Plan) string {
+	if imageType(plan) == "container" {
+		return plan.Source.RootfsSHA256
+	}
+	return plan.Source.DiskSHA256
+}
+
+func imageType(plan imageplan.Plan) string {
+	return plan.Image.EffectiveType()
+}
+
+func dockerStorageDriver(plan imageplan.Plan) string {
+	if imageType(plan) == "container" {
+		return "overlayfs"
+	}
+	return "overlay2"
 }
 
 func queryJSON[T any](ctx context.Context, runner CommandRunner, path string) (T, error) {

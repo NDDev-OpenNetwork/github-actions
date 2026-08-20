@@ -1,0 +1,182 @@
+//go:build linux
+
+package providerretry
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+)
+
+const minimumTerminalRecoveryAge = time.Minute
+
+type record struct {
+	JobID          string    `json:"job_id"`
+	Attempts       int       `json:"attempts"`
+	LastErrorClass string    `json:"last_error_class,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	NextAllowedAt  time.Time `json:"next_allowed_at"`
+	TerminalUntil  time.Time `json:"terminal_until,omitempty"`
+}
+
+type journal struct {
+	SchemaVersion int               `json:"schema_version"`
+	Generation    uint64            `json:"generation"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Records       map[string]record `json:"records"`
+}
+
+type RecoveryResult struct {
+	Applied            bool      `json:"applied"`
+	Key                string    `json:"key"`
+	ErrorClass         string    `json:"error_class"`
+	ExpectedUpdatedAt  time.Time `json:"expected_updated_at"`
+	PreviousGeneration uint64    `json:"previous_generation"`
+	Generation         uint64    `json:"generation"`
+	RecoveredAt        time.Time `json:"recovered_at"`
+}
+
+func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, errorClass string, expectedUpdatedAt time.Time, apply bool) (RecoveryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RecoveryResult{}, err
+	}
+	if !filepath.IsAbs(journalPath) || !filepath.IsAbs(lockPath) || filepath.Dir(journalPath) != filepath.Dir(lockPath) || journalPath == lockPath {
+		return RecoveryResult{}, errors.New("retry journal and lock must be distinct absolute siblings")
+	}
+	if key == "" || len(key) > 256 || (errorClass != "provider" && errorClass != "intent" && errorClass != "identity" && errorClass != "timeout") || expectedUpdatedAt.IsZero() {
+		return RecoveryResult{}, errors.New("exact retry key, recoverable error class and updated_at are required")
+	}
+	parent := filepath.Dir(journalPath)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil || filepath.Clean(resolved) != filepath.Clean(parent) {
+		return RecoveryResult{}, errors.New("retry state parent must be a real directory")
+	}
+	lockFD, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return RecoveryResult{}, fmt.Errorf("open retry lock: %w", err)
+	}
+	lock := os.NewFile(uintptr(lockFD), lockPath)
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return RecoveryResult{}, fmt.Errorf("lock retry journal: %w", err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	if err := requirePrivateOwnedRegular(lock, "retry lock"); err != nil {
+		return RecoveryResult{}, err
+	}
+	beforeInfo, err := os.Lstat(journalPath)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	state, err := readJournal(journalPath)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	retry, exists := state.Records[key]
+	if !exists || retry.JobID != key || retry.Attempts != 8 || retry.LastErrorClass != errorClass || retry.TerminalUntil.IsZero() {
+		return RecoveryResult{}, errors.New("retry record is not the exact terminal circuit")
+	}
+	if !retry.UpdatedAt.Equal(expectedUpdatedAt.UTC()) {
+		return RecoveryResult{}, errors.New("retry record updated_at changed")
+	}
+	now := time.Now().UTC()
+	if now.Sub(retry.UpdatedAt) < minimumTerminalRecoveryAge {
+		return RecoveryResult{}, errors.New("retry circuit is inside the recovery grace period")
+	}
+	result := RecoveryResult{Key: key, ErrorClass: errorClass, ExpectedUpdatedAt: retry.UpdatedAt, PreviousGeneration: state.Generation, Generation: state.Generation, RecoveredAt: now}
+	if !apply {
+		return result, nil
+	}
+	delete(state.Records, key)
+	state.Generation++
+	state.UpdatedAt = now
+	content, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	content = append(content, '\n')
+	temporary, err := os.CreateTemp(parent, ".retry-recovery-*")
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		return RecoveryResult{}, err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		return RecoveryResult{}, err
+	}
+	if err := temporary.Sync(); err != nil {
+		return RecoveryResult{}, err
+	}
+	if err := temporary.Close(); err != nil {
+		return RecoveryResult{}, err
+	}
+	afterInfo, err := os.Lstat(journalPath)
+	if err != nil || !os.SameFile(beforeInfo, afterInfo) || beforeInfo.Size() != afterInfo.Size() || beforeInfo.ModTime() != afterInfo.ModTime() {
+		return RecoveryResult{}, errors.New("retry journal changed during recovery")
+	}
+	if err := os.Rename(temporaryPath, journalPath); err != nil {
+		return RecoveryResult{}, err
+	}
+	directory, err := os.Open(parent)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil {
+		return RecoveryResult{}, err
+	}
+	result.Applied = true
+	result.Generation = state.Generation
+	return result, nil
+}
+
+func readJournal(path string) (journal, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return journal{}, err
+	}
+	defer file.Close()
+	if err := requirePrivateOwnedRegular(file, "retry journal"); err != nil {
+		return journal{}, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 1024*1024+1))
+	if err != nil || len(data) > 1024*1024 {
+		return journal{}, errors.New("retry journal has invalid bounded content")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var state journal
+	if err := decoder.Decode(&state); err != nil {
+		return journal{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return journal{}, errors.New("retry journal has trailing data")
+	}
+	if state.SchemaVersion != 1 || state.Records == nil {
+		return journal{}, errors.New("retry journal identity is invalid")
+	}
+	return state, nil
+}
+
+func requirePrivateOwnedRegular(file *os.File, description string) error {
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("%s must be a private regular file", description)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Geteuid() {
+		return fmt.Errorf("%s must be owned by the recovery identity", description)
+	}
+	return nil
+}

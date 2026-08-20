@@ -47,28 +47,31 @@ const (
 	testImageDigest            = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testIntegrationImageAlias  = "nddev-ubuntu-24.04-amd64-docker-current"
 	testIntegrationImageDigest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	testContainerImageAlias    = "nddev-ubuntu-24.04-amd64-container-current"
+	testContainerImageDigest   = "1111111111111111111111111111111111111111111111111111111111111111"
 )
 
 func newTestProvider(cli *MockIncusServer) *Incus {
 	return &Incus{
 		cfg: &config.Incus{
-			ProjectName:  config.ExpectedProjectName,
-			InstanceType: config.IncusImageVirtualMachine,
-			SecureBoot:   true,
+			ProjectName: config.ExpectedProjectName,
+			SecureBoot:  true,
 			WorkerImages: map[string]config.WorkerImage{
 				"nddev-linux-standard": {
-					Alias:       testImageAlias,
-					Fingerprint: testImageDigest,
-					Variant:     "standard",
-					RunnerUID:   1001,
-					RunnerGID:   1002,
+					Alias:        testImageAlias,
+					Fingerprint:  testImageDigest,
+					Variant:      "standard",
+					InstanceType: config.IncusImageVirtualMachine,
+					RunnerUID:    1001,
+					RunnerGID:    1002,
 				},
 				"nddev-linux-integration": {
-					Alias:       testIntegrationImageAlias,
-					Fingerprint: testIntegrationImageDigest,
-					Variant:     "integration",
-					RunnerUID:   1001,
-					RunnerGID:   1002,
+					Alias:        testIntegrationImageAlias,
+					Fingerprint:  testIntegrationImageDigest,
+					Variant:      "integration",
+					InstanceType: config.IncusImageVirtualMachine,
+					RunnerUID:    1001,
+					RunnerGID:    1002,
 				},
 			},
 		},
@@ -77,9 +80,12 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 		controllerID: testControllerID,
 		admission:    allowAllAdmission{},
 		diagnostics:  noopDiagnostics{},
-		platform: platformconfig.Config{Pools: []platformconfig.Pool{
+		platform: platformconfig.Config{Backends: []platformconfig.Backend{{
+			Name: "linux-amd64-incus", Platform: "linux", Architecture: "amd64", Implementation: "incus-vm",
+		}}, Pools: []platformconfig.Pool{
 			{
 				Name:         "nddev-linux-standard",
+				Backend:      "linux-amd64-incus",
 				ScaleSetName: "nddev-linux-standard",
 				Trust:        "trusted",
 				Capabilities: platformconfig.Capabilities{
@@ -89,6 +95,7 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 			},
 			{
 				Name:         "nddev-linux-integration",
+				Backend:      "linux-amd64-incus",
 				ScaleSetName: "nddev-linux-integration",
 				Trust:        "trusted",
 				Capabilities: platformconfig.Capabilities{
@@ -115,7 +122,8 @@ func (r repositoryResolvingAdmission) ResolveRepository(context.Context, commonP
 
 type recordingAdmission struct {
 	allowAllAdmission
-	released []string
+	released   []string
+	reconciled int
 }
 
 type warmAdmission struct {
@@ -129,6 +137,7 @@ type preemptingAdmission struct {
 	rejectConfirmation bool
 	markedDeleting     []string
 	released           []string
+	reconciled         int
 }
 
 type noopDiagnostics struct{}
@@ -180,6 +189,11 @@ func (r *recordingAdmission) Release(_ context.Context, instance string) error {
 	return nil
 }
 
+func (r *recordingAdmission) Reconcile(context.Context, InstanceServerInterface) error {
+	r.reconciled++
+	return nil
+}
+
 func (p *preemptingAdmission) Admit(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
 	p.calls++
 	result := provideradmission.AdmissionResult{Decision: admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}}
@@ -201,6 +215,11 @@ func (p *preemptingAdmission) MarkDeleting(_ context.Context, instance string) e
 
 func (p *preemptingAdmission) Release(_ context.Context, instance string) error {
 	p.released = append(p.released, instance)
+	return nil
+}
+
+func (p *preemptingAdmission) Reconcile(context.Context, InstanceServerInterface) error {
+	p.reconciled++
 	return nil
 }
 
@@ -274,8 +293,8 @@ func TestBootstrapBoundaryAdmitsEveryRegisteredTenantAndNothingElse(t *testing.T
 		"",
 		"https://github.com/someone-else/ai_stp",
 		"https://github.com/example-guild-evil/anything",
-		"https://github.com/NDDev-OpenNetwork-evil/github-actions",
-		"https://example.invalid/NDDev-OpenNetwork/github-actions",
+		"https://github.com/example-org-evil/github-actions",
+		"https://example.invalid/example-org/example-actions",
 	} {
 		if isRegisteredRepositoryURL(rejected) {
 			t.Errorf("unregistered repository %q passed the provider boundary", rejected)
@@ -379,7 +398,7 @@ func ownedInstance(name string) *api.InstanceFull {
 				lifecycleKey:          "ephemeral-one-job",
 				trustKey:              "trusted",
 				scaleSetKey:           "nddev-linux-standard",
-				repositoryKey:         "NDDev-OpenNetwork/github-actions",
+				repositoryKey:         "example-org/example-actions",
 				networkPolicyKey:      "public-internet",
 				cacheWriteScopeKey:    "trusted",
 				garmJobNameKey:        "runner-test-instance",
@@ -394,10 +413,25 @@ func ownedInstance(name string) *api.InstanceFull {
 		State: &api.InstanceState{
 			Status: "Running",
 			Network: map[string]api.InstanceStateNetwork{
-				"eth0": {Addresses: []api.InstanceStateNetworkAddress{{Address: "192.0.2.22", Scope: "global"}}},
+				"eth0": {Addresses: []api.InstanceStateNetworkAddress{{Address: "198.51.100.22", Scope: "global"}}},
 			},
 		},
 	}
+}
+
+func TestExistingNMinusOneWorkerMayFinishButCannotBecomeWarm(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	previous := config.ProviderIdentity{Version: "v0.1.5-nddev.32", Commit: "945fad5e276c0b21ba763425a5d7a692df4e35e7"}
+	provider.cfg.PreviousProviderIdentities = []config.ProviderIdentity{previous}
+	instance := ownedInstance("runner-test-instance")
+	instance.ExpandedConfig[providerVersionKey] = previous.Version
+	instance.ExpandedConfig[providerCommitKey] = previous.Commit
+
+	require.NoError(t, provider.validateExistingInstance(instance, validBootstrap()))
+	warm := warmInstance("warm-standard-previous")
+	warm.Config[providerVersionKey], warm.ExpandedConfig[providerVersionKey] = previous.Version, previous.Version
+	warm.Config[providerCommitKey], warm.ExpandedConfig[providerCommitKey] = previous.Commit, previous.Commit
+	require.ErrorContains(t, provider.validateWarmInstance(warm, validBootstrap()), providerVersionKey)
 }
 
 func warmInstance(name string) *api.InstanceFull {
@@ -445,15 +479,19 @@ func prepareCreateMocks(cli *MockIncusServer, fingerprint string) {
 }
 
 func prepareCreateMocksFor(cli *MockIncusServer, profile, alias, fingerprint, variant string) {
+	prepareCreateMocksForType(cli, profile, alias, fingerprint, variant, config.IncusImageVirtualMachine)
+}
+
+func prepareCreateMocksForType(cli *MockIncusServer, profile, alias, fingerprint, variant string, instanceType config.IncusImageType) {
 	aliases := map[string]*api.ImageAliasesEntry{
 		"x86_64": {
 			ImageAliasesEntryPut: api.ImageAliasesEntryPut{Target: "image-target"},
 			Name:                 alias,
-			Type:                 string(api.InstanceTypeVM),
+			Type:                 string(instanceType),
 		},
 	}
 	cli.On("GetProfileNames").Return([]string{profile}, nil)
-	cli.On("GetImageAliasArchitectures", string(config.IncusImageVirtualMachine), alias).Return(aliases, nil)
+	cli.On("GetImageAliasArchitectures", string(instanceType), alias).Return(aliases, nil)
 	cli.On("GetImage", "image-target").Return(&api.Image{
 		Fingerprint: fingerprint,
 		ImagePut: api.ImagePut{
@@ -762,12 +800,74 @@ func TestGetCreateInstanceArgsPinsImageAndSecurityPolicy(t *testing.T) {
 	require.Equal(t, "ephemeral-one-job", got.Config[lifecycleKey])
 	require.Equal(t, "trusted", got.Config[trustKey])
 	require.Equal(t, "nddev-linux-standard", got.Config[scaleSetKey])
-	require.Equal(t, "NDDev-OpenNetwork/github-actions", got.Config[repositoryKey])
+	require.Equal(t, "example-org/example-actions", got.Config[repositoryKey])
 	require.Equal(t, "public-internet", got.Config[networkPolicyKey])
 	require.Equal(t, "trusted", got.Config[cacheWriteScopeKey])
 	require.Equal(t, "true", got.Config["security.secureboot"])
 	require.NotContains(t, got.Config, "security.nesting")
 	require.Equal(t, incuspolicy.DisableNestedVirtualizationRawQEMU, got.Config["raw.qemu"])
+}
+
+func TestGetCreateInstanceArgsBuildsUnprivilegedContainerWithoutVMDevices(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	provider.platform.Backends = append(provider.platform.Backends, platformconfig.Backend{
+		Name: "linux-amd64-container", Platform: "linux", Architecture: "amd64", Implementation: "incus-container",
+	})
+	provider.platform.Pools = append(provider.platform.Pools, platformconfig.Pool{
+		Name: "nddev-linux-fast", Backend: "linux-amd64-container", ScaleSetName: "nddev-linux-fast", Trust: "trusted",
+		Capabilities: platformconfig.Capabilities{NetworkPolicy: "public-internet", CacheWriteScope: "none"},
+	})
+	provider.cfg.WorkerImages["nddev-linux-fast"] = config.WorkerImage{
+		Alias: testContainerImageAlias, Fingerprint: testContainerImageDigest, Variant: "standard",
+		InstanceType: config.IncusImageContainer, RunnerUID: 1001, RunnerGID: 1002,
+	}
+	prepareCreateMocksForType(cli, "nddev-linux-fast", testContainerImageAlias, testContainerImageDigest, "standard", config.IncusImageContainer)
+	bootstrap := validBootstrap()
+	bootstrap.Flavor = "nddev-linux-fast"
+	bootstrap.Image = testContainerImageAlias
+	got, err := provider.getCreateInstanceArgs(context.Background(), bootstrap, extraSpecs{DisableUpdates: true})
+	require.NoError(t, err)
+	require.Equal(t, api.InstanceTypeContainer, got.Type)
+	require.Equal(t, "false", got.Config["security.privileged"])
+	require.Equal(t, "false", got.Config["security.nesting"])
+	require.Equal(t, "false", got.Config["security.syscalls.intercept.mknod"])
+	require.Equal(t, "false", got.Config["security.syscalls.intercept.setxattr"])
+	_, hasRawLXC := got.Config["raw.lxc"]
+	require.False(t, hasRawLXC)
+	require.NotContains(t, got.Config, "security.secureboot")
+	require.NotContains(t, got.Config, "raw.qemu")
+}
+
+func TestGetCreateInstanceArgsEnablesNestingOnlyForDockerContainer(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	provider.platform.Backends = append(provider.platform.Backends, platformconfig.Backend{
+		Name: "linux-amd64-container", Platform: "linux", Architecture: "amd64", Implementation: "incus-container",
+		Capabilities: platformconfig.BackendCapabilities{Docker: true},
+	})
+	provider.platform.Pools = append(provider.platform.Pools, platformconfig.Pool{
+		Name: "nddev-linux-docker-container-canary", Backend: "linux-amd64-container",
+		ScaleSetName: "nddev-linux-docker-container-canary", Trust: "trusted",
+		Capabilities: platformconfig.Capabilities{Docker: true, NetworkPolicy: "public-internet", CacheWriteScope: "none"},
+	})
+	provider.cfg.WorkerImages["nddev-linux-docker-container-canary"] = config.WorkerImage{
+		Alias: testContainerImageAlias, Fingerprint: testContainerImageDigest, Variant: "integration",
+		InstanceType: config.IncusImageContainer, RunnerUID: 1001, RunnerGID: 1002,
+	}
+	prepareCreateMocksForType(cli, "nddev-linux-docker-container-canary", testContainerImageAlias, testContainerImageDigest, "integration", config.IncusImageContainer)
+	bootstrap := validBootstrap()
+	bootstrap.Flavor = "nddev-linux-docker-container-canary"
+	bootstrap.Image = testContainerImageAlias
+	got, err := provider.getCreateInstanceArgs(context.Background(), bootstrap, extraSpecs{DisableUpdates: true})
+	require.NoError(t, err)
+	require.Equal(t, api.InstanceTypeContainer, got.Type)
+	require.Equal(t, "false", got.Config["security.privileged"])
+	require.Equal(t, "true", got.Config["security.nesting"])
+	require.Equal(t, "false", got.Config["security.syscalls.intercept.mknod"])
+	require.Equal(t, "false", got.Config["security.syscalls.intercept.setxattr"])
 }
 
 func TestGetCreateInstanceArgsSelectsIntegrationImageAndDockerGroup(t *testing.T) {
@@ -866,8 +966,8 @@ func TestRunnerToolMetadataMustMatchPinnedImageVersion(t *testing.T) {
 
 func TestCanonicalRepositoryIdentity(t *testing.T) {
 	for input, expected := range map[string]string{
-		"https://github.com/NDDev-OpenNetwork/github-actions":     "NDDev-OpenNetwork/github-actions",
-		"https://github.com/NDDev-OpenNetwork/github-actions.git": "NDDev-OpenNetwork/github-actions",
+		"https://github.com/example-org/example-actions":     "example-org/example-actions",
+		"https://github.com/example-org/example-actions.git": "example-org/example-actions",
 	} {
 		got, err := canonicalRepositoryIdentity(input)
 		require.NoError(t, err)
@@ -887,12 +987,12 @@ func TestCanonicalRepositoryIdentity(t *testing.T) {
 
 func TestOrganizationBootstrapIsNarrowedThroughQueueIntent(t *testing.T) {
 	bootstrap := validBootstrap()
-	bootstrap.RepoURL = "https://github.com/NDDev-OpenNetwork/"
-	provider := &Incus{admission: repositoryResolvingAdmission{repository: "NDDev-OpenNetwork/github-actions"}}
+	bootstrap.RepoURL = "https://github.com/example-org/"
+	provider := &Incus{admission: repositoryResolvingAdmission{repository: "example-org/example-actions"}}
 
 	resolved, err := provider.narrowBootstrapRepository(context.Background(), bootstrap)
 	require.NoError(t, err)
-	require.Equal(t, "https://github.com/NDDev-OpenNetwork/github-actions", resolved.RepoURL)
+	require.Equal(t, "https://github.com/example-org/example-actions", resolved.RepoURL)
 
 	provider.admission = repositoryResolvingAdmission{err: errors.New("no concrete repository")}
 	_, err = provider.narrowBootstrapRepository(context.Background(), bootstrap)
@@ -901,14 +1001,14 @@ func TestOrganizationBootstrapIsNarrowedThroughQueueIntent(t *testing.T) {
 
 func TestWholeAccountBootstrapRetainsAccountIdentity(t *testing.T) {
 	bootstrap := validBootstrap()
-	bootstrap.RepoURL = "https://github.com/NDDev-OpenNetwork"
+	bootstrap.RepoURL = "https://github.com/example-org"
 	provider := &Incus{}
 	resolved, err := provider.narrowBootstrapRepository(context.Background(), bootstrap)
 	require.NoError(t, err)
 	require.Equal(t, bootstrap.RepoURL, resolved.RepoURL)
 	identity, err := canonicalRepositoryIdentity(resolved.RepoURL)
 	require.NoError(t, err)
-	require.Equal(t, "NDDev-OpenNetwork", identity)
+	require.Equal(t, "example-org", identity)
 }
 
 func TestGetCreateInstanceArgsRejectsImageAliasDrift(t *testing.T) {
@@ -951,7 +1051,7 @@ func TestCreateInstanceReturnsOnlineOwnedVM(t *testing.T) {
 	require.Equal(t, "runner-test-instance", got.ProviderID)
 	require.Equal(t, commonParams.Linux, got.OSType)
 	require.Equal(t, commonParams.InstanceRunning, got.Status)
-	require.Equal(t, []commonParams.Address{{Address: "192.0.2.22", Type: commonParams.PublicAddress}}, got.Addresses)
+	require.Equal(t, []commonParams.Address{{Address: "198.51.100.22", Type: commonParams.PublicAddress}}, got.Addresses)
 }
 
 func TestCreateInstanceDeletesReservedWarmCapacityBeforeColdLaunch(t *testing.T) {
@@ -985,7 +1085,8 @@ func TestCreateInstanceDeletesReservedWarmCapacityBeforeColdLaunch(t *testing.T)
 	require.Equal(t, "runner-test-instance", got.ProviderID)
 	require.Equal(t, 2, control.calls)
 	require.Equal(t, []string{warm.Name}, control.markedDeleting)
-	require.Equal(t, []string{warm.Name}, control.released)
+	require.Equal(t, 1, control.reconciled)
+	require.Empty(t, control.released)
 	cli.AssertExpectations(t)
 }
 
@@ -1013,7 +1114,8 @@ func TestCreateInstanceReleasesColdReservationWhenPostPreemptionAdmissionFails(t
 	require.ErrorContains(t, err, "post-preemption admission rejected")
 	require.Equal(t, 2, control.calls)
 	require.Equal(t, []string{warm.Name}, control.markedDeleting)
-	require.Equal(t, []string{warm.Name, "runner-test-instance"}, control.released)
+	require.Equal(t, 1, control.reconciled)
+	require.Equal(t, []string{"runner-test-instance"}, control.released)
 	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
 	cli.AssertExpectations(t)
 }
@@ -1038,7 +1140,7 @@ func TestCreateInstanceClaimsRunningUnregisteredWarmVMWithoutColdCreate(t *testi
 		return update.Config[lifecycleKey] == lifecycleEphemeralOneJob &&
 			update.Config[poolIDKey] == "pool-test" &&
 			update.Config[garmJobNameKey] == "runner-test-instance" &&
-			update.Config[repositoryKey] == "NDDev-OpenNetwork/github-actions" &&
+			update.Config[repositoryKey] == "example-org/example-actions" &&
 			update.Config[warmReadyKey] == "" && update.Config["user.user-data"] == ""
 	}), "warm-etag").Return(op, nil).Once()
 	bootstrap := validBootstrap()
@@ -1225,6 +1327,8 @@ func TestGetInstanceRejectsForeignOwnership(t *testing.T) {
 func TestDeleteInstanceChecksOwnershipBeforeMutation(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
+	admissionControl := &recordingAdmission{}
+	provider.admission = admissionControl
 	instance := ownedInstance("runner-test-instance")
 	cli.On("GetInstanceFull", instance.Name).Return(instance, "", nil).Twice()
 	op := new(MockOperation)
@@ -1233,6 +1337,8 @@ func TestDeleteInstanceChecksOwnershipBeforeMutation(t *testing.T) {
 	cli.On("DeleteInstance", instance.Name).Return(op, nil).Once()
 
 	require.NoError(t, provider.DeleteInstance(context.Background(), instance.Name))
+	require.Equal(t, 1, admissionControl.reconciled)
+	require.Empty(t, admissionControl.released)
 	cli.AssertExpectations(t)
 }
 

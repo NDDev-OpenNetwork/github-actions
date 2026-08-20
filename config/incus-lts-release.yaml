@@ -1,0 +1,26 @@
+schema_version: 2
+release: v6.0.6
+package_version: "1:6.0.6-ubuntu24.04-202603272003"
+repository:
+  uri: https://pkgs.zabbly.com/incus/lts-6.0
+  suite: noble
+  component: main
+  architecture: amd64
+  signing_key:
+    url: https://pkgs.zabbly.com/key.asc
+    fingerprint: 4EFC590696CB15B87C73A3AD82CC8797C838DCFD
+    sha256: f1adb44fdf82083f983a392b5b406d34e473dce3d66a51de3118cdc1f51d3f87
+packages:
+  - incus
+  - incus-base
+  - incus-client
+cluster:
+  project: gha-fleet
+  members:
+    - example-runner-1
+    - example-runner-2
+    - example-runner-3
+    - example-runner-4
+  required_api_extension: instances_scriptlet_get_instances_count
+  upgrade_mode: coordinated-full-cluster-maintenance
+  maximum_unavailable_members: 4

@@ -19,13 +19,13 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 	// membership, so the API address is the member's private endpoint rather
 	// than the standalone loopback one. A cluster member cannot serve its
 	// peers on loopback, and rewriting it to loopback partitions the member.
-	if plan.Version != "v6.0.0" || plan.APIAddress != "172.16.0.5:8443" {
+	if plan.Version != "v6.0.6" || plan.APIAddress != "10.200.0.5:8443" {
 		t.Fatalf("unexpected Incus baseline: %#v", plan)
 	}
 	if plan.Storage.Driver != "lvm" || plan.Storage.Config["size"] != "200GiB" || plan.Storage.Config["lvm.use_thinpool"] != "true" {
 		t.Fatalf("unexpected storage policy: %#v", plan.Storage)
 	}
-	if plan.Project.Config["restricted"] != "true" || plan.Project.Config["limits.containers"] != "0" || plan.Project.Config["restricted.containers.lowlevel"] != "block" || plan.Project.Config["restricted.virtual-machines.lowlevel"] != "allow" {
+	if plan.Project.Config["restricted"] != "true" || plan.Project.Config["limits.containers"] != "32" || plan.Project.Config["limits.virtual-machines"] != "0" || plan.Project.Config["restricted.containers.lowlevel"] != "block" || plan.Project.Config["restricted.containers.nesting"] != "allow" || plan.Project.Config["restricted.virtual-machines.lowlevel"] != "block" {
 		t.Fatalf("project is not restricted: %#v", plan.Project.Config)
 	}
 	if _, unsupported := plan.Project.Config["restricted.virtual-machines.nesting"]; unsupported {
@@ -43,7 +43,6 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 		"features.storage.volumes":             true,
 		"images.auto_update_interval":          true,
 		"limits.containers":                    true,
-		"limits.cpu":                           true,
 		"limits.disk":                          true,
 		"limits.instances":                     true,
 		"limits.memory":                        true,
@@ -52,6 +51,7 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 		"restricted":                           true,
 		"restricted.backups":                   true,
 		"restricted.containers.lowlevel":       true,
+		"restricted.containers.nesting":        true,
 		"restricted.devices.disk":              true,
 		"restricted.devices.nic":               true,
 		"restricted.networks.access":           true,
@@ -63,14 +63,16 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 			t.Errorf("project key %q is not in the Incus 6.0 contract", key)
 		}
 	}
-	if plan.Network.Config["security.acls.default.egress.action"] != "reject" || plan.Network.Config["security.acls.default.ingress.action"] != "reject" {
-		t.Fatalf("network defaults are not deny: %#v", plan.Network.Config)
+	for key := range plan.Network.Config {
+		if strings.HasPrefix(key, "security.acls") {
+			t.Fatalf("bridge must not attach a fleet-wide ACL: %#v", plan.Network.Config)
+		}
 	}
 	if len(plan.Profiles) != 1 || plan.Profiles[0].Name != "nddev-linux-standard" {
 		t.Fatalf("unexpected selected profiles: %#v", plan.Profiles)
 	}
 	profile := plan.Profiles[0]
-	if profile.Config["limits.cpu"] != "2" || profile.Config["limits.memory"] != "4096MiB" || profile.Config["security.nesting"] != "false" || profile.Devices["root"]["size"] != "30GiB" {
+	if profile.Config["limits.cpu"] != "" || profile.Config["limits.cpu.allowance"] != "200%" || profile.Config["limits.memory"] != "4096MiB" || profile.Config["security.nesting"] != "false" || profile.Devices["root"]["size"] != "30GiB" {
 		t.Fatalf("unexpected standard profile resources: %#v", profile)
 	}
 	if profile.Devices["eth0"]["security.port_isolation"] != "true" || profile.Devices["eth0"]["security.ipv4_filtering"] != "true" || profile.Devices["eth0"]["security.mac_filtering"] != "true" {
@@ -82,7 +84,11 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 		"security.ipv4_filtering": true,
 		"security.mac_filtering":  true,
 		"security.port_isolation": true,
+		"security.acls":           true,
 		"type":                    true,
+	}
+	if profile.Devices["eth0"]["security.acls"] != plan.ACL.Name {
+		t.Fatalf("standard NIC carries %q, want %q", profile.Devices["eth0"]["security.acls"], plan.ACL.Name)
 	}
 	for key := range profile.Devices["eth0"] {
 		if !incus60BridgeNICKeys[key] {
@@ -96,26 +102,31 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 	if plan.HostFirewall.Backend != "ufw" || plan.HostFirewall.RequiredStatus != "active" || plan.HostFirewall.RequiredDefault != "deny (incoming), allow (outgoing), deny (routed)" {
 		t.Fatalf("unsafe host firewall preconditions: %#v", plan.HostFirewall)
 	}
-	if len(plan.HostFirewall.Rules) != 8 {
+	if len(plan.HostFirewall.Rules) != 11 {
 		t.Fatalf("unexpected host firewall rules: %#v", plan.HostFirewall.Rules)
 	}
-	var dhcp, publicHTTP, publicHTTPS, rustfs, garmGateway bool
+	var dhcp, publicHTTP, publicHTTPS, rustfs, servicesRustFS, garmGateway, declaroSSH, almatyStagingSSH bool
 	for _, rule := range plan.HostFirewall.Rules {
 		command := strings.Join(rule.Args, " ")
 		switch rule.Name {
 		case "dhcp":
 			dhcp = strings.Contains(command, "allow in on gha0 to any port 67 proto udp comment gha-fleet-dhcp-v2")
 		case "public-http":
-			publicHTTP = strings.Contains(command, "route allow in on gha0 from 192.0.2.0/24 to any port 80 proto tcp")
+			publicHTTP = strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to any port 80 proto tcp")
 		case "public-https":
-			publicHTTPS = strings.Contains(command, "route allow in on gha0 from 192.0.2.0/24 to any port 443 proto tcp")
+			publicHTTPS = strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to any port 443 proto tcp")
 		case "rustfs":
-			rustfs = strings.Contains(command, "allow in on gha0 to 192.0.2.1 port 9002 proto tcp")
+			rustfs = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9002 proto tcp")
+		case "services-rustfs-diagnostics":
+			servicesRustFS = strings.Contains(command, "allow in on eth1 from 10.200.0.7 to 198.51.100.1 port 9002 proto tcp")
 		case "garm-gateway":
-			garmGateway = strings.Contains(command, "allow in on gha0 to 192.0.2.1 port 9443 proto tcp")
+			garmGateway = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9443 proto tcp")
+		case "release-egress-1", "release-egress-2":
+			declaroSSH = declaroSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.20/32 port 22 proto tcp")
+			almatyStagingSSH = almatyStagingSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.21/32 port 22 proto tcp")
 		}
 	}
-	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !garmGateway {
+	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !servicesRustFS || !garmGateway || !declaroSSH || !almatyStagingSSH {
 		t.Fatalf("host firewall invariants missing: %#v", plan.HostFirewall.Rules)
 	}
 
@@ -128,16 +139,54 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 			// rather than from whichever host this test happened to load.
 			privateReject = rule.Action == "reject" && strings.Contains(rule.Destination, "10.0.0.0/8") &&
 				strings.Contains(rule.Destination, cfg.Incus.PublicHostAddress+"/32")
+			for _, address := range cfg.Incus.EstatePublicHostAddresses {
+				if !strings.Contains(rule.Destination, address+"/32") {
+					t.Errorf("ACL private reject omits estate host %s: %s", address, rule.Destination)
+				}
+			}
 		case "Block sensitive host bridge services":
-			hostServiceReject = rule.Action == "reject" && rule.Destination == "192.0.2.1/32" && strings.Contains(rule.DestinationPort, "8443")
-		case "Allow scoped local registry and RustFS endpoints":
-			cacheAllow = rule.Action == "allow" && rule.Destination == "192.0.2.1/32" && rule.DestinationPort == "5001,9002"
+			hostServiceReject = rule.Action == "reject" && rule.Destination == "198.51.100.1/32" && strings.Contains(rule.DestinationPort, "8443")
+		case "Allow scoped local cache endpoints":
+			cacheAllow = rule.Action == "allow" && rule.Destination == "198.51.100.1/32" && rule.DestinationPort == "5001,9002"
 		case "Allow the restricted GARM worker gateway":
-			gatewayAllow = rule.Action == "allow" && rule.Destination == "192.0.2.1/32" && rule.DestinationPort == "9443"
+			gatewayAllow = rule.Action == "allow" && rule.Destination == "198.51.100.1/32" && rule.DestinationPort == "9443"
 		}
 	}
 	if !privateReject || !hostServiceReject || !cacheAllow || !gatewayAllow {
 		t.Fatalf("ACL invariants missing: %#v", plan.ACL.Egress)
+	}
+}
+
+func TestContainerCanaryProfileIsUnprivilegedAndNonNested(t *testing.T) {
+	t.Parallel()
+	plan := loadPlan(t, "nddev-linux-container-canary")
+	if len(plan.Profiles) != 1 {
+		t.Fatalf("unexpected profiles: %#v", plan.Profiles)
+	}
+	profile := plan.Profiles[0]
+	if profile.Config["limits.cpu.allowance"] != "200%" || profile.Config["limits.cpu"] != "" || profile.Config["security.idmap.isolated"] != "true" ||
+		profile.Config["security.privileged"] != "false" || profile.Config["security.nesting"] != "false" ||
+		profile.Config["security.syscalls.intercept.mknod"] != "false" ||
+		profile.Config["security.syscalls.intercept.setxattr"] != "false" ||
+		profile.Config["security.secureboot"] != "" || profile.Devices["root"]["size"] != "20GiB" {
+		t.Fatalf("container profile is not fail-closed: %#v", profile)
+	}
+}
+
+func TestDockerContainerCanaryProfileHasNestedRuntimeAndSoftCPUWeight(t *testing.T) {
+	t.Parallel()
+	plan := loadPlan(t, "nddev-linux-docker-container-canary")
+	plannedProfile := plan.Profiles[0]
+	if plannedProfile.Config["limits.cpu"] != "" || plannedProfile.Config["limits.cpu.allowance"] != "200%" ||
+		plannedProfile.Config["security.idmap.isolated"] != "true" ||
+		plannedProfile.Config["security.privileged"] != "false" || plannedProfile.Config["security.nesting"] != "true" {
+		t.Fatalf("Docker container CPU/isolation contract is incomplete: %#v", plannedProfile.Config)
+	}
+	cfg := loadConfig(t)
+	pool, _ := cfg.Pool("nddev-linux-docker-container-canary")
+	pool.Resources.VCPU = 4
+	if got := profile(cfg, pool).Config["limits.cpu.allowance"]; got != "400%" {
+		t.Fatalf("four-vCPU container allowance = %q", got)
 	}
 }
 
@@ -170,12 +219,9 @@ func TestUnimplementedNetworkPolicyIsStillRejected(t *testing.T) {
 	}
 }
 
-// A release pool's extra destination has to reach that pool and nothing else.
-// The bridge ACL applies to every NIC on the bridge, so a destination added
-// there would be opened for every pool on the host, including another tenant's.
-// This proves the rule lands on the declaring pool's own NIC instead, and that
-// the ACL carrying it is deny-shaped on its own rather than depending on which
-// of two attached ACLs an implementation evaluates first.
+// A release pool's destination has to reach that pool and nothing else. Every
+// NIC gets exactly one ACL: ordinary pools get public egress while release gets
+// its narrower allowlist. The bridge itself carries no fleet-wide ACL.
 func TestReleaseAllowlistReachesOnlyTheDeclaringPool(t *testing.T) {
 	t.Parallel()
 
@@ -203,7 +249,7 @@ func TestReleaseAllowlistReachesOnlyTheDeclaringPool(t *testing.T) {
 	if acl.Name != "gha-public-egress-nddev-linux-release" {
 		t.Fatalf("pool ACL is named %q", acl.Name)
 	}
-	var reject, allow bool
+	var reject, publicHTTPS, allow bool
 	for _, rule := range acl.Egress {
 		if rule.Action == "reject" && strings.Contains(rule.Destination, "169.254.0.0/16") {
 			reject = true
@@ -212,8 +258,12 @@ func TestReleaseAllowlistReachesOnlyTheDeclaringPool(t *testing.T) {
 			rule.Protocol == "tcp" && rule.DestinationPort == "22" {
 			allow = true
 		}
+		if rule.Action == "allow" && rule.Destination == "" &&
+			rule.Protocol == "tcp" && rule.DestinationPort == "443" {
+			publicHTTPS = true
+		}
 	}
-	if !reject || !allow {
+	if !reject || !publicHTTPS || !allow {
 		t.Fatalf("pool ACL is not deny-shaped around its allow: %#v", acl.Egress)
 	}
 
@@ -225,8 +275,8 @@ func TestReleaseAllowlistReachesOnlyTheDeclaringPool(t *testing.T) {
 				t.Fatalf("release NIC carries %q, want %q", attached, acl.Name)
 			}
 		default:
-			if attached != "" {
-				t.Fatalf("pool %q was given the release ACL %q", profile.Name, attached)
+			if attached != plan.ACL.Name {
+				t.Fatalf("pool %q carries %q, want public ACL %q", profile.Name, attached, plan.ACL.Name)
 			}
 		}
 	}
@@ -254,7 +304,9 @@ func TestDockerIntegrationProfileIsExplicitAndBounded(t *testing.T) {
 	if integration == nil {
 		t.Fatal("integration profile is absent")
 	}
-	if integration.Config["limits.cpu"] != "2" || integration.Config["limits.memory"] != "6144MiB" || integration.Config["security.nesting"] != "false" {
+	if integration.Config["limits.cpu"] != "" || integration.Config["limits.cpu.allowance"] != "400%" ||
+		integration.Config["limits.memory"] != "6144MiB" || integration.Config["security.idmap.isolated"] != "true" ||
+		integration.Config["security.nesting"] != "true" || integration.Config["security.privileged"] != "false" {
 		t.Fatalf("unexpected integration limits: %#v", integration.Config)
 	}
 	if integration.Devices["root"]["size"] != "50GiB" || integration.Devices["root"]["pool"] != "gha-lvm" {
@@ -285,7 +337,7 @@ func loadPlan(t *testing.T, pools ...string) Plan {
 
 func loadConfig(t *testing.T) config.Config {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -303,10 +355,10 @@ func loadConfig(t *testing.T) config.Config {
 func TestEveryPoolWithWarmCapacityCanBePlanned(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{
-		"../../config/server-gha-runner-1.yaml",
-		"../../config/server-gha-runner-1.yaml",
-		"../../config/server-gha-runner-2.yaml",
-		"../../config/server-gha-runner-3.yaml",
+		"../../config/example-runner-1.yaml",
+		"../../config/example-runner-1.yaml",
+		"../../config/example-runner-2.yaml",
+		"../../config/example-runner-3.yaml",
 	} {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
@@ -351,13 +403,15 @@ func TestClusterProjectQuotaIsThePerHostCeilingTimesTheMembers(t *testing.T) {
 	members := cfg.Incus.ClusterMembers()
 	for key, want := range map[string]string{
 		"limits.instances":        strconv.Itoa(cfg.Incus.ProjectMaxInstances * members),
-		"limits.virtual-machines": strconv.Itoa(cfg.Incus.ProjectMaxInstances * members),
-		"limits.cpu":              strconv.Itoa(cfg.Incus.ProjectMaxCPUUnits * members),
+		"limits.virtual-machines": "0",
 		"limits.memory":           strconv.Itoa(cfg.Incus.ProjectMaxMemoryMiB*members) + "MiB",
 		"limits.disk":             strconv.Itoa(cfg.Incus.ProjectDiskLimitGiB*members) + "GiB",
 	} {
 		if got := plan.Project.Config[key]; got != want {
 			t.Errorf("%s = %q across %d members, want %q", key, got, members, want)
 		}
+	}
+	if _, pinned := plan.Project.Config["limits.cpu"]; pinned {
+		t.Fatal("container-only project must not enforce aggregate configured cpusets")
 	}
 }

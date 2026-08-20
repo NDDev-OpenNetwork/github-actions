@@ -72,7 +72,7 @@ index 3fc00e0..b35d10e 100644
  
  	listenCtx, listenCancelFunc := context.WithCancel(context.Background())
  	listenCtx = garmUtil.CopySlogValuesToNewCtx(l.ctx, listenCtx)
-@@ -181,17 +192,36 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+@@ -181,17 +192,23 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
  		slog.ErrorContext(l.ctx, "getting scale set client", "error", err)
  		return
  	}
@@ -80,21 +80,8 @@ index 3fc00e0..b35d10e 100644
 +	// Completion must release the global slot before this same message tries
 +	// to acquire newly available work. Recording lifecycle first also prevents
 +	// a retained available message from hiding a completion in a mixed batch.
-+	deferAssignedMessage, err := l.intentCoordinator.ObserveLifecycle(scaleSet, l.scaleSetHelper.GetEntity(), assignedJobs, startedJobs, completedJobs)
-+	if err != nil {
++	if _, err := l.intentCoordinator.ObserveLifecycle(scaleSet, l.scaleSetHelper.GetEntity(), assignedJobs, startedJobs, completedJobs); err != nil {
 +		slog.ErrorContext(l.ctx, "recording queue lifecycle", "error", err)
-+		return
-+	}
-+	if deferAssignedMessage {
-+		// JobAssigned precedes JobAvailable. Do not update desired capacity or
-+		// acknowledge this message until its job wins global admission.
-+		slog.DebugContext(l.ctx, "retaining deferred assigned-job message", "message_id", msg.MessageID)
-+		timer := time.NewTimer(time.Second)
-+		defer timer.Stop()
-+		select {
-+		case <-timer.C:
-+		case <-l.listenerCtx.Done():
-+		}
 +		return
 +	}
 +	retainAvailableMessage := false

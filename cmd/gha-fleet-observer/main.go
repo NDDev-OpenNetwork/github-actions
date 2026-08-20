@@ -66,11 +66,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	collector, err := buildCollector(options)
 	if err != nil {
-		logger.Error("initialize fleet observer", "error", err)
+		logger.Error("initialize NDDev Drakkars observer", "error", err)
 		return 1
 	}
 	if err := collector.Validate(); err != nil {
-		logger.Error("validate fleet observer", "error", err)
+		logger.Error("validate NDDev Drakkars observer", "error", err)
 		return 1
 	}
 
@@ -97,12 +97,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownContext); err != nil {
-			logger.Error("fleet observer shutdown failed", "error", err)
+			logger.Error("NDDev Drakkars observer shutdown failed", "error", err)
 		}
 	}()
 
 	logger.Info(
-		"fleet observer starting",
+		"NDDev Drakkars observer starting",
 		"listen_address", options.listen,
 		"sample_interval", sampleInterval.String(),
 		"max_staleness", maxStaleness.String(),
@@ -110,7 +110,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		"commit", commit,
 	)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("fleet observer stopped", "error", err)
+		logger.Error("NDDev Drakkars observer stopped", "error", err)
 		return 1
 	}
 	return 0
@@ -153,7 +153,7 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		Path:     providerConfiguration.JournalFile,
 		LockPath: providerConfiguration.JournalLockFile,
 	}
-	return fleetobserve.Collector{
+	collector := fleetobserve.Collector{
 		Config: platform,
 		Host:   hostprobe.Collect,
 		Journal: func(ctx context.Context) (providerjournal.Journal, error) {
@@ -176,11 +176,21 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		Diagnostics: func(now time.Time) (workerdiagnostics.SpoolStats, error) {
 			return workerdiagnostics.Inspect(providerConfiguration.DiagnosticsDirectory, now)
 		},
-		Export: func() (diagnosticexport.Status, error) {
+		Service:            serviceState,
+		DiagnosticMaxBytes: providerConfiguration.DiagnosticsMaxTotalBytes,
+	}
+	if platformOwnsDiagnosticExporter(platform) {
+		collector.Export = func() (diagnosticexport.Status, error) {
 			return diagnosticexport.ReadStatus(diagnosticExportState)
-		},
-		Service: serviceState,
-	}, nil
+		}
+	}
+	return collector, nil
+}
+
+func platformOwnsDiagnosticExporter(platform config.Config) bool {
+	// The non-member services host owns the queue, provider process, local
+	// diagnostic WAL and central exporter. Cluster members are capacity only.
+	return !platform.Incus.Cluster.Enabled
 }
 
 func collect(parent context.Context, collector fleetobserve.Collector) fleetobserve.Snapshot {
@@ -201,7 +211,7 @@ func sample(ctx context.Context, collector fleetobserve.Collector, state *fleeto
 			state.Set(snapshot)
 			if !snapshot.Healthy {
 				logger.Warn(
-					"fleet observer sample is unhealthy",
+					"NDDev Drakkars observer sample is unhealthy",
 					"collection_errors", len(snapshot.CollectionErrors),
 					"orphan_instances", snapshot.Incus.OrphanInstances,
 					"missing_instances", snapshot.Incus.MissingInstances,

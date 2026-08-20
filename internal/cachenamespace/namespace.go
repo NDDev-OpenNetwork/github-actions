@@ -1,6 +1,6 @@
 // Package cachenamespace is the one place a compiler-cache object key is built.
 //
-// The prefix root -- NDDev-OpenNetwork/github-actions/trust/<class> -- was written as
+// The prefix root -- example-org/example-actions/trust/<class> -- was written as
 // a literal in twenty-four places across five files: the identity manifest, the
 // RustFS validator, the reconciler that also derives lifecycle-rule identifiers
 // from it, the provider's delivery check, two jq expressions rendered into the
@@ -53,8 +53,8 @@ const (
 	// They are constants because there is exactly one today; #236 is the work of
 	// making them a per-tenant parameter, and this package is where that change
 	// happens once rather than in twenty-four places.
-	Organization = "NDDev-OpenNetwork"
-	Repository   = "github-actions"
+	Organization = "example-org"
+	Repository   = "example-actions"
 
 	// trustSegment separates the trust-scoped cache from anything else that
 	// might live under the repository prefix. It is a literal path segment and

@@ -41,15 +41,10 @@ const (
 // other, and the provider reaches the cluster, over the private network. So
 // the boundary widens by exactly one subnet and no further -- an Incus API
 // outside it would accept a client certificate from anywhere on the internet.
-//
-// The prefix itself is deployment data, not an engine constant: which private
-// network a fleet sits on is a fact about that estate. It is declared in the
-// provider configuration, and the value below is only what an example estate
-// uses, so a deployment on another network states its own instead of patching
-// the binary.
-const DefaultFleetPrivateNetwork = "172.16.0.0/20"
+var fleetPrivateNetwork = netip.MustParsePrefix("10.200.0.0/20")
 
 var fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 type IncusRemoteProtocol string
 type IncusImageType string
@@ -76,11 +71,20 @@ type IncusImageRemote struct {
 // WorkerImage pins one local Incus alias to one immutable image fingerprint.
 // The containing map is keyed by the exact GARM flavor / platform pool name.
 type WorkerImage struct {
-	Alias       string `toml:"alias" json:"alias"`
-	Fingerprint string `toml:"fingerprint" json:"fingerprint"`
-	Variant     string `toml:"variant" json:"variant"`
-	RunnerUID   int64  `toml:"runner_uid" json:"runner_uid"`
-	RunnerGID   int64  `toml:"runner_gid" json:"runner_gid"`
+	Alias        string         `toml:"alias" json:"alias"`
+	Fingerprint  string         `toml:"fingerprint" json:"fingerprint"`
+	Variant      string         `toml:"variant" json:"variant"`
+	InstanceType IncusImageType `toml:"instance_type" json:"instance_type"`
+	RunnerUID    int64          `toml:"runner_uid" json:"runner_uid"`
+	RunnerGID    int64          `toml:"runner_gid" json:"runner_gid"`
+}
+
+// ProviderIdentity is one immediately previous release that may finish and be
+// deleted during a rolling transition. It never authorizes a warm claim or a
+// new instance; those remain bound to the running binary's exact identity.
+type ProviderIdentity struct {
+	Version string `toml:"version" json:"version"`
+	Commit  string `toml:"commit" json:"commit"`
 }
 
 func (l *IncusImageRemote) Validate() error {
@@ -138,14 +142,12 @@ type Incus struct {
 	// the "default" profile to any newly created instance.
 	IncludeDefaultProfile bool `toml:"include_default_profile" json:"include-default-profile"`
 
-	// PrivateNetwork is the CIDR the fleet's hosts sit on. A cluster member's
-	// API address must be inside it; a standalone host uses loopback and never
-	// consults it. Empty means DefaultFleetPrivateNetwork.
-	PrivateNetwork string `toml:"private_network" json:"private-network"`
-
 	// URL holds the URL of the remote Incus server.
 	// example: https://10.10.10.1:8443/
 	URL string `toml:"url" json:"url"`
+	// ClusterURLs is the ordered, bounded failover set for the same Incus
+	// cluster. It replaces URL after every member certificate is verified.
+	ClusterURLs []string `toml:"cluster_urls" json:"cluster-urls"`
 	// ClientCertificate is the x509 client certificate path used for authentication.
 	ClientCertificate string `toml:"client_certificate" json:"client_certificate"`
 	// ClientKey is the key used for client certificate authentication.
@@ -162,9 +164,6 @@ type Incus struct {
 	// SecureBoot enables secure boot for VMs spun up using this provider.
 	SecureBoot bool `toml:"secure_boot" json:"secure-boot"`
 
-	// InstanceType allows you to choose between a virtual machine and a container
-	InstanceType IncusImageType `toml:"instance_type" json:"instance-type"`
-
 	// WorkerImages is the exact flavor-to-image policy accepted from GARM.
 	// Every configured alias resolves locally and is independently pinned by digest.
 	WorkerImages map[string]WorkerImage `toml:"worker_images" json:"worker-images"`
@@ -179,6 +178,10 @@ type Incus struct {
 	QueueIntentFile string `toml:"queue_intent_file" json:"queue-intent-file"`
 	// AdmissionLeaseSeconds bounds recovery of a crash before instance creation.
 	AdmissionLeaseSeconds int `toml:"admission_lease_seconds" json:"admission-lease-seconds"`
+	// PreviousProviderIdentities is deliberately bounded to N-1. Carrying an
+	// open-ended allowlist would turn rolling compatibility into permanent
+	// acceptance of obsolete worker policy.
+	PreviousProviderIdentities []ProviderIdentity `toml:"previous_provider_identities" json:"previous-provider-identities"`
 
 	// Diagnostics are captured outside a disposable VM immediately before
 	// teardown. These pilot limits are exact so config drift cannot silently
@@ -189,18 +192,21 @@ type Incus struct {
 	DiagnosticsMaxTotalBytes  int64  `toml:"diagnostics_max_total_bytes" json:"diagnostics-max-total-bytes"`
 }
 
-func (l *Incus) GetInstanceType() IncusImageType {
-	switch l.InstanceType {
-	case IncusImageVirtualMachine, IncusImageContainer:
-		return l.InstanceType
-	default:
-		return IncusImageVirtualMachine
-	}
-}
-
 func (l *Incus) WorkerImageForFlavor(flavor string) (WorkerImage, bool) {
 	image, exists := l.WorkerImages[flavor]
 	return image, exists
+}
+
+func (l *Incus) AllowsProviderIdentity(actualVersion, actualCommit, currentVersion, currentCommit string) bool {
+	if actualVersion == currentVersion && actualCommit == currentCommit {
+		return true
+	}
+	for _, identity := range l.PreviousProviderIdentities {
+		if actualVersion == identity.Version && actualCommit == identity.Commit {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Incus) Validate() error {
@@ -208,21 +214,36 @@ func (l *Incus) Validate() error {
 		return fmt.Errorf("unix_socket_path is forbidden; use the pinned loopback TLS endpoint")
 	}
 
-	if l.URL == "" {
-		return fmt.Errorf("url must be specified")
+	if l.URL != "" && len(l.ClusterURLs) != 0 {
+		return fmt.Errorf("url and cluster_urls are mutually exclusive")
 	}
-
-	parsedURL, err := url.ParseRequestURI(l.URL)
-	if err != nil {
-		return fmt.Errorf("invalid Incus URL")
+	if l.URL == "" && len(l.ClusterURLs) == 0 {
+		return fmt.Errorf("url or cluster_urls must be specified")
 	}
-	if parsedURL.Scheme != "https" || parsedURL.User != nil ||
-		(parsedURL.Path != "" && parsedURL.Path != "/") ||
-		parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
-		return fmt.Errorf("url must be a bare https endpoint with no path, query, fragment or credentials")
+	urls := l.ClusterURLs
+	if l.URL != "" {
+		urls = []string{l.URL}
+	} else if len(urls) < 2 || len(urls) > 4 {
+		return fmt.Errorf("cluster_urls must contain between two and four endpoints")
 	}
-	if err := validateIncusEndpoint(parsedURL.Host, l.PrivateNetwork); err != nil {
-		return fmt.Errorf("invalid Incus endpoint %q: %w", parsedURL.Host, err)
+	seenURLs := make(map[string]struct{}, len(urls))
+	for _, endpoint := range urls {
+		if _, exists := seenURLs[endpoint]; exists {
+			return fmt.Errorf("cluster_urls contains duplicate endpoint %q", endpoint)
+		}
+		seenURLs[endpoint] = struct{}{}
+		parsedURL, err := url.ParseRequestURI(endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid Incus URL")
+		}
+		if parsedURL.Scheme != "https" || parsedURL.User != nil ||
+			(parsedURL.Path != "" && parsedURL.Path != "/") ||
+			parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+			return fmt.Errorf("url must be a bare https endpoint with no path, query, fragment or credentials")
+		}
+		if err := validateIncusEndpoint(parsedURL.Host); err != nil {
+			return fmt.Errorf("invalid Incus endpoint %q: %w", parsedURL.Host, err)
+		}
 	}
 
 	if l.ClientCertificate == "" || l.ClientKey == "" {
@@ -255,15 +276,10 @@ func (l *Incus) Validate() error {
 	if l.IncludeDefaultProfile {
 		return fmt.Errorf("include_default_profile must be false")
 	}
-	if !l.SecureBoot {
-		return fmt.Errorf("secure_boot must be true")
-	}
-	if l.InstanceType != IncusImageVirtualMachine {
-		return fmt.Errorf("instance_type must be %s", IncusImageVirtualMachine)
-	}
 	if len(l.WorkerImages) == 0 {
 		return fmt.Errorf("worker_images must pin at least one pool image")
 	}
+	hasVirtualMachine := false
 	aliases := make(map[string]string, len(l.WorkerImages))
 	for flavor, image := range l.WorkerImages {
 		if flavor == "" || strings.TrimSpace(flavor) != flavor {
@@ -278,6 +294,12 @@ func (l *Incus) Validate() error {
 		if image.Variant != "standard" && image.Variant != "integration" {
 			return fmt.Errorf("worker_images.%s.variant must be standard or integration", flavor)
 		}
+		if image.InstanceType != IncusImageVirtualMachine && image.InstanceType != IncusImageContainer {
+			return fmt.Errorf("worker_images.%s.instance_type must be virtual-machine or container", flavor)
+		}
+		if image.InstanceType == IncusImageVirtualMachine {
+			hasVirtualMachine = true
+		}
 		if image.RunnerUID < 1 || image.RunnerUID > 65535 {
 			return fmt.Errorf("worker_images.%s.runner_uid must be in 1..65535", flavor)
 		}
@@ -288,6 +310,9 @@ func (l *Incus) Validate() error {
 			return fmt.Errorf("worker image alias %q is pinned to conflicting fingerprints", image.Alias)
 		}
 		aliases[image.Alias] = image.Fingerprint
+	}
+	if hasVirtualMachine != l.SecureBoot {
+		return fmt.Errorf("secure_boot must be true exactly when a virtual-machine worker image is configured")
 	}
 	if err := validateRegularFile(l.PlatformConfigFile, false); err != nil {
 		return fmt.Errorf("invalid platform_config_file %s: %w", l.PlatformConfigFile, err)
@@ -307,6 +332,15 @@ func (l *Incus) Validate() error {
 	if filepath.Clean(l.QueueIntentFile) == filepath.Clean(l.JournalFile) ||
 		filepath.Clean(l.QueueIntentFile) == filepath.Clean(l.JournalLockFile) {
 		return fmt.Errorf("queue_intent_file must differ from provider journal paths")
+	}
+	if len(l.PreviousProviderIdentities) > 1 {
+		return fmt.Errorf("previous_provider_identities may contain only N-1")
+	}
+	for _, identity := range l.PreviousProviderIdentities {
+		if identity.Version == "" || strings.TrimSpace(identity.Version) != identity.Version || len(identity.Version) > 64 ||
+			!commitPattern.MatchString(identity.Commit) {
+			return fmt.Errorf("previous_provider_identities contains an invalid exact identity")
+		}
 	}
 	if l.AdmissionLeaseSeconds != 300 {
 		return fmt.Errorf("admission_lease_seconds must be exactly 300 during the pilot")
@@ -412,7 +446,7 @@ func validateStateDirectory(path string) error {
 // address here would expose instance creation to any holder of a client
 // certificate, and this provider is the only thing standing between GARM and
 // the hypervisor.
-func validateIncusEndpoint(host, privateNetwork string) error {
+func validateIncusEndpoint(host string) error {
 	if host == "127.0.0.1:8443" {
 		return nil
 	}
@@ -423,28 +457,8 @@ func validateIncusEndpoint(host, privateNetwork string) error {
 	if address.Port() != 8443 {
 		return fmt.Errorf("must use port 8443")
 	}
-	network, err := FleetPrivateNetwork(privateNetwork)
-	if err != nil {
-		return err
-	}
-	if !network.Contains(address.Addr()) {
-		return fmt.Errorf("must be %s or a cluster member inside %s", ExpectedIncusURL, network)
+	if !fleetPrivateNetwork.Contains(address.Addr()) {
+		return fmt.Errorf("must be %s or a cluster member inside %s", ExpectedIncusURL, fleetPrivateNetwork)
 	}
 	return nil
-}
-
-// FleetPrivateNetwork parses a declared private network, falling back to the
-// example estate's when a deployment states none.
-func FleetPrivateNetwork(declared string) (netip.Prefix, error) {
-	if declared == "" {
-		declared = DefaultFleetPrivateNetwork
-	}
-	network, err := netip.ParsePrefix(declared)
-	if err != nil {
-		return netip.Prefix{}, fmt.Errorf("private_network must be a CIDR: %w", err)
-	}
-	if !network.Addr().IsPrivate() {
-		return netip.Prefix{}, fmt.Errorf("private_network %s is not a private range", network)
-	}
-	return network, nil
 }

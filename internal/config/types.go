@@ -52,24 +52,21 @@ type Cluster struct {
 }
 
 type Incus struct {
-	// PrivateNetwork is the CIDR this fleet's hosts sit on. Empty means
-	// DefaultFleetPrivateNetwork.
-	PrivateNetwork string `json:"private_network,omitempty" yaml:"private_network,omitempty"`
-
-	Version             string `json:"version" yaml:"version"`
-	APIAddress          string `json:"api_address" yaml:"api_address"`
-	Project             string `json:"project" yaml:"project"`
-	StoragePool         string `json:"storage_pool" yaml:"storage_pool"`
-	StorageDriver       string `json:"storage_driver" yaml:"storage_driver"`
-	StorageSizeGiB      int    `json:"storage_size_gib" yaml:"storage_size_gib"`
-	ProjectDiskLimitGiB int    `json:"project_disk_limit_gib" yaml:"project_disk_limit_gib"`
-	Network             string `json:"network" yaml:"network"`
-	NetworkCIDR         string `json:"network_cidr" yaml:"network_cidr"`
-	EgressACL           string `json:"egress_acl" yaml:"egress_acl"`
-	PublicHostAddress   string `json:"public_host_address" yaml:"public_host_address"`
-	ProjectMaxInstances int    `json:"project_max_instances" yaml:"project_max_instances"`
-	ProjectMaxCPUUnits  int    `json:"project_max_cpu_units" yaml:"project_max_cpu_units"`
-	ProjectMaxMemoryMiB int    `json:"project_max_memory_mib" yaml:"project_max_memory_mib"`
+	Version                   string   `json:"version" yaml:"version"`
+	APIAddress                string   `json:"api_address" yaml:"api_address"`
+	Project                   string   `json:"project" yaml:"project"`
+	StoragePool               string   `json:"storage_pool" yaml:"storage_pool"`
+	StorageDriver             string   `json:"storage_driver" yaml:"storage_driver"`
+	StorageSizeGiB            int      `json:"storage_size_gib" yaml:"storage_size_gib"`
+	ProjectDiskLimitGiB       int      `json:"project_disk_limit_gib" yaml:"project_disk_limit_gib"`
+	Network                   string   `json:"network" yaml:"network"`
+	NetworkCIDR               string   `json:"network_cidr" yaml:"network_cidr"`
+	EgressACL                 string   `json:"egress_acl" yaml:"egress_acl"`
+	PublicHostAddress         string   `json:"public_host_address" yaml:"public_host_address"`
+	EstatePublicHostAddresses []string `json:"estate_public_host_addresses" yaml:"estate_public_host_addresses"`
+	ProjectMaxInstances       int      `json:"project_max_instances" yaml:"project_max_instances"`
+	ProjectMaxCPUUnits        int      `json:"project_max_cpu_units" yaml:"project_max_cpu_units"`
+	ProjectMaxMemoryMiB       int      `json:"project_max_memory_mib" yaml:"project_max_memory_mib"`
 	// Cluster describes this host's membership of the fleet's Incus cluster.
 	// A cluster is what lets one queue place a worker on any host: the
 	// provider talks to one API and Incus decides which member runs the VM.
@@ -112,16 +109,20 @@ type Guardrails struct {
 
 // HostReserve is capacity the fleet must leave for everything that is not the
 // fleet. Its floor depends on what the host actually carries: a host retaining
-// the twelve legacy listeners and the ExamplePlatform and Captcha stacks must protect
+// the twelve legacy listeners and the Declaro and Captcha stacks must protect
 // them, while a dedicated fleet host has only its own control plane and the
 // operating system to protect. Declaring the mode is mandatory so a dedicated
 // floor is always a deliberate statement about a host, never a default.
 type HostReserve struct {
-	Mode                   string `json:"mode" yaml:"mode"`
-	MinimumCPUUnits        int    `json:"minimum_cpu_units" yaml:"minimum_cpu_units"`
-	MinimumMemoryMiB       int    `json:"minimum_memory_mib" yaml:"minimum_memory_mib"`
-	MinimumPercent         int    `json:"minimum_percent" yaml:"minimum_percent"`
-	MinimumFreeDiskPercent int    `json:"minimum_free_disk_percent" yaml:"minimum_free_disk_percent"`
+	Mode             string `json:"mode" yaml:"mode"`
+	MinimumCPUUnits  int    `json:"minimum_cpu_units" yaml:"minimum_cpu_units"`
+	MinimumMemoryMiB int    `json:"minimum_memory_mib" yaml:"minimum_memory_mib"`
+	MinimumPercent   int    `json:"minimum_percent" yaml:"minimum_percent"`
+	// MaximumFleetCPUPercent is the aggregate cgroup ceiling for Incus and all
+	// worker processes it owns. It is deliberately below the host-wide SLO so
+	// the kernel, telemetry and member services retain CPU during a burst.
+	MaximumFleetCPUPercent int `json:"maximum_fleet_cpu_percent" yaml:"maximum_fleet_cpu_percent"`
+	MinimumFreeDiskPercent int `json:"minimum_free_disk_percent" yaml:"minimum_free_disk_percent"`
 }
 
 type Cache struct {

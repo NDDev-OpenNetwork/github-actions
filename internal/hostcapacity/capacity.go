@@ -40,20 +40,8 @@ const (
 	BindingMemory    = "incus.project_max_memory_mib"
 )
 
-// ForPool derives the concurrency one pool can reach across everything the
+// ForPool derives the concurrency one pool can reach on the host the
 // configuration describes.
-//
-// It used to be per host, and that was right while one GARM served one
-// hypervisor: a pool's max_running was a per-host number and this ceiling was
-// the per-host arithmetic to check it against. Clustering ended that. One queue
-// now drives every member, the provider counts running workers across the whole
-// cluster, and so `max_running` is a fleet-wide number. A per-host ceiling
-// compared against a fleet-wide declaration is not a stricter check, it is a
-// different question, and answering it would have refused a correct fleet-wide
-// value on every host.
-//
-// The project caps stay per member -- Incus enforces them that way -- so the
-// fleet ceiling is the per-member cap times the members that carry it.
 func ForPool(cfg fleetconfig.Config, pool string) (Limit, error) {
 	declared, exists := cfg.Pool(pool)
 	if !exists {
@@ -63,16 +51,11 @@ func ForPool(cfg fleetconfig.Config, pool string) (Limit, error) {
 		return Limit{}, fmt.Errorf("pool %q declares no resources to divide the host caps by", pool)
 	}
 
-	members := 1
-	if cfg.Incus.Cluster.Enabled && cfg.Incus.Cluster.Members > 1 {
-		members = cfg.Incus.Cluster.Members
-	}
-
-	limit := Limit{Pool: pool, Workers: cfg.Incus.ProjectMaxInstances * members, Binding: BindingInstances}
-	if byCPU := (cfg.Incus.ProjectMaxCPUUnits * members) / declared.Resources.VCPU; byCPU < limit.Workers {
+	limit := Limit{Pool: pool, Workers: cfg.Incus.ProjectMaxInstances, Binding: BindingInstances}
+	if byCPU := cfg.Incus.ProjectMaxCPUUnits / declared.Resources.VCPU; byCPU < limit.Workers {
 		limit.Workers, limit.Binding = byCPU, BindingCPU
 	}
-	if byMemory := (cfg.Incus.ProjectMaxMemoryMiB * members) / declared.Resources.MemoryMiB; byMemory < limit.Workers {
+	if byMemory := cfg.Incus.ProjectMaxMemoryMiB / declared.Resources.MemoryMiB; byMemory < limit.Workers {
 		limit.Workers, limit.Binding = byMemory, BindingMemory
 	}
 	if limit.Workers < 0 {

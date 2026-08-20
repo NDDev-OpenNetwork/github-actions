@@ -27,7 +27,6 @@ type Allocation struct {
 
 type Request struct {
 	Allocation
-	MaxRunning            int
 	QueueIntentAuthorized bool
 }
 
@@ -112,9 +111,6 @@ func (c Controller) admit(
 	if err := validateAllocation(request.Allocation); err != nil {
 		return AdmissionResult{}, fmt.Errorf("validate request: %w", err)
 	}
-	if request.MaxRunning <= 0 {
-		return AdmissionResult{}, fmt.Errorf("validate request: max running must be positive")
-	}
 	if request.ControllerID != c.ControllerID {
 		return AdmissionResult{}, fmt.Errorf("request controller ID does not match admission controller")
 	}
@@ -140,10 +136,10 @@ func (c Controller) admit(
 			preemptions := preemptionsFor(journal.Leases, request.InstanceName)
 			result.PreemptedWarmWorkers = preemptions
 			excluded := append([]string{request.InstanceName}, preemptions...)
-			hostWithoutExisting := withAllocatedLeasesExcluding(host, journal.Leases, request.PoolName, exclusionSet(excluded...))
+			hostWithoutExisting := withAllocatedLeasesExcluding(host, journal.Leases, exclusionSet(excluded...))
 			hostWithoutExisting.AvailableMemoryMiB = projectedAvailableMemory(host, journal.Leases, preemptions)
 			result.Decision, err = admission.Evaluate(hostWithoutExisting, c.Policy, admission.Request{
-				PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB, MaxRunning: request.MaxRunning,
+				PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
 			})
 			if err != nil {
 				return err
@@ -163,12 +159,11 @@ func (c Controller) admit(
 			return nil
 		}
 
-		allocatedHost := withAllocatedLeases(host, journal.Leases, request.PoolName, "")
+		allocatedHost := withAllocatedLeases(host, journal.Leases, "")
 		result.Decision, err = admission.Evaluate(allocatedHost, c.Policy, admission.Request{
-			PoolName:   request.PoolName,
-			VCPU:       request.VCPU,
-			MemoryMiB:  request.MemoryMiB,
-			MaxRunning: request.MaxRunning,
+			PoolName:  request.PoolName,
+			VCPU:      request.VCPU,
+			MemoryMiB: request.MemoryMiB,
 		})
 		if err != nil {
 			return err
@@ -220,9 +215,9 @@ func (c Controller) planWarmPreemption(
 	journal *providerjournal.Journal,
 	request Request,
 ) (admission.Decision, []string, error) {
-	projected := withAllocatedLeases(host, journal.Leases, request.PoolName, "")
+	projected := withAllocatedLeases(host, journal.Leases, "")
 	decision, err := admission.Evaluate(projected, c.Policy, admission.Request{
-		PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB, MaxRunning: request.MaxRunning,
+		PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
 	})
 	if err != nil {
 		return admission.Decision{}, nil, err
@@ -260,10 +255,10 @@ func (c Controller) planWarmPreemption(
 	selected := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		selected = append(selected, candidate.InstanceName)
-		projected = withAllocatedLeasesExcluding(host, journal.Leases, request.PoolName, exclusionSet(selected...))
+		projected = withAllocatedLeasesExcluding(host, journal.Leases, exclusionSet(selected...))
 		projected.AvailableMemoryMiB = projectedAvailableMemory(host, journal.Leases, selected)
 		decision, err = admission.Evaluate(projected, c.Policy, admission.Request{
-			PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB, MaxRunning: request.MaxRunning,
+			PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
 		})
 		if err != nil {
 			return admission.Decision{}, nil, err
@@ -530,10 +525,7 @@ func (c Controller) reconcile(journal *providerjournal.Journal, observed map[str
 		}
 		allocation, exists := observed[name]
 		if exists {
-			// Reconciliation compares a lease against an instance that already
-			// exists, so only identity is in question here; a resize or an
-			// image rebuild is history for a worker already running.
-			if err := leaseIdentityMatches(lease, allocation); err != nil {
+			if err := leaseMatches(lease, allocation); err != nil {
 				claim, claimed := claimsByInstance[name]
 				if !claimed || !allocationMatchesClaim(allocation, claim) ||
 					lease.InstanceName != allocation.InstanceName || lease.ControllerID != allocation.ControllerID ||
@@ -692,34 +684,6 @@ func validateAllocation(allocation Allocation) error {
 }
 
 func leaseMatches(lease providerjournal.Lease, allocation Allocation) error {
-	if err := leaseIdentityMatches(lease, allocation); err != nil {
-		return err
-	}
-	switch {
-	case lease.VCPU != allocation.VCPU || lease.MemoryMiB != allocation.MemoryMiB:
-		return fmt.Errorf("resource mismatch for lease %q", lease.InstanceName)
-	case lease.ImageFingerprint != allocation.ImageFingerprint:
-		return fmt.Errorf("image fingerprint mismatch for lease %q", lease.InstanceName)
-	}
-	return nil
-}
-
-// leaseIdentityMatches is the half of the comparison that a policy change
-// cannot move.
-//
-// A lease records what its instance was created with. The allocation it is
-// compared against is built from the pool policy as it reads *now*, so the
-// moment a class is resized -- or its image is rebuilt -- every live worker of
-// the old shape stops matching. Reconciliation then calls that a conflict and
-// refuses every subsequent create until the last old worker drains. Observed on
-// 2026-08-16: resizing nddev-linux-integration while one worker was thirty
-// minutes into a job produced 766 refused creates in twenty-five minutes.
-//
-// The instance did not change; the policy did. Its recorded resources stay the
-// truth for capacity accounting, which is why they are kept rather than
-// rewritten. What still has to match is identity: the same name, controller and
-// pool, because a lease that names a different instance is a real conflict.
-func leaseIdentityMatches(lease providerjournal.Lease, allocation Allocation) error {
 	switch {
 	case lease.InstanceName != allocation.InstanceName:
 		return fmt.Errorf("instance name mismatch for lease %q", lease.InstanceName)
@@ -729,36 +693,34 @@ func leaseIdentityMatches(lease providerjournal.Lease, allocation Allocation) er
 		return fmt.Errorf("pool ID mismatch for lease %q", lease.InstanceName)
 	case lease.PoolName != allocation.PoolName:
 		return fmt.Errorf("pool name mismatch for lease %q", lease.InstanceName)
+	case lease.VCPU != allocation.VCPU || lease.MemoryMiB != allocation.MemoryMiB:
+		return fmt.Errorf("resource mismatch for lease %q", lease.InstanceName)
+	case lease.ImageFingerprint != allocation.ImageFingerprint:
+		return fmt.Errorf("image fingerprint mismatch for lease %q", lease.InstanceName)
 	}
 	return nil
 }
 
-func withAllocatedLeases(host admission.HostSnapshot, leases map[string]providerjournal.Lease, poolName, exclude string) admission.HostSnapshot {
-	return withAllocatedLeasesExcluding(host, leases, poolName, exclusionSet(exclude))
+func withAllocatedLeases(host admission.HostSnapshot, leases map[string]providerjournal.Lease, exclude string) admission.HostSnapshot {
+	return withAllocatedLeasesExcluding(host, leases, exclusionSet(exclude))
 }
 
 func withAllocatedLeasesExcluding(
 	host admission.HostSnapshot,
 	leases map[string]providerjournal.Lease,
-	poolName string,
 	excluded map[string]struct{},
 ) admission.HostSnapshot {
 	allocatedCPU := 0
 	allocatedMemory := 0
-	poolRunning := 0
 	for name, lease := range leases {
 		if _, skip := excluded[name]; skip {
 			continue
 		}
 		allocatedCPU += lease.VCPU
 		allocatedMemory += lease.MemoryMiB
-		if lease.PoolName == poolName {
-			poolRunning++
-		}
 	}
 	host.AllocatedCPUUnits = allocatedCPU
 	host.AllocatedMemoryMiB = allocatedMemory
-	host.PoolRunning = poolRunning
 	return host
 }
 

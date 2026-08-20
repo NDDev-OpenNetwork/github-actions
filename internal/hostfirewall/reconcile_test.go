@@ -46,6 +46,17 @@ func TestApplyIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRenderCommandMatchesUFWHostCIDRNormalization(t *testing.T) {
+	t.Parallel()
+	command := renderCommand([]string{
+		"route", "allow", "from", "198.51.100.0/24", "to", "203.0.113.20/32",
+		"port", "22", "proto", "tcp", "comment", "gha-fleet-release-egress-v1",
+	})
+	if command != "ufw route allow from 198.51.100.0/24 to 203.0.113.20 port 22 proto tcp comment 'gha-fleet-release-egress-v1'" {
+		t.Fatalf("unexpected normalized command: %s", command)
+	}
+}
+
 func TestApplyRejectsUnsafeUFWDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -61,7 +72,7 @@ func TestApplyRejectsStaleManagedRule(t *testing.T) {
 
 	runner := &fakeRunner{responses: []response{
 		{output: testStatus},
-		{output: "ufw allow in on gha0 to 192.0.2.1 port 1 proto tcp comment 'gha-fleet-stale-v1'\n"},
+		{output: "ufw allow in on gha0 to 198.51.100.1 port 1 proto tcp comment 'gha-fleet-stale-v1'\n"},
 	}}
 	_, err := (Reconciler{Runner: runner}).Apply(context.Background(), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "drift must be reviewed") {
@@ -81,7 +92,7 @@ func testPlan() incusplan.HostFirewall {
 		RequiredDefault: "deny (incoming), allow (outgoing), deny (routed)",
 		Rules: []incusplan.HostFirewallRule{{
 			Name: "dhcp",
-			Args: []string{"allow", "in", "on", "gha0", "to", "192.0.2.1", "port", "67", "proto", "udp", "comment", "gha-fleet-dhcp-v1"},
+			Args: []string{"allow", "in", "on", "gha0", "to", "198.51.100.1", "port", "67", "proto", "udp", "comment", "gha-fleet-dhcp-v1"},
 		}},
 	}
 }

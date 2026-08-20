@@ -7,7 +7,7 @@ import "testing"
 // the retained-workloads case rather than loading it: the property under test
 // belongs to the validator, not to whichever host happens to exist.
 func TestHostReserveFloorFollowsDeclaredMode(t *testing.T) {
-	base, err := Load("../../config/server-gha-runner-1.yaml")
+	base, err := Load("../../config/example-runner-1.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +44,17 @@ func TestHostReserveFloorFollowsDeclaredMode(t *testing.T) {
 			c.HostReserve.MinimumMemoryMiB = 16 * 1024
 		}, "minimum_cpu_units"},
 		{"dedicated host below its own floor", func(c *Config) {
-			c.HostReserve.MinimumMemoryMiB = 1024
+			c.HostReserve.MinimumMemoryMiB = 512
 		}, "minimum_memory_mib"},
 		{"dedicated host below its own cpu floor", func(c *Config) {
 			c.HostReserve.MinimumCPUUnits = 1
 		}, "minimum_cpu_units"},
+		{"fleet cpu ceiling can exceed the host slo", func(c *Config) {
+			c.HostReserve.MaximumFleetCPUPercent = 99
+		}, "maximum_fleet_cpu_percent"},
+		{"fleet cpu ceiling wastes capacity", func(c *Config) {
+			c.HostReserve.MaximumFleetCPUPercent = 79
+		}, "maximum_fleet_cpu_percent"},
 	} {
 		mutated := base
 		testCase.mutate(&mutated)

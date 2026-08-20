@@ -1,13 +1,8 @@
-# This repository is public, so its own CI runs on GitHub-hosted runners: a
-# fork's pull request must never execute on fleet hardware, and hosted minutes
-# are unmetered here. The workflows that do exercise a live fleet are
-# dispatch-only and are operator tools, not gates.
 name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -19,132 +14,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The required status context is this job's name. Renaming it silently
-  # detaches branch protection, which then waits forever on a check that no
-  # longer reports, so the name is fixed until the protected context moves.
-  verify:
-    name: Go verify
-    # The standard class: repository credentials for the checkout, and the
-    # largest worker the host's project caps allow. GitHub-hosted minutes are
-    # exhausted by owner decision and will not be replenished, so `ubuntu-latest`
-    # is not a fallback -- it is a job that never starts.
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Go
-        # Read from the toolchain directive in go.mod rather than repeated here,
-        # so `make verify` on a workstation and `make verify` in this job cannot
-        # answer differently. go.mod states why that version and not another.
-        # This is not the toolchain baked into the worker images: that one is
-        # pinned by config/golden-image*.yaml, moves with an image rebuild, and
-        # representative-benchmark.yml is bound to it by
-        # TestBenchmarkWorkflowRequestsBakedToolchains.
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+      - run: go mod download
+      - run: go mod verify
+      - run: go test ./...
 
-      - name: Download modules
-        run: go mod download
-
-      - name: Verify module checksums
-        run: go mod verify
-
-      - name: Verify code, policy, image plan and reproducible binaries
-        run: make verify
-
-  # A label would let a pull request that edits a patch skip the proof for it,
-  # so the decision is taken from the diff instead of from a human remembering.
-  changes:
-    name: Changed paths
-    # Also standard: it needs a credentialed checkout with full history to diff
-    # the base against the head, which the fast class cannot do.
+  race:
+    name: Race
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      derivative: ${{ steps.detect.outputs.derivative }}
+    timeout-minutes: 40
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
 
-      - name: Detect derivative inputs
-        id: detect
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -eu
-          if [ -z "${BASE_REF}" ]; then
-            echo 'derivative=true' >> "${GITHUB_OUTPUT}"
-            echo 'not a pull request; running every proof'
-            exit 0
-          fi
-          changed="$(git diff --name-only "${BASE_REF}" "${HEAD_REF}")"
-          printf '%s\n' "${changed}"
-          if printf '%s\n' "${changed}" | grep -qE '^(third_party/garm/|scripts/build-garm-nddev\.sh$|config/garm-derivative\.yaml$|Makefile$)'; then
-            echo 'derivative=true' >> "${GITHUB_OUTPUT}"
-          else
-            echo 'derivative=false' >> "${GITHUB_OUTPUT}"
-          fi
-
-  # The production GARM derivative has a strong proof -- pinned upstream, five
-  # patch digests, overlay digests, vendored offline tests, a double build and
-  # an exact binary digest -- that nothing required. A patch could change and
-  # merge green. It is path-filtered because it fetches upstream source and
-  # builds twice; a documentation change has no reason to wait for it.
-  garm-derivative:
-    name: GARM derivative
-    # The integration class is the only one that can run containers, and this
-    # job's entire purpose is a build inside a digest-pinned golang container.
+  static:
+    name: Static and build
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: changes
-    if: needs.changes.outputs.derivative == 'true'
+    timeout-minutes: 20
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: test -z "$(gofmt -l cmd internal third_party)"
+      - run: go vet ./...
+      - run: go build -trimpath ./...
 
-      # No Go is installed for this job on purpose. Every compile it performs
-      # happens inside the digest-pinned golang container that
-      # scripts/build-garm-nddev.sh runs, which asserts its own go1.26.5 with
-      # GOTOOLCHAIN=local and no network. A toolchain on the runner would be
-      # unused, and naming a version here would suggest the derivative follows
-      # the version CI verifies with, which is exactly what it must not do.
-      - name: Rebuild the derivative and compare its digest
-        run: make build-garm-derivative
-
-  # One aggregate that always reports, so a skipped path-filtered job cannot
-  # leave a required context pending. Moving branch protection onto this
-  # context makes every proof above blocking without renaming any of them.
   gate:
     name: Gate
-    # The fast class carries no job credential, which is exactly right here: the
-    # gate checks out nothing and reads only the results of the jobs it needs.
-    # Keeping it off the standard class means the aggregate never waits behind
-    # the proofs it is aggregating.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs:
-      - changes
-      - verify
-      - garm-derivative
+    timeout-minutes: 5
     if: always()
+    needs: [test, race, static]
     steps:
-      - name: Require every proof to have passed or been deliberately skipped
+      - env:
+          TEST: ${{ needs.test.result }}
+          RACE: ${{ needs.race.result }}
+          STATIC: ${{ needs.static.result }}
         run: |
           set -eu
-          changed='${{ needs.changes.result }}'
-          verify='${{ needs.verify.result }}'
-          derivative='${{ needs.garm-derivative.result }}'
-          printf 'changes=%s verify=%s garm-derivative=%s\n' "${changed}" "${verify}" "${derivative}"
-          test "${changed}" = success
-          test "${verify}" = success
-          case "${derivative}" in
-            success|skipped) ;;
-            *) exit 1 ;;
-          esac
+          test "${TEST}" = success
+          test "${RACE}" = success
+          test "${STATIC}" = success

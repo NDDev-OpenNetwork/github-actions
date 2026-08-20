@@ -18,7 +18,7 @@ func TestAccountBoundaryAdmitsOneSegmentUnderTheAccountOnly(t *testing.T) {
 
 	admitted := []string{
 		"https://github.com/example-media",
-		"https://github.com/example-media/server-example-media-ai",
+		"https://github.com/example-media/example-service",
 		"https://github.com/example-media/another-repository",
 	}
 	for _, url := range admitted {
@@ -53,26 +53,26 @@ func TestPoolTenantBoundaryRefusesAnotherRegisteredTenant(t *testing.T) {
 	// The reference host configuration declares no pool tenant, so this test
 	// states the narrow rule against a tenant that was declared. The undeclared
 	// case is a different rule and is held by the test below it.
-	selected, err := tenant.ByID("nddev")
+	selected, err := tenant.ByID("example")
 	if err != nil {
 		t.Fatal(err)
 	}
-	declarePoolTenant(t, provider, "nddev-linux-standard", "nddev")
+	declarePoolTenant(t, provider, "nddev-linux-standard", "example")
 
 	for _, testCase := range []struct {
 		name       string
 		repository string
 		admitted   bool
 	}{
-		{"own repository", "https://github.com/NDDev-OpenNetwork/github-actions", true},
-		{"own account, organization entity", "https://github.com/NDDev-OpenNetwork", true},
-		{"own account, another repository", "https://github.com/NDDev-OpenNetwork/gds", true},
+		{"own repository", "https://github.com/example-org/example-actions", true},
+		{"own account, organization entity", "https://github.com/example-org", true},
+		{"own account, another repository", "https://github.com/example-org/gds", true},
 		// Both are in the registry, so isRegisteredRepositoryURL admits them.
 		// Neither belongs to the tenant this pool was declared for.
-		{"another registered tenant", "https://github.com/example-guild/ai_stp", false},
+		{"another registered tenant", "https://github.com/example-guild/example-project", false},
 		{"another whole-account tenant", "https://github.com/example-media/anything", false},
-		{"lookalike account", "https://github.com/NDDev-OpenNetwork-evil/repository", false},
-		{"nested path under the account", "https://github.com/NDDev-OpenNetwork/a/b", false},
+		{"lookalike account", "https://github.com/example-org-evil/repository", false},
+		{"nested path under the account", "https://github.com/example-org/a/b", false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if got := repositoryWithinTenant(selected, testCase.repository); got != testCase.admitted {
@@ -98,7 +98,7 @@ func TestPoolTenantBoundaryRefusesAnotherRegisteredTenant(t *testing.T) {
 // A tenant that did not declare it serves a whole account keeps the tightest
 // boundary the fleet can state: exactly the one repository the registry names.
 func TestPoolTenantBoundaryKeepsSingleRepositoryTenantsNarrow(t *testing.T) {
-	guild, err := tenant.ByID("guild")
+	guild, err := tenant.ByID("example-guild")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestPoolTenantBoundaryKeepsSingleRepositoryTenantsNarrow(t *testing.T) {
 // Pool.TenantID defaults an undeclared tenant to nddev, which is right for
 // reading a configuration and wrong for deciding admission. Reading that
 // default as a declaration refused every other registered tenant on every
-// deployed host: gha-runner-2 serves example-guild/ai_stp through its own
+// deployed host: gha-runner-2 serves example-guild/example-project through its own
 // scale set on this same pool, and every create was refused with "outside the
 // boundary of tenant nddev declared by pool nddev-linux-integration" -- for a
 // pool that declared nothing.
@@ -134,8 +134,8 @@ func TestAPoolThatDeclaresNoTenantKeepsTheRegistryBoundary(t *testing.T) {
 		t.Fatalf("poolTenant reported declared=%v err=%v for a pool that declares nothing", declared, err)
 	}
 	for _, admitted := range []string{
-		"https://github.com/NDDev-OpenNetwork/github-actions",
-		"https://github.com/example-guild/ai_stp",
+		"https://github.com/example-org/example-actions",
+		"https://github.com/example-guild/example-project",
 	} {
 		bootstrap := validBootstrap()
 		bootstrap.RepoURL = admitted

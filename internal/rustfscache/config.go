@@ -84,9 +84,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("schema_version must be %d", SchemaVersion)
 	}
 	endpoint, err := url.ParseRequestURI(c.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host != "192.0.2.1:9002" || endpoint.Path != "" ||
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host != "198.51.100.1:9002" || endpoint.Path != "" ||
 		endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.User != nil {
-		return fmt.Errorf("endpoint must be exactly https://192.0.2.1:9002")
+		return fmt.Errorf("endpoint must be exactly https://198.51.100.1:9002")
 	}
 	if c.Region != "us-east-1" {
 		return fmt.Errorf("region must be us-east-1")
