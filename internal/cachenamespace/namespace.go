@@ -1,6 +1,6 @@
 // Package cachenamespace is the one place a compiler-cache object key is built.
 //
-// The prefix root -- example-org/example-actions/trust/<class> -- was written as
+// A prefix root -- organization/repository/trust/<class> -- was written as
 // a literal in twenty-four places across five files: the identity manifest, the
 // RustFS validator, the reconciler that also derives lifecycle-rule identifiers
 // from it, the provider's delivery check, two jq expressions rendered into the
@@ -8,9 +8,8 @@
 // and #236 is the consequence: every tenant shares one read-write namespace and
 // widening it is a twenty-four-site edit rather than a decision.
 //
-// Making the root one function is the prerequisite for making it per-tenant. It
-// is not that change: the values it produces today are byte-identical to the
-// literals it replaces, so no cache object moves and no IAM policy changes.
+// Repository identity is supplied by deployment configuration; this package
+// owns only its public syntax and trust-boundary transformations.
 package cachenamespace
 
 import (
@@ -35,6 +34,39 @@ const (
 	Promoted TrustClass = "promoted"
 )
 
+// PrefixRootFor builds a trust root for an explicitly configured repository.
+// Repository identity is deployment data: public binaries must not compile a
+// tenant into their authorization decisions.
+func PrefixRootFor(repository string, class TrustClass) (string, error) {
+	if !class.Valid() {
+		return "", fmt.Errorf("unknown cache trust class %q", string(class))
+	}
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || !validSegment(parts[0]) || !validSegment(parts[1]) {
+		return "", fmt.Errorf("cache repository %q must be organization/repository", repository)
+	}
+	return strings.Join([]string{parts[0], parts[1], trustSegment, string(class)}, "/"), nil
+}
+
+// ParsePrefixRoot returns the repository and trust class encoded by a complete
+// credential root. It rejects additional path segments and ambiguous values.
+func ParsePrefixRoot(prefix string) (string, TrustClass, error) {
+	parts := strings.Split(prefix, "/")
+	if len(parts) != 4 || !validSegment(parts[0]) || !validSegment(parts[1]) || parts[2] != trustSegment {
+		return "", "", fmt.Errorf("cache prefix %q must be organization/repository/trust/class", prefix)
+	}
+	class := TrustClass(parts[3])
+	if !class.Valid() {
+		return "", "", fmt.Errorf("cache prefix %q has unknown trust class", prefix)
+	}
+	return parts[0] + "/" + parts[1], class, nil
+}
+
+func validSegment(value string) bool {
+	return value != "" && value != "." && value != ".." &&
+		!strings.ContainsAny(value, "/\\")
+}
+
 // TrustClasses is every class, in the order a reader would expect them.
 func TrustClasses() []TrustClass { return []TrustClass{Trusted, Untrusted, Promoted} }
 
@@ -49,10 +81,8 @@ func (c TrustClass) Valid() bool {
 }
 
 const (
-	// Organization and Repository are the account the fleet's cache lives under.
-	// They are constants because there is exactly one today; #236 is the work of
-	// making them a per-tenant parameter, and this package is where that change
-	// happens once rather than in twenty-four places.
+	// Organization and Repository form the public example configuration only.
+	// Production authorization must use PrefixRootFor with its estate identity.
 	Organization = "example-org"
 	Repository   = "example-actions"
 
@@ -67,10 +97,7 @@ const (
 // PrefixRoot is the credential-scoped root for a trust class. Every S3 policy,
 // every lifecycle rule and every worker delivery is scoped to one of these.
 func PrefixRoot(class TrustClass) (string, error) {
-	if !class.Valid() {
-		return "", fmt.Errorf("unknown cache trust class %q", string(class))
-	}
-	return strings.Join([]string{Organization, Repository, trustSegment, string(class)}, "/"), nil
+	return PrefixRootFor(Organization+"/"+Repository, class)
 }
 
 // MustPrefixRoot is PrefixRoot for the three constants above, where an unknown
@@ -154,16 +181,11 @@ func Template() string {
 // root, with separators flattened. The reconciler derived this by trimming the
 // literal root, which meant the root was written down there too.
 func Identifier(prefix string) (string, error) {
-	root := strings.Join([]string{Organization, Repository, trustSegment}, "/") + "/"
-	below, found := strings.CutPrefix(prefix, root)
-	if !found {
-		return "", fmt.Errorf("prefix %q is not inside the fleet cache namespace", prefix)
+	_, class, err := ParsePrefixRoot(prefix)
+	if err != nil {
+		return "", err
 	}
-	below = strings.Trim(below, "/")
-	if below == "" {
-		return "", fmt.Errorf("prefix %q names no trust class", prefix)
-	}
-	return strings.ReplaceAll(below, "/", "-"), nil
+	return string(class), nil
 }
 
 // Counterpart is the class a credential for the given class must be denied. The

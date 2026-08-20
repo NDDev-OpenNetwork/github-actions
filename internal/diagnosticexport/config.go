@@ -96,6 +96,15 @@ func LoadConfig(filename string) (Config, error) {
 		stat.Mtim != after.Mtim || stat.Ctim != after.Ctim || after.Nlink != 1 {
 		return Config{}, errors.New("diagnostic exporter config changed while reading")
 	}
+	return ParseConfig(content)
+}
+
+// ParseConfig validates committed deployment configuration without applying
+// the runtime ownership checks enforced by LoadConfig.
+func ParseConfig(content []byte) (Config, error) {
+	if len(content) == 0 || len(content) > maxConfigBytes {
+		return Config{}, fmt.Errorf("diagnostic exporter config must contain 1..%d bytes", maxConfigBytes)
+	}
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	decoder.KnownFields(true)
 	var config Config

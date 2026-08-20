@@ -189,6 +189,7 @@ func NewIncusProvider(configFile, controllerID string) (*Incus, error) {
 	provider.platform = nddevAdmissionController.platform
 	provider.diagnostics = newProviderDiagnostics(cfg, provider.platform.ControlPlane.RunnerVersion)
 	provider.cacheDelivery = productionCacheDelivery
+	provider.cacheRepository = productionCacheRepository
 
 	return provider, nil
 }
@@ -655,6 +656,9 @@ type Incus struct {
 	// cacheDelivery reads one trust-scoped identity only after a disposable VM
 	// is bound to a job; unregistered warm capacity never receives it.
 	cacheDelivery cacheDeliveryLoader
+	// cacheRepository reads only the public shape/private identity configuration
+	// before any trust-scoped credential is opened.
+	cacheRepository cacheRepositoryLoader
 	// placementLockPath serializes only the Incus placement request across
 	// short-lived provider processes. Guest boot remains fully parallel.
 	placementLockPath string

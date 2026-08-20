@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachenamespace"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -83,10 +84,8 @@ func (c Config) Validate() error {
 	if c.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("schema_version must be %d", SchemaVersion)
 	}
-	endpoint, err := url.ParseRequestURI(c.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host != "198.51.100.1:9002" || endpoint.Path != "" ||
-		endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.User != nil {
-		return fmt.Errorf("endpoint must be exactly https://198.51.100.1:9002")
+	if err := ValidateEndpoint(c.Endpoint); err != nil {
+		return err
 	}
 	if c.Region != "us-east-1" {
 		return fmt.Errorf("region must be us-east-1")
@@ -114,16 +113,23 @@ func (c Config) Validate() error {
 	if len(c.Identities) != 4 {
 		return fmt.Errorf("identities must contain exactly four trust roles")
 	}
+	if len(c.Identities) == 0 {
+		return fmt.Errorf("identities must contain exactly four trust roles")
+	}
+	repository, _, err := cachenamespace.ParsePrefixRoot(c.Identities[0].Prefix)
+	if err != nil {
+		return fmt.Errorf("derive cache repository identity: %w", err)
+	}
 	wanted := map[string]struct {
 		mode      string
 		policy    string
 		prefix    string
 		retention int
 	}{
-		"trusted-writer":   {"read-write", "gha-cache-github-actions-trusted", cachenamespace.MustPrefixRoot(cachenamespace.Trusted), 30},
-		"untrusted-writer": {"read-write", "gha-cache-github-actions-untrusted", cachenamespace.MustPrefixRoot(cachenamespace.Untrusted), 7},
-		"promoter":         {"read-write", "gha-cache-github-actions-promoter", cachenamespace.MustPrefixRoot(cachenamespace.Promoted), 90},
-		"release-reader":   {"read-only", "gha-cache-github-actions-release", cachenamespace.MustPrefixRoot(cachenamespace.Promoted), 90},
+		"trusted-writer":   {"read-write", "gha-cache-github-actions-trusted", mustPrefix(repository, cachenamespace.Trusted), 30},
+		"untrusted-writer": {"read-write", "gha-cache-github-actions-untrusted", mustPrefix(repository, cachenamespace.Untrusted), 7},
+		"promoter":         {"read-write", "gha-cache-github-actions-promoter", mustPrefix(repository, cachenamespace.Promoted), 90},
+		"release-reader":   {"read-only", "gha-cache-github-actions-release", mustPrefix(repository, cachenamespace.Promoted), 90},
 	}
 	seenRoles := make(map[string]struct{}, len(c.Identities))
 	seenPolicies := make(map[string]struct{}, len(c.Identities))
@@ -153,6 +159,42 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateEndpoint accepts the deployment address while refusing DNS,
+// credentials, alternate ports and non-origin URL components. The exact IP is
+// estate data and must not be compiled into this public package.
+func ValidateEndpoint(value string) error {
+	endpoint, err := url.ParseRequestURI(value)
+	if err != nil {
+		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and port 9002")
+	}
+	host, port, splitErr := net.SplitHostPort(endpoint.Host)
+	address := net.ParseIP(host)
+	if endpoint.Scheme != "https" || splitErr != nil || address == nil || port != "9002" ||
+		address.IsUnspecified() || address.IsMulticast() || endpoint.Path != "" ||
+		endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.User != nil {
+		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and port 9002")
+	}
+	return nil
+}
+
+func mustPrefix(repository string, class cachenamespace.TrustClass) string {
+	prefix, err := cachenamespace.PrefixRootFor(repository, class)
+	if err != nil {
+		panic(err)
+	}
+	return prefix
+}
+
+// Repository returns the exact repository authorized by all configured cache
+// identities. Validate proves every role shares this root.
+func (c Config) Repository() (string, error) {
+	if err := c.Validate(); err != nil {
+		return "", err
+	}
+	repository, _, err := cachenamespace.ParsePrefixRoot(c.Identities[0].Prefix)
+	return repository, err
 }
 
 // ValidateProductionPaths pins mutable credential material to the reviewed host

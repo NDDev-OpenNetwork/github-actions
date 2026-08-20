@@ -70,10 +70,13 @@ func TestKeyRefusesComponentsThatWouldEscapeTheNamespace(t *testing.T) {
 	}
 }
 
-func TestIdentifierRefusesAPrefixOutsideTheNamespace(t *testing.T) {
+func TestIdentifierAcceptsAnyValidatedDeploymentNamespace(t *testing.T) {
 	t.Parallel()
-	if _, err := Identifier("some-other-account/cache/trust/trusted"); err == nil {
-		t.Fatal("an identifier was derived for a prefix outside the fleet namespace")
+	if got, err := Identifier("some-other-account/cache/trust/trusted"); err != nil || got != "trusted" {
+		t.Fatalf("deployment namespace was not accepted: %q, %v", got, err)
+	}
+	if _, err := Identifier("some-other-account/cache/other/trusted"); err == nil {
+		t.Fatal("an identifier was derived for an invalid prefix shape")
 	}
 	got, err := Identifier(MustPrefixRoot(Promoted))
 	if err != nil || got != "promoted" {

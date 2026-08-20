@@ -5,15 +5,13 @@ import (
 	"testing"
 )
 
-// The refactor that made the namespace one authority must not have changed a
-// byte the guest executes. These are the exact three lines the two jq
-// expressions carried as literals before, so if the rendered clause differs in
-// spacing, ordering or quoting, the guest is running something else.
-func TestRenderedRoleClauseIsWhatTheGuestUsedToCarry(t *testing.T) {
+// The guest validates the public namespace shape and trust suffix without
+// compiling any deployment tenant identity into the provider artifact.
+func TestRenderedRoleClauseIsTenantNeutral(t *testing.T) {
 	t.Parallel()
-	want := `    (.role == "trusted-writer" and .mode == "read-write" and .prefix_root == "example-org/example-actions/trust/trusted") or
-    (.role == "untrusted-writer" and .mode == "read-write" and .prefix_root == "example-org/example-actions/trust/untrusted") or
-    (.role == "release-reader" and .mode == "read-only" and .prefix_root == "example-org/example-actions/trust/promoted")`
+	want := `    (.role == "trusted-writer" and .mode == "read-write" and (.prefix_root | test("^[^/]+/[^/]+/trust/trusted$"))) or
+    (.role == "untrusted-writer" and .mode == "read-write" and (.prefix_root | test("^[^/]+/[^/]+/trust/untrusted$"))) or
+    (.role == "release-reader" and .mode == "read-only" and (.prefix_root | test("^[^/]+/[^/]+/trust/promoted$")))`
 
 	if got := cacheRoleJQClause(); got != want {
 		t.Fatalf("rendered clause differs from what the guest carried:\ngot:\n%s\nwant:\n%s", got, want)
@@ -27,6 +25,9 @@ func TestRenderedRoleClauseIsWhatTheGuestUsedToCarry(t *testing.T) {
 		}
 		if strings.Contains(script, cacheRoleClausePlaceholder) {
 			t.Errorf("%s still holds an unsubstituted placeholder", script[:40])
+		}
+		if strings.Contains(script, "example-org/example-actions") {
+			t.Errorf("%s compiles the public example tenant into runtime authorization", script[:40])
 		}
 	}
 }
