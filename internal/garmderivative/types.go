@@ -64,31 +64,32 @@ type Build struct {
 // a build input: it is held by the patch and overlay content assertions in
 // internal/deploycontract, which read the same manifest.
 type RuntimeContract struct {
-	EventDrivenScaleSetWake                bool `json:"event_driven_scale_set_wake" yaml:"event_driven_scale_set_wake"`
-	EventDrivenInstanceWake                bool `json:"event_driven_instance_wake" yaml:"event_driven_instance_wake"`
-	StartupStatesProtected                 bool `json:"startup_states_protected_from_scale_down" yaml:"startup_states_protected_from_scale_down"`
-	PeriodicReconciliationSecs             int  `json:"periodic_reconciliation_seconds" yaml:"periodic_reconciliation_seconds"`
-	DurableQueueIntentBeforeAcquire        bool `json:"durable_queue_intent_before_acquire" yaml:"durable_queue_intent_before_acquire"`
-	JobAssignedObservationOnly             bool `json:"job_assigned_observation_only" yaml:"job_assigned_observation_only"`
-	JobAvailableReservationBeforeCapacity  bool `json:"job_available_reservation_before_capacity" yaml:"job_available_reservation_before_capacity"`
-	DeferredAvailableMessageRetained       bool `json:"deferred_available_message_retained" yaml:"deferred_available_message_retained"`
-	GlobalMaxInFlight                      int  `json:"global_max_in_flight" yaml:"global_max_in_flight"`
-	WeightedRepositoryFairness             bool `json:"weighted_repository_fairness" yaml:"weighted_repository_fairness"`
-	PerRepositoryLimit                     int  `json:"per_repository_limit" yaml:"per_repository_limit"`
-	PriorityAgingSeconds                   int  `json:"priority_aging_seconds" yaml:"priority_aging_seconds"`
-	FailedScaleSetRegistrationCleanup      bool `json:"failed_scale_set_registration_cleanup" yaml:"failed_scale_set_registration_cleanup"`
-	DirectJITProviderHandoff               bool `json:"direct_jit_provider_handoff" yaml:"direct_jit_provider_handoff"`
-	DirectJITPhaseTelemetry                bool `json:"direct_jit_phase_telemetry" yaml:"direct_jit_phase_telemetry"`
-	DurableProviderRetry                   bool `json:"durable_provider_retry" yaml:"durable_provider_retry"`
-	ProviderRetryMaximumAttempts           int  `json:"provider_retry_maximum_attempts" yaml:"provider_retry_maximum_attempts"`
-	ProviderRetryBackoffCapSeconds         int  `json:"provider_retry_backoff_cap_seconds" yaml:"provider_retry_backoff_cap_seconds"`
-	CapacityRetryBackoffCapSeconds         int  `json:"capacity_retry_backoff_cap_seconds" yaml:"capacity_retry_backoff_cap_seconds"`
-	CapacityRetryWakeAfterDelete           bool `json:"capacity_retry_wake_after_delete" yaml:"capacity_retry_wake_after_delete"`
-	AuthoritativeJobReconciliation         bool `json:"authoritative_job_reconciliation" yaml:"authoritative_job_reconciliation"`
-	AuthoritativeQueueIntentReconciliation bool `json:"authoritative_queue_intent_reconciliation" yaml:"authoritative_queue_intent_reconciliation"`
-	JobReconciliationIntervalSeconds       int  `json:"job_reconciliation_interval_seconds" yaml:"job_reconciliation_interval_seconds"`
-	JobReconciliationBatchSize             int  `json:"job_reconciliation_batch_size" yaml:"job_reconciliation_batch_size"`
-	OfficialActionsRunnerUnchanged         bool `json:"official_actions_runner_unchanged" yaml:"official_actions_runner_unchanged"`
+	EventDrivenScaleSetWake                  bool `json:"event_driven_scale_set_wake" yaml:"event_driven_scale_set_wake"`
+	EventDrivenInstanceWake                  bool `json:"event_driven_instance_wake" yaml:"event_driven_instance_wake"`
+	StartupStatesProtected                   bool `json:"startup_states_protected_from_scale_down" yaml:"startup_states_protected_from_scale_down"`
+	PeriodicReconciliationSecs               int  `json:"periodic_reconciliation_seconds" yaml:"periodic_reconciliation_seconds"`
+	DurableQueueIntentBeforeAcquire          bool `json:"durable_queue_intent_before_acquire" yaml:"durable_queue_intent_before_acquire"`
+	JobAssignedProvisionalCapacity           bool `json:"job_assigned_provisional_capacity" yaml:"job_assigned_provisional_capacity"`
+	JobAvailableIdentityBindingBeforeAcquire bool `json:"job_available_identity_binding_before_acquire" yaml:"job_available_identity_binding_before_acquire"`
+	StartupQueuePromotion                    bool `json:"startup_queue_promotion" yaml:"startup_queue_promotion"`
+	DeferredAvailableMessageRetained         bool `json:"deferred_available_message_retained" yaml:"deferred_available_message_retained"`
+	GlobalMaxInFlight                        int  `json:"global_max_in_flight" yaml:"global_max_in_flight"`
+	WeightedRepositoryFairness               bool `json:"weighted_repository_fairness" yaml:"weighted_repository_fairness"`
+	PerRepositoryLimit                       int  `json:"per_repository_limit" yaml:"per_repository_limit"`
+	PriorityAgingSeconds                     int  `json:"priority_aging_seconds" yaml:"priority_aging_seconds"`
+	FailedScaleSetRegistrationCleanup        bool `json:"failed_scale_set_registration_cleanup" yaml:"failed_scale_set_registration_cleanup"`
+	DirectJITProviderHandoff                 bool `json:"direct_jit_provider_handoff" yaml:"direct_jit_provider_handoff"`
+	DirectJITPhaseTelemetry                  bool `json:"direct_jit_phase_telemetry" yaml:"direct_jit_phase_telemetry"`
+	DurableProviderRetry                     bool `json:"durable_provider_retry" yaml:"durable_provider_retry"`
+	ProviderRetryMaximumAttempts             int  `json:"provider_retry_maximum_attempts" yaml:"provider_retry_maximum_attempts"`
+	ProviderRetryBackoffCapSeconds           int  `json:"provider_retry_backoff_cap_seconds" yaml:"provider_retry_backoff_cap_seconds"`
+	CapacityRetryBackoffCapSeconds           int  `json:"capacity_retry_backoff_cap_seconds" yaml:"capacity_retry_backoff_cap_seconds"`
+	CapacityRetryWakeAfterDelete             bool `json:"capacity_retry_wake_after_delete" yaml:"capacity_retry_wake_after_delete"`
+	AuthoritativeJobReconciliation           bool `json:"authoritative_job_reconciliation" yaml:"authoritative_job_reconciliation"`
+	AuthoritativeQueueIntentReconciliation   bool `json:"authoritative_queue_intent_reconciliation" yaml:"authoritative_queue_intent_reconciliation"`
+	JobReconciliationIntervalSeconds         int  `json:"job_reconciliation_interval_seconds" yaml:"job_reconciliation_interval_seconds"`
+	JobReconciliationBatchSize               int  `json:"job_reconciliation_batch_size" yaml:"job_reconciliation_batch_size"`
+	OfficialActionsRunnerUnchanged           bool `json:"official_actions_runner_unchanged" yaml:"official_actions_runner_unchanged"`
 }
 
 // OverlayTarget is where an overlay file is installed inside the checked-out

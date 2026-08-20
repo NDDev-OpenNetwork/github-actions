@@ -407,10 +407,12 @@ func (c *queueIntentCoordinator) FailAcquire(scaleSet params.ScaleSet, selected 
 // protocol and carries only jobId reliably. Repository identity comes from the
 // canonical repository-scoped ForgeEntity; workflow metadata and the numeric
 // runnerRequestId are bound later from JobAvailable. The returned boolean is
-// JobAssigned is observation only: without RunnerRequestID it cannot own a
-// resource token. JobAvailable binds the complete identity and is the first
-// event allowed to reserve capacity. The returned boolean remains for patch
-// compatibility and is always false after the durable journal write.
+// JobAssigned owns one short-lived provisional capacity token. GitHub does not
+// emit JobAvailable until a runner exists, so treating the sparse event as
+// observation-only deadlocks an empty fleet: desired count rises, but the
+// provider preflight sees zero admitted intent and refuses to create that first
+// runner. JobAvailable binds the complete identity before AcquireJobs, while
+// the short assigned TTL bounds a missing follow-up event.
 func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntity, assigned, started, completed []params.ScaleSetJobMessage) (bool, error) {
 	config, err := c.loadConfig()
 	if err != nil {
@@ -623,6 +625,11 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	now := c.nowUTC()
 	migrateLegacyQueueIntentOwnership(&journal, config, now)
 	cleanupExpiredQueueIntents(&journal, now)
+	// A restart can occur after JobAssigned was durably acknowledged but before
+	// the scale-up worker observed its provisional token. Promote from durable
+	// queue state on every serialized journal transaction so recovery never
+	// depends on GitHub redelivering an already acknowledged lifecycle message.
+	admitQueuedToBudget(&journal, config, now)
 	if err := validateQueueBudget(&journal, config); err != nil {
 		return err
 	}
@@ -650,9 +657,11 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 func migrateLegacyQueueIntentOwnership(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
 	for key, intent := range journal.Intents {
 		switch {
-		case intent.State == queueStateAssigned && intent.RunnerRequestID == 0:
+		case intent.State == queueStateAssigned && intent.RunnerRequestID == 0 &&
+			intent.ExpiresAt.After(now.Add(time.Duration(config.AcquiringTTLSeconds)*time.Second)):
 			// Before nddev.41, sparse JobAssigned consumed a slot and received the
-			// execution horizon. It is observation-only in the current model.
+			// execution horizon. Current provisional ownership has the bounded
+			// acquiring horizon already and must not be downgraded on every read.
 			intent.State = queueStateQueued
 			intent.ExpiresAt = expiryForState(config, queueStateQueued, now)
 		case intent.State == queueStateAssigned:
@@ -812,7 +821,7 @@ func baseQueuePriority(scaleSetName string, job params.ScaleSetJobMessage) int {
 func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	candidates := make([]queueIntent, 0)
 	for _, intent := range journal.Intents {
-		if intent.State != queueStateQueued || intent.RunnerRequestID <= 0 ||
+		if intent.State != queueStateQueued ||
 			inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight {
 			continue
 		}

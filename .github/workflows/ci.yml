@@ -60,19 +60,31 @@ jobs:
       - run: go vet ./...
       - run: go build -trimpath ./...
 
+  derivative:
+    name: Reproducible GARM derivative
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make build-garm-derivative
+
   gate:
     name: Gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [test, race, static]
+    needs: [test, race, static, derivative]
     steps:
       - env:
           TEST: ${{ needs.test.result }}
           RACE: ${{ needs.race.result }}
           STATIC: ${{ needs.static.result }}
+          DERIVATIVE: ${{ needs.derivative.result }}
         run: |
           set -eu
           test "${TEST}" = success
           test "${RACE}" = success
           test "${STATIC}" = success
+          test "${DERIVATIVE}" = success
