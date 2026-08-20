@@ -1,0 +1,36 @@
+schema_version: 1
+default_tenant: example
+
+tenants:
+  - id: example
+    owner: example-org
+    repository: example-org/example-actions
+    managed_repositories:
+      - example-org/example-actions
+      - example-org/example-library
+    app_slug: example-actions-fleet
+    credential_name: example-actions-fleet
+    homepage_url: https://github.com/example-org/example-actions
+    serves_whole_account: true
+    scale_set_repositories:
+      nddev-almaty-integration: example-org/example-library
+      nddev-almaty-standard: example-org/example-library
+      nddev-almaty-untrusted: example-org/example-library
+  - id: example-guild
+    owner: example-guild
+    repository: example-guild/example-project
+    managed_repositories:
+      - example-guild/example-project
+    app_slug: example-guild-fleet
+    credential_name: example-guild-fleet
+    homepage_url: https://github.com/example-guild/example-project
+    serves_whole_account: true
+  - id: example-media
+    owner: example-media
+    repository: example-media/example-service
+    managed_repositories:
+      - example-media/example-service
+    app_slug: example-media-fleet
+    credential_name: example-media-fleet
+    homepage_url: https://github.com/example-media/example-service
+    serves_whole_account: true

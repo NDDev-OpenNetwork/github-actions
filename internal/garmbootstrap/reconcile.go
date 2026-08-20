@@ -23,12 +23,13 @@ type Runner struct {
 }
 
 type scaleSetSpec struct {
-	Name       string
-	Image      string
-	Flavor     string
-	MaxRunners uint
-	DirectJIT  bool
-	Repository string
+	Name             string
+	Image            string
+	Flavor           string
+	MaxRunners       uint
+	DirectJIT        bool
+	Repository       string
+	RepositoryScoped bool
 }
 
 func (r Runner) Run(ctx context.Context, options Options) (Result, error) {
@@ -37,7 +38,7 @@ func (r Runner) Run(ctx context.Context, options Options) (Result, error) {
 		now = r.Now
 	}
 	result := Result{SchemaVersion: 1, Applied: options.Apply, Actions: []string{}, ObservedAt: now().UTC()}
-	selected, err := tenant.ByID(options.Tenant)
+	selected, _, err := tenant.Resolve(options.Registry, options.Tenant)
 	if err != nil {
 		return result, err
 	}
@@ -51,6 +52,13 @@ func (r Runner) Run(ctx context.Context, options Options) (Result, error) {
 	desiredSpec, err := resolveScaleSetSpec(options.ScaleSetName)
 	if err != nil {
 		return result, err
+	}
+	if desiredSpec.RepositoryScoped {
+		repository, exists := selected.RepositoryForScaleSet(desiredSpec.Name)
+		if !exists {
+			return result, fmt.Errorf("scale set %q requires a repository binding in tenant %q", desiredSpec.Name, selected.ID)
+		}
+		desiredSpec.Repository = repository
 	}
 	if desiredSpec.Repository != "" && selected.Repository != desiredSpec.Repository {
 		return result, fmt.Errorf("scale set %q is restricted to repository %q", desiredSpec.Name, desiredSpec.Repository)
@@ -557,7 +565,7 @@ func resolveScaleSetSpec(name string) (scaleSetSpec, error) {
 	published := PublishedScaleSets()
 	for _, class := range published {
 		if class.Name == name {
-			return scaleSetSpec{Name: class.Name, Image: class.Image, Flavor: class.Flavor, MaxRunners: class.MaxRunners, Repository: class.Repository}, nil
+			return scaleSetSpec{Name: class.Name, Image: class.Image, Flavor: class.Flavor, MaxRunners: class.MaxRunners, RepositoryScoped: class.RepositoryScoped}, nil
 		}
 	}
 	names := make([]string, 0, len(published))

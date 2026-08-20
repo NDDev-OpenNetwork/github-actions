@@ -47,6 +47,7 @@ func manifestActionURL(owner, ownerType string) string {
 }
 
 type Options struct {
+	Registry tenant.Registry
 	// Tenant names which registered account this App will serve. Empty means
 	// the default tenant, so an existing invocation keeps working unchanged.
 	Tenant string
@@ -263,9 +264,9 @@ func validateOptions(options Options) error {
 	// operator names an account; they cannot describe one. Registering an App
 	// is the single irreversible step in this flow, so an account the GARM
 	// reconciler would later refuse must fail here, before the key exists.
-	selected, err := tenant.ByID(options.Tenant)
+	selected, registry, err := tenant.Resolve(options.Registry, options.Tenant)
 	if err != nil {
-		return fmt.Errorf("%w; known tenants: %v", err, tenant.IDs())
+		return fmt.Errorf("%w; known tenants: %v", err, registry.IDs())
 	}
 	if owner == "" || options.Repository != selected.Repository {
 		return fmt.Errorf("repository must be exactly %s for tenant %q", selected.Repository, selected.ID)

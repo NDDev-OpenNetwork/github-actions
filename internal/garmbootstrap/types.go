@@ -3,6 +3,8 @@ package garmbootstrap
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/tenant"
 )
 
 const (
@@ -71,19 +73,19 @@ const (
 // set name, the Incus image alias a worker of that class boots from, and the
 // pool policy the provider selects by.
 type ScaleSetClass struct {
-	Name            string
-	Image           string
-	Flavor          string
-	MaxRunners      uint
-	Repository      string
-	Trust           string
-	Credentials     string
-	NetworkPolicy   string
-	CacheWriteScope string
-	Docker          bool
-	VCPU            int
-	MemoryMiB       int
-	DiskGiB         int
+	Name             string
+	Image            string
+	Flavor           string
+	MaxRunners       uint
+	RepositoryScoped bool
+	Trust            string
+	Credentials      string
+	NetworkPolicy    string
+	CacheWriteScope  string
+	Docker           bool
+	VCPU             int
+	MemoryMiB        int
+	DiskGiB          int
 }
 
 // PublishedScaleSets is the closed set of classes this reconciler can register,
@@ -94,22 +96,22 @@ type ScaleSetClass struct {
 // fails every create with a pool that has no pinned worker image.
 func PublishedScaleSets() []ScaleSetClass {
 	return []ScaleSetClass{
-		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 4096, 30, ""),
-		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, 4, 6144, 50, ""),
-		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 3072, 30, ""),
-		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, ""),
-		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, ""),
-		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, ""),
-		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, 2, 4096, 30, ""),
-		class(AlmatyStandardScaleSetName, DefaultImage, AlmatyStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, "example-org/example-library"),
-		class(AlmatyIntegrationScaleSetName, IntegrationImage, AlmatyIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, "example-org/example-library"),
-		class(AlmatyUntrustedScaleSetName, UntrustedImage, AlmatyUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, "example-org/example-library"),
+		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 4096, 30, false),
+		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, 4, 6144, 50, false),
+		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 3072, 30, false),
+		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, false),
+		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, false),
+		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, false),
+		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, 2, 4096, 30, false),
+		class(AlmatyStandardScaleSetName, DefaultImage, AlmatyStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
+		class(AlmatyIntegrationScaleSetName, IntegrationImage, AlmatyIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
+		class(AlmatyUntrustedScaleSetName, UntrustedImage, AlmatyUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, true),
 	}
 }
 
-func class(name, image, flavor string, maxRunners uint, trust, credentials, networkPolicy, cacheWriteScope string, docker bool, vcpu, memoryMiB, diskGiB int, repository string) ScaleSetClass {
+func class(name, image, flavor string, maxRunners uint, trust, credentials, networkPolicy, cacheWriteScope string, docker bool, vcpu, memoryMiB, diskGiB int, repositoryScoped bool) ScaleSetClass {
 	return ScaleSetClass{
-		Name: name, Image: image, Flavor: flavor, MaxRunners: maxRunners, Repository: repository,
+		Name: name, Image: image, Flavor: flavor, MaxRunners: maxRunners, RepositoryScoped: repositoryScoped,
 		Trust: trust, Credentials: credentials, NetworkPolicy: networkPolicy,
 		CacheWriteScope: cacheWriteScope, Docker: docker,
 		VCPU: vcpu, MemoryMiB: memoryMiB, DiskGiB: diskGiB,
@@ -117,6 +119,7 @@ func class(name, image, flavor string, maxRunners uint, trust, credentials, netw
 }
 
 type Options struct {
+	Registry tenant.Registry
 	// Tenant selects which account this run reconciles. Empty means
 	// DefaultTenantID, so an operator who passes nothing gets the account that
 	// was already deployed.

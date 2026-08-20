@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateRustFSCache(args[1:], stdout, stderr)
 	case "validate-diagnostic-exporter":
 		return runValidateDiagnosticExporter(args[1:], stdout, stderr)
+	case "validate-tenant-registry":
+		return runValidateTenantRegistry(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -146,6 +148,25 @@ func runValidateDiagnosticExporter(args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	return 0
+}
+
+func runValidateTenantRegistry(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-tenant-registry", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/tenant-registry.yaml", "strict tenant registry path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: validate-tenant-registry requires --config and no positional arguments")
+		return 2
+	}
+	registry, err := tenant.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, registry)
 }
 
 func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
@@ -356,7 +377,8 @@ func runValidateRustFSCache(args []string, stdout, stderr io.Writer) int {
 func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("reconcile-garm", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	tenantID := flags.String("tenant", tenant.DefaultID, "registered account to reconcile: "+strings.Join(tenant.IDs(), ", "))
+	tenantConfig := flags.String("tenant-config", tenant.DefaultRegistryPath, "strict private tenant registry")
+	tenantID := flags.String("tenant", "", "tenant id from the private registry; empty selects its declared default")
 	repository := flags.String("repository", "", "exact reviewed repository entity; empty selects the tenant primary repository")
 	baseURL := flags.String("garm-url", garmbootstrap.DefaultBaseURL, "loopback GARM API base URL")
 	adminCredentials := flags.String("admin-credentials", "/etc/garm/admin-credentials.json", "private GARM administrator credential file")
@@ -377,10 +399,21 @@ func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gha-fleet: reconcile-garm accepts no positional arguments")
 		return 2
 	}
+	registry, err := tenant.Load(*tenantConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	selected, err := registry.ByID(*tenantID)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v; known tenants: %v\n", err, registry.IDs())
+		return 2
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	result, err := (garmbootstrap.Runner{}).Run(ctx, garmbootstrap.Options{
-		Tenant:               *tenantID,
+		Registry:             registry,
+		Tenant:               selected.ID,
 		Repository:           *repository,
 		BaseURL:              *baseURL,
 		AdminCredentialsPath: *adminCredentials,
@@ -410,7 +443,8 @@ func runBootstrapGitHubApp(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("bootstrap-github-app", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	listen := flags.String("listen", "127.0.0.1:0", "loopback callback address")
-	tenantID := flags.String("tenant", tenant.DefaultID, "registered account this App will serve: "+strings.Join(tenant.IDs(), ", "))
+	tenantConfig := flags.String("tenant-config", tenant.DefaultRegistryPath, "strict private tenant registry")
+	tenantID := flags.String("tenant", "", "tenant id from the private registry; empty selects its declared default")
 	repository := flags.String("repository", "", "override the tenant's managed owner/name repository")
 	ownerType := flags.String("owner-type", githubappbootstrap.OwnerTypeOrganization, "account kind that owns and installs the App: organization or user")
 	organizationRunners := flags.Bool("organization-runners", false, "also request the organization runner permission; required when the App will back an organization entity")
@@ -430,9 +464,14 @@ func runBootstrapGitHubApp(args []string, stdout, stderr io.Writer) int {
 	// An operator names an account; the identity comes from the registry. The
 	// overrides exist so a mismatch can still be expressed and refused, not so
 	// one can be configured.
-	selected, err := tenant.ByID(*tenantID)
+	registry, err := tenant.Load(*tenantConfig)
 	if err != nil {
-		fmt.Fprintf(stderr, "gha-fleet: %v; known tenants: %v\n", err, tenant.IDs())
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	selected, err := registry.ByID(*tenantID)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v; known tenants: %v\n", err, registry.IDs())
 		return 2
 	}
 	if *repository == "" {
@@ -448,6 +487,7 @@ func runBootstrapGitHubApp(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	result, err := (githubappbootstrap.Runner{}).Run(ctx, githubappbootstrap.Options{
+		Registry:            registry,
 		Tenant:              selected.ID,
 		OrganizationRunners: *organizationRunners,
 		ListenAddress:       *listen,
@@ -476,7 +516,8 @@ func runBootstrapGitHubApp(args []string, stdout, stderr io.Writer) int {
 func runVerifyGitHubApp(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("verify-github-app", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	tenantID := flags.String("tenant", tenant.DefaultID, "registered account whose App is being re-verified: "+strings.Join(tenant.IDs(), ", "))
+	tenantConfig := flags.String("tenant-config", tenant.DefaultRegistryPath, "strict private tenant registry")
+	tenantID := flags.String("tenant", "", "tenant id from the private registry; empty selects its declared default")
 	repository := flags.String("repository", "", "override the tenant's managed owner/name repository")
 	ownerType := flags.String("owner-type", githubappbootstrap.OwnerTypeOrganization, "account kind that owns and installs the App: organization or user")
 	organizationRunners := flags.Bool("organization-runners", false, "the App is expected to hold the organization runner permission; required when it backs an organization entity")
@@ -492,11 +533,22 @@ func runVerifyGitHubApp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gha-fleet: verify-github-app requires --key, --output-dir and a timeout in (0,1h]")
 		return 2
 	}
+	registry, err := tenant.Load(*tenantConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	selected, err := registry.ByID(*tenantID)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v; known tenants: %v\n", err, registry.IDs())
+		return 2
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	result, err := (githubappbootstrap.Runner{}).Verify(ctx, githubappbootstrap.VerifyOptions{
-		Tenant:              *tenantID,
+		Registry:            registry,
+		Tenant:              selected.ID,
 		Repository:          *repository,
 		OwnerType:           *ownerType,
 		OrganizationRunners: *organizationRunners,
@@ -1323,5 +1375,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|render|admit|preflight|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|render|admit|preflight|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

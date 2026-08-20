@@ -31,6 +31,7 @@ const maxPrivateKeyBytes = 16 << 10
 // which churns an installation, an anchor and a registry row to fix a stale
 // JSON file.
 type VerifyOptions struct {
+	Registry tenant.Registry
 	// Tenant names the registered account. Identity comes from the registry.
 	Tenant string
 	// Repository, OwnerType and OrganizationRunners are held to the same values
@@ -94,9 +95,9 @@ func validateVerifyOptions(options *VerifyOptions) (tenant.Tenant, error) {
 			"owner type is %q, want %q or %q",
 			options.OwnerType, OwnerTypeOrganization, OwnerTypeUser)
 	}
-	selected, err := tenant.ByID(options.Tenant)
+	selected, registry, err := tenant.Resolve(options.Registry, options.Tenant)
 	if err != nil {
-		return tenant.Tenant{}, fmt.Errorf("%w; known tenants: %v", err, tenant.IDs())
+		return tenant.Tenant{}, fmt.Errorf("%w; known tenants: %v", err, registry.IDs())
 	}
 	// The registry is the identity, exactly as it is for the bootstrap. An
 	// override exists so a mismatch can be expressed and refused, not so one

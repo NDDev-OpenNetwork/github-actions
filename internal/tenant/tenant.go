@@ -13,13 +13,10 @@ import (
 
 // Tenant is one account this fleet may serve.
 //
-// The set is closed and compiled in. Serving a second account widens who can
-// reach these pools, and that widening is the whole security question here, so
-// it is enumerated in source where it shows up in a diff and a review — not
-// read from a file, where an owner is one typo away from pointing the fleet at
-// an account nobody meant to serve. Every identity check in this package
-// compares against the selected tenant and fails closed on anything else,
-// exactly as it did when there was one account and the values were constants.
+// Runtime deployments load a strict reviewed registry. The compiled rows below
+// are synthetic public examples only; operational CLI commands require the
+// private registry path and pass the selected immutable row into their engine.
+// Every identity check compares against that selected tenant and fails closed.
 //
 // One tenant is one GitHub App. The App stays private and owned by the account
 // it serves, so GitHub itself still permits exactly one installation, on that
@@ -29,26 +26,26 @@ import (
 type Tenant struct {
 	// ID selects the tenant on the command line. It is not an identity and is
 	// never compared against anything GitHub or GARM returns.
-	ID string
+	ID string `json:"id" yaml:"id"`
 	// Owner is the account that owns the App, receives its installation, and
 	// backs the organization entity.
-	Owner string
+	Owner string `json:"owner" yaml:"owner"`
 	// Repository is the exact repository the repository entity serves, in
 	// `owner/name` form. It always belongs to Owner.
-	Repository string
+	Repository string `json:"repository" yaml:"repository"`
 	// ManagedRepositories is the closed set that may receive a repository-
 	// scoped Scale Set from this tenant's App credential. Organization-scoped
 	// serving remains available when ServesWholeAccount is true, but an exact
 	// repository entity needs this reviewed identity before GARM mutation.
-	ManagedRepositories []string
+	ManagedRepositories []string `json:"managed_repositories" yaml:"managed_repositories"`
 	// AppSlug is the slug the verified installation metadata must carry.
-	AppSlug string
+	AppSlug string `json:"app_slug" yaml:"app_slug"`
 	// CredentialName is the GARM credential this tenant's entities bind to.
 	// Distinct per tenant so one GARM can hold both without either entity
 	// silently adopting the other's credential.
-	CredentialName string
+	CredentialName string `json:"credential_name" yaml:"credential_name"`
 	// HomepageURL is the exact homepage the App manifest must declare.
-	HomepageURL string
+	HomepageURL string `json:"homepage_url" yaml:"homepage_url"`
 	// ServesWholeAccount widens this tenant's provider boundary from the one
 	// repository above to every repository Owner holds. Set it only for a
 	// tenant whose scale sets hang from an organization entity, because that
@@ -58,7 +55,11 @@ type Tenant struct {
 	// It is declared rather than inferred: the provider is the layer that
 	// does not trust what GARM hands it, so how wide it may be is an
 	// onboarding decision with a review attached, not a runtime observation.
-	ServesWholeAccount bool
+	ServesWholeAccount bool `json:"serves_whole_account" yaml:"serves_whole_account"`
+	// ScaleSetRepositories binds repository-scoped product lanes to one exact
+	// reviewed repository. Public source declares only the class name; private
+	// runtime configuration supplies the production repository identity.
+	ScaleSetRepositories map[string]string `json:"scale_set_repositories,omitempty" yaml:"scale_set_repositories,omitempty"`
 }
 
 // DefaultID is the account the fleet ran on before it could serve more
@@ -66,7 +67,8 @@ type Tenant struct {
 // behaviour that is already deployed.
 const DefaultID = "example"
 
-// : The closed set. Adding a row is a deliberate act with a review attached.
+// tenants is the synthetic public example registry. It cannot name a production
+// account; private deployments load Registry from their estate-owned file.
 var tenants = map[string]Tenant{
 	DefaultID: {
 		ID:             DefaultID,
@@ -83,6 +85,11 @@ var tenants = map[string]Tenant{
 		// reviewed fleet can replace the legacy organization runners for GDS
 		// and the other repositories owned by this account.
 		ServesWholeAccount: true,
+		ScaleSetRepositories: map[string]string{
+			"nddev-almaty-integration": "example-org/example-library",
+			"nddev-almaty-standard":    "example-org/example-library",
+			"nddev-almaty-untrusted":   "example-org/example-library",
+		},
 	},
 	"example-guild": {
 		ID:             "example-guild",
@@ -152,6 +159,7 @@ func IDs() []string {
 	for id := range tenants {
 		ids = append(ids, id)
 	}
+	slices.Sort(ids)
 	return ids
 }
 
@@ -210,10 +218,20 @@ func (t Tenant) Validate() error {
 			return fmt.Errorf("tenant %q managed repository %q is duplicated", t.ID, repository)
 		}
 	}
+	for scaleSet, repository := range t.ScaleSetRepositories {
+		if scaleSet == "" || repository == "" || !slices.Contains(t.ManagedRepositories, repository) {
+			return fmt.Errorf("tenant %q scale set %q has unmanaged repository %q", t.ID, scaleSet, repository)
+		}
+	}
 	if !slices.Contains(t.ManagedRepositories, t.Repository) {
 		return fmt.Errorf("tenant %q primary repository is not managed", t.ID)
 	}
 	return nil
+}
+
+func (t Tenant) RepositoryForScaleSet(name string) (string, bool) {
+	repository, exists := t.ScaleSetRepositories[name]
+	return repository, exists
 }
 
 func repositoryName(repository string) string {
