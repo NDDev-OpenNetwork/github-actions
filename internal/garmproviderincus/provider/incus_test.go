@@ -1003,16 +1003,17 @@ func TestOrganizationBootstrapIsNarrowedThroughQueueIntent(t *testing.T) {
 	require.ErrorContains(t, err, "cannot be narrowed through queue intent")
 }
 
-func TestWholeAccountBootstrapRetainsAccountIdentity(t *testing.T) {
+func TestWholeAccountBootstrapWithoutTrailingSlashIsNarrowed(t *testing.T) {
 	bootstrap := validBootstrap()
 	bootstrap.RepoURL = "https://github.com/example-org"
-	provider := &Incus{}
+	provider := newTestProvider(new(MockIncusServer))
+	provider.admission = repositoryResolvingAdmission{repository: "example-org/example-actions"}
 	resolved, err := provider.narrowBootstrapRepository(context.Background(), bootstrap)
 	require.NoError(t, err)
-	require.Equal(t, bootstrap.RepoURL, resolved.RepoURL)
+	require.Equal(t, "https://github.com/example-org/example-actions", resolved.RepoURL)
 	identity, err := canonicalRepositoryIdentity(resolved.RepoURL)
 	require.NoError(t, err)
-	require.Equal(t, "example-org", identity)
+	require.Equal(t, "example-org/example-actions", identity)
 }
 
 func TestGetCreateInstanceArgsRejectsImageAliasDrift(t *testing.T) {

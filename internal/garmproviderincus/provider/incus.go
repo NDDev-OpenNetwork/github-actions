@@ -1187,12 +1187,18 @@ func canonicalRepositoryIdentity(value string) (string, error) {
 }
 
 func (l *Incus) narrowBootstrapRepository(ctx context.Context, bootstrap commonParams.BootstrapInstance) (commonParams.BootstrapInstance, error) {
-	if l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
+	identity, identityErr := canonicalRepositoryIdentity(bootstrap.RepoURL)
+	if identityErr == nil && strings.Contains(identity, "/") {
+		if !l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
+			return bootstrap, runnerErrors.NewBadRequestError(
+				"repository is outside the configured provider boundary: %q", bootstrap.RepoURL)
+		}
 		return bootstrap, nil
 	}
-	if _, err := canonicalRepositoryIdentity(bootstrap.RepoURL); err == nil {
-		return bootstrap, nil
-	}
+	// An organization entity gives GARM only the account URL. It is an allowed
+	// account but not an executable repository identity; resolve the one exact
+	// repository from the active pre-AcquireJobs intent before any admission,
+	// cache or instance metadata is derived from it.
 	resolver, ok := l.admission.(repositoryResolver)
 	if !ok {
 		return bootstrap, fmt.Errorf("repository resolver is not configured")
@@ -1203,6 +1209,10 @@ func (l *Incus) narrowBootstrapRepository(ctx context.Context, bootstrap commonP
 			"repository %q cannot be narrowed through queue intent: %s", bootstrap.RepoURL, err)
 	}
 	bootstrap.RepoURL = "https://github.com/" + repository
+	if !l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
+		return bootstrap, runnerErrors.NewBadRequestError(
+			"queue intent resolved repository outside the configured provider boundary: %q", repository)
+	}
 	return bootstrap, nil
 }
 
