@@ -37,6 +37,9 @@ Versioning.
 - Cut provider derivative `v0.1.5-nddev.52` from the exact pressure-aware
   source commit with reproducible binary identity, while retaining `.51` as
   the bounded rollout fallback for already executing workers.
+- Disabled implicit Go VCS metadata in provider builds. The explicit stamped
+  source commit remains authoritative, so a standalone checkout and the same
+  commit embedded as a submodule now produce identical bytes.
 
 ## [0.1.1] - 2026-08-16
 
