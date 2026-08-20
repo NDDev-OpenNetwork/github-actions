@@ -792,7 +792,7 @@ func testFiles(t *testing.T, now time.Time) (string, string, string) {
 		OwnerType:           OwnerTypeOrganization,
 		Repository:          testTenant().Repository,
 		RepositorySelection: "selected",
-		Permissions:         map[string]string{"administration": "write", "metadata": "read", OrganizationRunnersPermission: "write"},
+		Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read", OrganizationRunnersPermission: "write"},
 		PrivateKeyPath:      "/old/staging/github-app-private-key.pem",
 		VerifiedAt:          now,
 	})
