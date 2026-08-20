@@ -153,17 +153,17 @@ func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	journalPath := flags.String("journal", "/var/lib/gha-fleet/create-retries.json", "exact GARM provider retry journal")
 	lockPath := flags.String("lock", "/var/lib/gha-fleet/create-retries.lock", "exact GARM provider retry lock")
-	providerPath := flags.String("provider-journal", "/var/lib/gha-fleet/provider-journal.json", "provider execution journal")
-	poolName := flags.String("pool-name", "", "exact provider pool protected by this circuit")
 	key := flags.String("key", "", "exact terminal retry key")
+	entityID := flags.String("entity-id", "", "exact forge entity UUID encoded in the retry key")
+	scaleSetID := flags.Uint("scale-set-id", 0, "exact GARM scale-set database ID encoded in the retry key")
 	errorClass := flags.String("error-class", "", "exact recoverable error class")
 	updatedAtText := flags.String("updated-at", "", "exact RFC3339Nano updated_at precondition")
 	apply := flags.Bool("apply", false, "remove the exact proven terminal circuit")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 0 || *key == "" || *poolName == "" || *errorClass == "" || *updatedAtText == "" {
-		fmt.Fprintln(stderr, "gha-fleet: recover-provider-retry requires --key, --pool-name, --error-class and --updated-at")
+	if flags.NArg() != 0 || *key == "" || *entityID == "" || *scaleSetID == 0 || *errorClass == "" || *updatedAtText == "" {
+		fmt.Fprintln(stderr, "gha-fleet: recover-provider-retry requires --key, --entity-id, --scale-set-id, --error-class and --updated-at")
 		return 2
 	}
 	if os.Geteuid() == 0 {
@@ -185,22 +185,7 @@ func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	providerState, err := (providerjournal.Store{Path: *providerPath}).ReadOnly(ctx)
-	targetOwned := false
-	for _, lease := range providerState.Leases {
-		targetOwned = targetOwned || lease.PoolName == *poolName
-	}
-	for _, claim := range providerState.Claims {
-		targetOwned = targetOwned || claim.PoolName == *poolName
-	}
-	if err != nil || targetOwned {
-		if err == nil {
-			err = fmt.Errorf("provider journal still owns execution state for pool %q", *poolName)
-		}
-		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
-		return 1
-	}
-	result, err := providerretry.RecoverTerminal(ctx, *journalPath, *lockPath, *key, *errorClass, updatedAt, *apply)
+	result, err := providerretry.RecoverTerminal(ctx, *journalPath, *lockPath, *key, *entityID, *scaleSetID, *errorClass, updatedAt, *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
 		return 1
