@@ -66,6 +66,10 @@ Versioning.
   Observer metrics expose both running intents without runner identity and
   created provider leases without a matching running identity, closing the
   previous one-direction-only lifecycle blind spot.
+- Cut provider derivative `v0.1.5-nddev.53` from the same queue-schema-v2
+  source as GARM `.50` and observer v0.8.2. This is a required paired rollout:
+  the previous `.52` strict reader correctly rejects the new journal and must
+  not be mixed with a schema-v2 writer.
 
 ## [0.1.1] - 2026-08-16
 
