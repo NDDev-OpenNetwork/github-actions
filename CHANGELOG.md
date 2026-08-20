@@ -24,6 +24,10 @@ Versioning.
   the synthetic example subnet. Private-unicast TLS cluster endpoints on port
   8443 are accepted; public, link-local and alternate-loopback endpoints remain
   rejected.
+- Cut provider derivative `v0.1.5-nddev.43` after the `.42` read-only probe
+  proved a public synthetic hostname allowlist still made private deployments
+  impossible. Platform identity is now bound to the provider process's exact
+  runtime hostname, with no private host inventory compiled into public code.
 
 ## [0.1.1] - 2026-08-16
 

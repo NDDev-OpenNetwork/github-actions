@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -18,22 +19,7 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 )
 
-// supportedPlatformHosts is the exact set of hosts this provider was built for.
-// The assertion exists so a platform policy written for one host can never be
-// executed against another; widening it to a fleet does not weaken that, it
-// only stops the check from being a single-host accident. Every entry must have
-// a declared configuration under config/, which
-// TestSupportedPlatformHostsMatchDeclaredConfigs enforces in both directions.
-var supportedPlatformHosts = map[string]struct{}{
-	// The queue host. It runs the provider but no workers, which is exactly
-	// why it has to be listed: the assertion is that a policy written for one
-	// host is never executed against another, and the queue host executes one.
-	"example-services": {},
-	"example-runner-1": {},
-	"example-runner-2": {},
-	"example-runner-3": {},
-	"example-runner-4": {},
-}
+var runtimeHostname = os.Hostname
 
 type admissionController interface {
 	Admit(context.Context, InstanceServerInterface, params.BootstrapInstance) (provideradmission.AdmissionResult, error)
@@ -82,8 +68,12 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 	if err != nil {
 		return nil, fmt.Errorf("load platform policy: %w", err)
 	}
-	if _, ok := supportedPlatformHosts[platform.Platform.Host]; !ok {
-		return nil, fmt.Errorf("platform policy targets unexpected host %q", platform.Platform.Host)
+	hostname, err := runtimeHostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		return nil, fmt.Errorf("resolve runtime hostname: %w", err)
+	}
+	if !platformHostMatches(platform.Platform.Host, hostname) {
+		return nil, fmt.Errorf("platform policy targets host %q but provider runs on %q", platform.Platform.Host, hostname)
 	}
 	// Compare the policy against what this binary actually is, not against a
 	// literal. A literal cannot notice that runner-1 and runner-2 were running
@@ -125,6 +115,10 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 		diagnosticsDirectory: cfg.DiagnosticsDirectory,
 		diagnosticsMaxBytes:  cfg.DiagnosticsMaxTotalBytes,
 	}, nil
+}
+
+func platformHostMatches(declared, observed string) bool {
+	return declared != "" && declared == observed
 }
 
 func validateWorkerImageMappings(platform platformconfig.Config, images map[string]providerconfig.WorkerImage) error {

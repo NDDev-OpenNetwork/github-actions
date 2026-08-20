@@ -17,6 +17,7 @@ import (
 // These exercise the constructor directly, because that is the only place the
 // binary's identity meets the policy's.
 func TestAdmissionRefusesAPolicyPinningADifferentProvider(t *testing.T) {
+	useRuntimeHostname(t, "example-runner-1")
 	original := Version
 	t.Cleanup(func() { Version = original })
 
@@ -40,6 +41,7 @@ func TestAdmissionRefusesAPolicyPinningADifferentProvider(t *testing.T) {
 // `go build ./cmd/garm-provider-incus-nddev` produced a binary that would admit
 // a policy pinning it.
 func TestAdmissionRefusesAnUnstampedBuild(t *testing.T) {
+	useRuntimeHostname(t, "example-runner-1")
 	original := Version
 	t.Cleanup(func() { Version = original })
 
@@ -61,6 +63,7 @@ func TestAdmissionRefusesAnUnstampedBuild(t *testing.T) {
 // the identity gate. Without this the two tests above would pass on a check that
 // refuses everything.
 func TestAdmissionAcceptsTheProviderThePolicyPins(t *testing.T) {
+	useRuntimeHostname(t, "example-runner-1")
 	original := Version
 	t.Cleanup(func() { Version = original })
 
@@ -80,4 +83,11 @@ func TestAdmissionAcceptsTheProviderThePolicyPins(t *testing.T) {
 		// Anything else is a later stage of the constructor and not what this
 		// test is about; the identity gate is what had to pass.
 	}
+}
+
+func useRuntimeHostname(t *testing.T, hostname string) {
+	t.Helper()
+	original := runtimeHostname
+	runtimeHostname = func() (string, error) { return hostname, nil }
+	t.Cleanup(func() { runtimeHostname = original })
 }
