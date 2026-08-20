@@ -130,8 +130,8 @@ func TestIncusConfigRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		{"public cluster endpoint", func(c *Incus) {
 			c.URL = ""
 			c.ClusterURLs = []string{"https://10.200.0.5:8443", "https://198.51.100.1:8443"}
-		}, "cluster member inside"},
-		{"public URL", func(c *Incus) { c.URL = "https://198.51.100.1:8443" }, "must be https://127.0.0.1:8443 or a cluster member inside"},
+		}, "private-unicast cluster member"},
+		{"public URL", func(c *Incus) { c.URL = "https://198.51.100.1:8443" }, "private-unicast cluster member"},
 		{"URL query", func(c *Incus) { c.URL = ExpectedIncusURL + "?unsafe=true" }, "must be a bare https endpoint"},
 		{"wrong port", func(c *Incus) { c.URL = "https://10.200.0.9:9443" }, "must use port 8443"},
 		{"missing client key", func(c *Incus) { c.ClientKey = "" }, "client_certificate and client_key are mandatory"},
@@ -263,15 +263,22 @@ instance_type = "virtual-machine"
 // boundary widens to the fleet's private network and stops there.
 func TestIncusConfigAcceptsAClusterMemberInsideThePrivateNetwork(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.URL = "https://10.200.0.9:8443"
-	require.NoError(t, cfg.Validate())
+	for _, inside := range []string{
+		"https://10.200.0.9:8443",
+		"https://10.110.0.5:8443",
+		"https://172.16.20.5:8443",
+		"https://192.168.50.5:8443",
+	} {
+		cfg.URL = inside
+		require.NoError(t, cfg.Validate(), "rejected %s", inside)
+	}
 
 	for _, outside := range []string{
-		"https://10.109.255.255:8443",
-		"https://10.200.16.1:8443",
 		"https://8.8.8.8:8443",
+		"https://169.254.1.1:8443",
+		"https://127.0.0.2:8443",
 	} {
 		cfg.URL = outside
-		require.ErrorContains(t, cfg.Validate(), "cluster member inside", "accepted %s", outside)
+		require.ErrorContains(t, cfg.Validate(), "private-unicast cluster member", "accepted %s", outside)
 	}
 }

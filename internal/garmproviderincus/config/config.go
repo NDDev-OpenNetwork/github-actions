@@ -34,15 +34,6 @@ const (
 	ExpectedProjectName = "gha-fleet"
 )
 
-// fleetPrivateNetwork is the cloud private network every fleet host sits on.
-//
-// A standalone host's Incus is reachable only on loopback, which is the
-// tightest boundary there is. A cluster cannot use it: members reach each
-// other, and the provider reaches the cluster, over the private network. So
-// the boundary widens by exactly one subnet and no further -- an Incus API
-// outside it would accept a client certificate from anywhere on the internet.
-var fleetPrivateNetwork = netip.MustParsePrefix("10.200.0.0/20")
-
 var fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
@@ -457,8 +448,8 @@ func validateIncusEndpoint(host string) error {
 	if address.Port() != 8443 {
 		return fmt.Errorf("must use port 8443")
 	}
-	if !fleetPrivateNetwork.Contains(address.Addr()) {
-		return fmt.Errorf("must be %s or a cluster member inside %s", ExpectedIncusURL, fleetPrivateNetwork)
+	if !address.Addr().IsPrivate() {
+		return fmt.Errorf("must be %s or a private-unicast cluster member", ExpectedIncusURL)
 	}
 	return nil
 }
