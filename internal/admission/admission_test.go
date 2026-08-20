@@ -61,6 +61,23 @@ func TestEvaluatePreservesCPUReserve(t *testing.T) {
 	}
 }
 
+func TestEvaluateTreatsAllocationsAbovePressureEligibleCapacityAsSaturation(t *testing.T) {
+	t.Parallel()
+	snapshot, policy, request := validInputs()
+	snapshot.TotalCPUUnits = 8
+	snapshot.AllocatedCPUUnits = 12
+	snapshot.TotalMemoryMiB = 16 * 1024
+	snapshot.AvailableMemoryMiB = 16 * 1024
+	snapshot.AllocatedMemoryMiB = 20 * 1024
+	decision, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatalf("dynamic capacity contraction became a provider error: %v", err)
+	}
+	if decision.Admitted || decision.Reason != ReasonInsufficientCPU {
+		t.Fatalf("contracted capacity decision = %#v", decision)
+	}
+}
+
 func TestEvaluateUsesAggregateQuotaInsteadOfStrandingIntegerCPUUnits(t *testing.T) {
 	t.Parallel()
 	snapshot, policy, request := validInputs()
@@ -147,11 +164,13 @@ func TestEvaluatePressurePolicyFailsClosed(t *testing.T) {
 		{name: "recent OOM", mutate: func(s *HostSnapshot) { s.PressureAvailable = true; s.RecentOOMKills = 1 }, reason: ReasonRecentOOM},
 		{name: "memory full", mutate: func(s *HostSnapshot) { s.PressureAvailable = true; s.MemoryFullAvg10 = 1.1 }, reason: ReasonMemoryPressure},
 		{name: "CPU some", mutate: func(s *HostSnapshot) { s.PressureAvailable = true; s.CPUSomeAvg10 = 20.1 }, reason: ReasonCPUPressure},
+		{name: "I/O full", mutate: func(s *HostSnapshot) { s.PressureAvailable = true; s.IOFullAvg10 = 5.1 }, reason: ReasonIOPressure},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot, policy, request := validInputs()
 			policy.RequirePressure = true
 			policy.MaxCPUSomeAvg10 = 20
+			policy.MaxIOFullAvg10 = 5
 			policy.MaxMemoryFullAvg10 = 1
 			policy.MaxRecentOOMKills = 0
 			test.mutate(&snapshot)
@@ -174,6 +193,7 @@ func TestEvaluatePressurePolicyAdmitsBelowThresholds(t *testing.T) {
 	snapshot.MemoryFullAvg10 = 0.9
 	policy.RequirePressure = true
 	policy.MaxCPUSomeAvg10 = 20
+	policy.MaxIOFullAvg10 = 5
 	policy.MaxMemoryFullAvg10 = 1
 	decision, err := Evaluate(snapshot, policy, request)
 	if err != nil || !decision.Admitted {

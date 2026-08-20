@@ -6,7 +6,7 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.45
+  manager_version: v0.2.1-nddev.46
   scheduling_mode: scale-set
   provider: incus
   provider_version: v0.1.5-nddev.51
@@ -75,6 +75,19 @@ host_reserve:
   minimum_percent: 10
   maximum_fleet_cpu_percent: 98
   minimum_free_disk_percent: 20
+
+pressure_admission:
+  required: true
+  stale_after_seconds: 90
+  heartbeat_seconds: 30
+  minimum_closed_seconds: 30
+  cpu_some_close: 20
+  cpu_some_reopen: 10
+  memory_full_close: 1
+  memory_full_reopen: 0.1
+  io_full_close: 10
+  io_full_reopen: 5
+  maximum_recent_oom_kills: 0
 
 cache:
   object_store:

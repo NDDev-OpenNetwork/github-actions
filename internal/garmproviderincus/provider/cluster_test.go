@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"testing"
+	"time"
 
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +15,18 @@ func clusterPlatform() platformconfig.Config {
 	var cfg platformconfig.Config
 	cfg.Incus.StoragePool = "gha-lvm"
 	cfg.Incus.ProjectMaxCPUUnits = 6
+	cfg.Pressure = pressuregate.Policy{Required: true, StaleAfterSeconds: 90, HeartbeatSeconds: 30, MinimumClosedSeconds: 30,
+		CPUSomeClose: 20, CPUSomeReopen: 10, MemoryFullClose: 1, MemoryFullReopen: .1,
+		IOFullClose: 10, IOFullReopen: 5, MaximumRecentOOMKills: 0}
 	return cfg
+}
+
+var clusterNow = time.Now().UTC()
+
+func pressureMember(name, status, state string) api.ClusterMember {
+	sample := pressuregate.Sample{ObservedAt: clusterNow, CPUSomeAvg10: 1}
+	gate := pressuregate.State{SchemaVersion: 1, State: state, Reason: "healthy", StateSince: clusterNow, ObservedAt: clusterNow}
+	return api.ClusterMember{ClusterMemberPut: api.ClusterMemberPut{Config: pressuregate.Metadata(gate, sample)}, ServerName: name, Status: status}
 }
 
 func testPool() platformconfig.Pool {
@@ -51,14 +64,15 @@ func TestFleetHostStateSumsOnlineClusterMembers(t *testing.T) {
 	cli := &MockIncusServer{}
 	cli.On("GetServer").Return(clusteredServer(), "", nil)
 	cli.On("GetClusterMembers").Return([]api.ClusterMember{
-		{ServerName: "gha-runner-3", Status: "Online"},
-		{ServerName: "gha-runner-4", Status: "Online"},
-		{ServerName: "gha-runner-2", Status: "Offline"},
+		pressureMember("example-runner-3", "Online", pressuregate.StateOpen),
+		pressureMember("example-runner-4", "Online", pressuregate.StateOpen),
+		pressureMember("example-runner-2", "Offline", pressuregate.StateOpen),
 	}, nil)
-	cli.On("GetClusterMemberState", "gha-runner-3").Return(memberState(16, 10, 1, 200, 100), "", nil)
-	cli.On("GetClusterMemberState", "gha-runner-4").Return(memberState(16, 12, 0, 200, 20), "", nil)
+	cli.On("GetClusterMemberState", "example-runner-3").Return(memberState(16, 10, 1, 200, 100), "", nil)
+	cli.On("GetClusterMemberState", "example-runner-4").Return(memberState(16, 12, 0, 200, 20), "", nil)
 
-	state, err := fleetHostState(context.Background(), cli, clusterPlatform(), testPool())
+	platform := clusterPlatform()
+	state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
 	require.NoError(t, err)
 
 	// Two online members at six schedulable CPU units each.
@@ -75,7 +89,7 @@ func TestFleetHostStateSumsOnlineClusterMembers(t *testing.T) {
 	// dedicated queue host every KVM check would fail and close admission for
 	// a fleet that is healthy.
 	require.True(t, state.Healthy)
-	cli.AssertNotCalled(t, "GetClusterMemberState", "gha-runner-2")
+	cli.AssertNotCalled(t, "GetClusterMemberState", "example-runner-2")
 }
 
 // A cluster with nothing online must refuse rather than report a fleet of zero
@@ -85,10 +99,11 @@ func TestFleetHostStateRefusesWhenEveryMemberIsOffline(t *testing.T) {
 	cli := &MockIncusServer{}
 	cli.On("GetServer").Return(clusteredServer(), "", nil)
 	cli.On("GetClusterMembers").Return([]api.ClusterMember{
-		{ServerName: "gha-runner-3", Status: "Offline"},
+		pressureMember("example-runner-3", "Offline", pressuregate.StateOpen),
 	}, nil)
 
-	_, err := fleetHostState(context.Background(), cli, clusterPlatform(), testPool())
+	platform := clusterPlatform()
+	_, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
 	require.ErrorContains(t, err, "no Incus cluster member is online")
 }
 
@@ -101,10 +116,58 @@ func TestFleetHostStateTreatsAnUnreportedPoolAsFull(t *testing.T) {
 
 	cli := &MockIncusServer{}
 	cli.On("GetServer").Return(clusteredServer(), "", nil)
-	cli.On("GetClusterMembers").Return([]api.ClusterMember{{ServerName: "gha-runner-3", Status: "Online"}}, nil)
-	cli.On("GetClusterMemberState", "gha-runner-3").Return(blank, "", nil)
+	cli.On("GetClusterMembers").Return([]api.ClusterMember{pressureMember("example-runner-3", "Online", pressuregate.StateOpen)}, nil)
+	cli.On("GetClusterMemberState", "example-runner-3").Return(blank, "", nil)
 
-	state, err := fleetHostState(context.Background(), cli, clusterPlatform(), testPool())
+	platform := clusterPlatform()
+	state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
 	require.NoError(t, err)
 	require.Equal(t, 0, state.FreeDiskPercent)
+}
+
+func TestFleetHostStateExcludesClosedMemberAndFailsClosedOnStaleMetadata(t *testing.T) {
+	platform := clusterPlatform()
+	for name, members := range map[string][]api.ClusterMember{
+		"closed member": {
+			pressureMember("example-runner-3", "Online", pressuregate.StateOpen),
+			pressureMember("example-runner-4", "Online", pressuregate.StateClosed),
+		},
+		"stale member": {
+			pressureMember("example-runner-3", "Online", pressuregate.StateOpen),
+			{ClusterMemberPut: api.ClusterMemberPut{Config: pressuregate.Metadata(
+				pressuregate.State{SchemaVersion: 1, State: pressuregate.StateOpen, StateSince: clusterNow.Add(-time.Minute)},
+				pressuregate.Sample{ObservedAt: clusterNow.Add(-time.Minute)},
+			)}, ServerName: "example-runner-4", Status: "Online"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cli := &MockIncusServer{}
+			cli.On("GetServer").Return(clusteredServer(), "", nil)
+			cli.On("GetClusterMembers").Return(members, nil)
+			cli.On("GetClusterMemberState", "example-runner-3").Return(memberState(16, 10, 0, 200, 20), "", nil)
+			cli.On("GetClusterMemberState", "example-runner-4").Return(memberState(16, 10, 0, 200, 20), "", nil)
+			state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
+			require.NoError(t, err)
+			if name == "closed member" {
+				require.True(t, state.Healthy)
+				require.Equal(t, 6, state.TotalCPUUnits)
+			} else {
+				require.False(t, state.Healthy)
+				require.False(t, state.PressureAvailable)
+			}
+		})
+	}
+}
+
+func TestFleetHostStateAllowsTwoPhaseUpgradeBeforePressurePolicyIsEnabled(t *testing.T) {
+	platform := clusterPlatform()
+	platform.Pressure = pressuregate.Policy{}
+	cli := &MockIncusServer{}
+	cli.On("GetServer").Return(clusteredServer(), "", nil)
+	cli.On("GetClusterMembers").Return([]api.ClusterMember{{ServerName: "example-runner-3", Status: "Online"}}, nil)
+	cli.On("GetClusterMemberState", "example-runner-3").Return(memberState(16, 10, 0, 200, 20), "", nil)
+	state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
+	require.NoError(t, err)
+	require.True(t, state.Healthy)
+	require.Equal(t, 6, state.TotalCPUUnits)
 }

@@ -70,6 +70,9 @@ func ValidateConfig(contract Contract, platform platformconfig.Config) error {
 		platform.Guardrails.EmergencySwapSchedulable != contract.ResourceSemantics.EmergencySwapSchedulable {
 		return fmt.Errorf("resource semantics differ from fleet contract v%d", contract.ContractVersion)
 	}
+	if !platform.Pressure.Required || !contract.ResourceSemantics.AdmissionHysteresisRequired {
+		return fmt.Errorf("pressure admission semantics differ from fleet contract v%d", contract.ContractVersion)
+	}
 	for _, class := range contract.RunnerClasses {
 		pool, exists := platform.Pool(class.Label)
 		if !exists {
