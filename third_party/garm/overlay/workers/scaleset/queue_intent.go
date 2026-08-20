@@ -426,8 +426,10 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		return false, fmt.Errorf("queue admission requires a scale set that admits at least one runner, got max_runners=%d", scaleSet.MaxRunners)
 	}
 	var orphanedStarts []string
+	var reservationTransfers [][2]string
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		orphanedStarts = orphanedStarts[:0]
+		reservationTransfers = reservationTransfers[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
 		for _, job := range completed {
@@ -460,6 +462,16 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			// assert: a scale set may be recreated at any time, and this
 			// journal is not the authority on what GitHub has already started.
 			if !exists || queueStateRank(intent.State) < queueStateRank(queueStateAssigned) {
+				fromJobID, transferred, transferErr := transferAssignedReservation(
+					journal, config, scaleSet, entity, job, now,
+				)
+				if transferErr != nil {
+					return transferErr
+				}
+				if transferred {
+					reservationTransfers = append(reservationTransfers, [2]string{fromJobID, job.JobID})
+					continue
+				}
 				orphanedStarts = append(orphanedStarts, key)
 				continue
 			}
@@ -504,6 +516,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		admitQueuedToBudget(journal, config, now)
 		return nil
 	})
+	for _, transfer := range reservationTransfers {
+		slog.Info(
+			"transferred same-scale-set capacity reservation to started job",
+			"from_job_id", transfer[0], "to_job_id", transfer[1],
+			"scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
+		)
+	}
 	for _, key := range orphanedStarts {
 		slog.Warn(
 			"started job has no admitted queue intent; acknowledging anyway",
@@ -514,6 +533,49 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	// Retaining JobAssigned at GitHub only causes head-of-line redelivery and
 	// prevents later JobCompleted messages from reaching this listener.
 	return false, err
+}
+
+func transferAssignedReservation(
+	journal *queueIntentJournal,
+	config queueAdmissionConfig,
+	scaleSet params.ScaleSet,
+	entity params.ForgeEntity,
+	started params.ScaleSetJobMessage,
+	now time.Time,
+) (string, bool, error) {
+	candidates := make([]queueIntent, 0)
+	for _, candidate := range journal.Intents {
+		if candidate.State != queueStateAssigned || candidate.ScaleSetID != int64(scaleSet.ScaleSetID) ||
+			candidate.ScaleSetName != scaleSet.Name || candidate.Owner != entity.Owner || candidate.JobID == started.JobID {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return "", false, nil
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		if !candidates[left].UpdatedAt.Equal(candidates[right].UpdatedAt) {
+			return candidates[left].UpdatedAt.Before(candidates[right].UpdatedAt)
+		}
+		return candidates[left].Key < candidates[right].Key
+	})
+	replacement, err := queueIntentFromLifecycle(
+		scaleSet, entity, started, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
+	)
+	if err != nil {
+		return "", false, err
+	}
+	reservation := candidates[0]
+	delete(journal.Intents, reservation.Key)
+	replacement.QueueTime = reservation.QueueTime
+	replacement.Priority = reservation.Priority
+	replacement.State = queueStateRunning
+	replacement.UpdatedAt = now
+	replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
+	journal.Intents[replacement.Key] = replacement
+	ensureRepositoryState(journal, config, replacement.Repository)
+	return reservation.JobID, true, nil
 }
 
 func admitQueuedToBudget(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {

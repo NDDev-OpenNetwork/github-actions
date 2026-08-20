@@ -1,0 +1,62 @@
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -22,6 +22,7 @@ import (
+ 	"math"
+ 	"math/big"
+ 	"net/http"
++	"sort"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+@@ -1957,6 +1958,17 @@ func (r *basePoolManager) DeleteRunner(runner params.Instance, forceRemove, bypa
+ 	return nil
+ }
+ 
++func oldestQueuedJobs(jobs []params.Job) []params.Job {
++	ordered := append([]params.Job(nil), jobs...)
++	sort.SliceStable(ordered, func(left, right int) bool {
++		if ordered[left].CreatedAt.Equal(ordered[right].CreatedAt) {
++			return ordered[left].ID < ordered[right].ID
++		}
++		return ordered[left].CreatedAt.Before(ordered[right].CreatedAt)
++	})
++	return ordered
++}
++
+ // reconcileStaleJobs checks queued jobs older than 30 seconds against the GitHub API to determine
+ // if they are still valid. Jobs that are no longer queued on GitHub (404 or completed/in_progress)
+ // are deleted from the database. This handles cases where GARM missed a webhook update
+@@ -1968,6 +1982,7 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 		return fmt.Errorf("error listing queued jobs: %w", err)
+ 	}
+ 
++	queued = oldestQueuedJobs(queued)
+ 	checked := 0
+ 	for _, job := range queued {
+ 		if checked >= 10 {
+diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
+--- a/runner/pool/pool_test.go
++++ b/runner/pool/pool_test.go
+@@ -794,5 +794,21 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
+ 	}
+ }
+ 
++func (s *PoolStressTestSuite) TestOldestQueuedJobsMakesTheBoundedBatchFair() {
++	now := time.Now().UTC()
++	jobs := []params.Job{
++		{ID: 30, CreatedAt: now.Add(-time.Minute)},
++		{ID: 10, CreatedAt: now.Add(-time.Hour)},
++		{ID: 20, CreatedAt: now.Add(-time.Hour)},
++	}
++	ordered := oldestQueuedJobs(jobs)
++	s.Require().Len(ordered, 3)
++	s.Equal(int64(10), ordered[0].ID)
++	s.Equal(int64(20), ordered[1].ID)
++	s.Equal(int64(30), ordered[2].ID)
++	// The store-owned input must not be reordered as a side effect.
++	s.Equal(int64(30), jobs[0].ID)
++}
++
+ func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
+ 	reconciledJobID := ""

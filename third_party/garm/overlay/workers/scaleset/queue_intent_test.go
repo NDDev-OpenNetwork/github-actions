@@ -544,6 +544,47 @@ func TestQueueCoordinatorAcknowledgesAStartedJobWithNoIntent(t *testing.T) {
 	}
 }
 
+func TestQueueCoordinatorTransfersAssignedCapacityToTheJobGitHubActuallyStarted(t *testing.T) {
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	reserved := testQueueJob(101, "example-org", "reserved", now.Add(-time.Minute))
+	reserved.MessageType = params.MessageTypeJobAssigned
+	reserved.RunnerRequestID = 0
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(reserved), []params.ScaleSetJobMessage{reserved}, nil, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := before.Intents[queueIntentKey(11, reserved.JobID)]
+
+	started := testQueueJob(202, "example-org", "actual", now)
+	started.MessageType = params.MessageTypeJobStarted
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(started), nil, []params.ScaleSetJobMessage{started}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(11, reserved.JobID)]; exists {
+		t.Fatal("the substituted job kept a second capacity token")
+	}
+	actual, exists := journal.Intents[queueIntentKey(11, started.JobID)]
+	if !exists || actual.State != queueStateRunning || actual.QueueTime != reservation.QueueTime {
+		t.Fatalf("capacity reservation was not transferred: %#v", actual)
+	}
+	if total, _ := queueInFlight(&journal); total != 1 {
+		t.Fatalf("reservation transfer changed in-flight width: %d", total)
+	}
+}
+
 func TestQueueCoordinatorDoesNotRecreateAnOrphanStartedIntentFromSameBatch(t *testing.T) {
 	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)

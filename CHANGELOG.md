@@ -40,6 +40,10 @@ Versioning.
 - Disabled implicit Go VCS metadata in provider builds. The explicit stamped
   source commit remains authoritative, so a standalone checkout and the same
   commit embedded as a submodule now produce identical bytes.
+- Added GARM derivative `v0.2.1-nddev.47`: stale workflow-job reconciliation
+  takes the oldest rows first, and GitHub job substitution atomically transfers
+  an already-admitted same-scale-set capacity token to the job that actually
+  started instead of losing exact lifecycle correlation.
 
 ## [0.1.1] - 2026-08-16
 

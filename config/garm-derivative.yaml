@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.46
+derivative_version: v0.2.1-nddev.47
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -58,12 +58,15 @@ patches:
   - path: third_party/garm/patches/0017-authoritative-queue-intent-reconciliation.patch
     sha256: fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad
     purpose: Release one exact queue intent before deleting a GitHub-authoritatively stale scale-set DB job, retaining both state surfaces when identity is ambiguous or journal reconciliation fails.
+  - path: third_party/garm/patches/0018-oldest-first-stale-job-reconciliation.patch
+    sha256: 7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2
+    purpose: Sort stale workflow-job reconciliation oldest-first before the bounded API batch so continuous new work cannot starve cancelled rows indefinitely.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 7d8e5e06331cb9e3b93c5947d0eff6409eedd6072f20deeb997133fbb5ae9cdd
+    sha256: 3456b598d57b970a7681f594d617d8910cf142835d810a3675e3a6acd08e5b28
     purpose: Fsync-backed central queue admission where sparse JobAssigned owns a short provisional token to bootstrap an empty scale set, JobAvailable binds complete AcquireJobs identity, pre-execution states have phase TTLs, and priority aging, repository quotas, weighted stride scheduling and completion-driven promotion remain durable without message redelivery.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: a668ae793b7605a2097949605732117e918c3fab034e9582ec4d5dc69e8a4083
+    sha256: 0ffa39e4ff239ee830279c3427ab57523e89daf154949e81aa353355ac10e7d9
     purpose: Deterministic provisional bootstrap, one-time legacy migration, phase expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 2ac19df649b166a1ea987bb491200baae5fcc846446ff9faef402972c2b43b27
@@ -85,7 +88,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: cc3af5b871cecb26615c3b1ea016809c4596d502f0c1185957da076c44cc2e6d
+  binary_sha256: 7e2b46e26a52818e39753cc8980494d553f16911597ddde087100f6826664c3f
 runtime_contract:
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
