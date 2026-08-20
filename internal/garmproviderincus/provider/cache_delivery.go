@@ -135,6 +135,12 @@ func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance
 	}
 	repository, err := canonicalRepositoryIdentity(bootstrap.RepoURL)
 	if err != nil {
+		if l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
+			// Organization JobAssigned is account-only until a runner exists.
+			// Creating a credential-free worker is safe inside the reviewed account
+			// boundary; guessing which repository cache to grant is not.
+			return role, false, nil
+		}
 		return role, false, fmt.Errorf("derive cache repository identity: %w", err)
 	}
 	// The current RustFS credentials are scoped to one exact repository. Do not
