@@ -37,7 +37,7 @@ runtime:
 
 build:
   source_commit: 742eb72c584c2846cf8ac657218d2e98504c209a
-  binary_sha256: 4a15261d96321329f89f171e37af7416b12b17d39fc0e30eae204caeb347fd44
+  binary_sha256: e52db9f113f809dd1fe9ccc4c74f68460a7bda03894314b9009860e8d5281e08
   go_version: go1.26.6
   cgo_enabled: false
   target_os: linux
