@@ -163,6 +163,16 @@ func TestIncusConfigRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 			image.Fingerprint = "A" + testFingerprint[1:]
 			c.WorkerImages["nddev-linux-standard"] = image
 		}, "fingerprint must be a lowercase SHA-256 digest"},
+		{"invalid previous fingerprint", func(c *Incus) {
+			image := c.WorkerImages["nddev-linux-standard"]
+			image.PreviousFingerprint = "invalid"
+			c.WorkerImages["nddev-linux-standard"] = image
+		}, "previous_fingerprint must be a lowercase SHA-256 digest"},
+		{"previous fingerprint equals current", func(c *Incus) {
+			image := c.WorkerImages["nddev-linux-standard"]
+			image.PreviousFingerprint = image.Fingerprint
+			c.WorkerImages["nddev-linux-standard"] = image
+		}, "previous_fingerprint must differ"},
 		{"unknown image variant", func(c *Incus) {
 			image := c.WorkerImages["nddev-linux-standard"]
 			image.Variant = "dockerish"

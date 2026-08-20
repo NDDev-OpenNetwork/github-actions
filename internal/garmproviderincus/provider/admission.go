@@ -340,6 +340,17 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 		if lifecycle != lifecycleEphemeralOneJob && lifecycle != lifecycleWarmPreparing && lifecycle != lifecycleWarmUnregistered {
 			return nil, fmt.Errorf("instance %q has unsupported lifecycle %q", instance.Name, lifecycle)
 		}
+		actualFingerprint := instance.ExpandedConfig[imageFingerprintKey]
+		fingerprintAllowed := actualFingerprint == imagePolicy.Fingerprint
+		if lifecycle == lifecycleEphemeralOneJob {
+			fingerprintAllowed = imagePolicy.AllowsExistingFingerprint(actualFingerprint)
+		}
+		if !fingerprintAllowed {
+			return nil, fmt.Errorf(
+				"instance %q has %s=%q, expected exact current fingerprint for lifecycle %q or declared N-1 for an executing one-job worker",
+				instance.Name, imageFingerprintKey, actualFingerprint, lifecycle,
+			)
+		}
 		if lifecycle == lifecycleEphemeralOneJob && !n.cfg.AllowsProviderIdentity(
 			instance.ExpandedConfig[providerVersionKey], instance.ExpandedConfig[providerCommitKey], Version, Commit,
 		) {
@@ -354,11 +365,10 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 		}{
 			{controllerIDKeyName, n.controllerID},
 			{imageAliasKey, imagePolicy.Alias},
-			{imageFingerprintKey, imagePolicy.Fingerprint},
 			{osTypeKeyName, string(params.Linux)},
 			{osArchKeyNAme, string(params.Amd64)},
 		}
-		checks = append(checks, securityChecks[2:]...)
+		checks = append(checks, securityChecks[1:]...)
 		for _, check := range checks {
 			if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
 				return nil, fmt.Errorf(

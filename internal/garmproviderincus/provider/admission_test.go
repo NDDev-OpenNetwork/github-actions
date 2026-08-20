@@ -90,6 +90,33 @@ func TestObservedAllocationsRequireCompleteSecurityPolicy(t *testing.T) {
 	}, allocations)
 }
 
+func TestObservedAllocationsAcceptNMinusOneOnlyForExecutingWorker(t *testing.T) {
+	t.Parallel()
+	previous := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	admission := testNDDevAdmission()
+	image := admission.workerImages["nddev-linux-standard"]
+	image.PreviousFingerprint = previous
+	admission.workerImages["nddev-linux-standard"] = image
+
+	instance := *ownedInstance("runner-previous")
+	instance.ExpandedConfig[imageFingerprintKey] = previous
+	cli := new(MockIncusServer)
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
+	allocations, err := admission.observedAllocations(context.Background(), cli)
+	require.NoError(t, err)
+	require.Equal(t, previous, allocations[0].ImageFingerprint)
+
+	instance.ExpandedConfig[lifecycleKey] = lifecycleWarmUnregistered
+	instance.ExpandedConfig[warmReadyKey] = "true"
+	instance.ExpandedConfig[poolIDKey] = warmPoolIDPrefix + "nddev-linux-standard"
+	instance.ExpandedConfig[repositoryKey] = ""
+	instance.ExpandedConfig[garmJobNameKey] = ""
+	cli = new(MockIncusServer)
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
+	_, err = admission.observedAllocations(context.Background(), cli)
+	require.ErrorContains(t, err, "exact current fingerprint")
+}
+
 func TestObservedAllocationsUseDurableLeaseForIncompleteIncusTransition(t *testing.T) {
 	t.Parallel()
 	admission := testNDDevAdmission()

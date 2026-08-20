@@ -63,12 +63,20 @@ type IncusImageRemote struct {
 // WorkerImage pins one local Incus alias to one immutable image fingerprint.
 // The containing map is keyed by the exact GARM flavor / platform pool name.
 type WorkerImage struct {
-	Alias        string         `toml:"alias" json:"alias"`
-	Fingerprint  string         `toml:"fingerprint" json:"fingerprint"`
-	Variant      string         `toml:"variant" json:"variant"`
-	InstanceType IncusImageType `toml:"instance_type" json:"instance_type"`
-	RunnerUID    int64          `toml:"runner_uid" json:"runner_uid"`
-	RunnerGID    int64          `toml:"runner_gid" json:"runner_gid"`
+	Alias               string         `toml:"alias" json:"alias"`
+	Fingerprint         string         `toml:"fingerprint" json:"fingerprint"`
+	PreviousFingerprint string         `toml:"previous_fingerprint" json:"previous_fingerprint,omitempty"`
+	Variant             string         `toml:"variant" json:"variant"`
+	InstanceType        IncusImageType `toml:"instance_type" json:"instance_type"`
+	RunnerUID           int64          `toml:"runner_uid" json:"runner_uid"`
+	RunnerGID           int64          `toml:"runner_gid" json:"runner_gid"`
+}
+
+// AllowsExistingFingerprint permits exactly current or N-1 for an already
+// running one-job worker. Callers creating or claiming capacity must continue
+// to use Fingerprint directly so an old image can never receive new work.
+func (w WorkerImage) AllowsExistingFingerprint(actual string) bool {
+	return actual == w.Fingerprint || (w.PreviousFingerprint != "" && actual == w.PreviousFingerprint)
 }
 
 // ProviderIdentity is one immediately previous release that may finish and be
@@ -332,6 +340,14 @@ func (l *Incus) Validate() error {
 		}
 		if !fingerprintPattern.MatchString(image.Fingerprint) {
 			return fmt.Errorf("worker_images.%s.fingerprint must be a lowercase SHA-256 digest", flavor)
+		}
+		if image.PreviousFingerprint != "" {
+			if !fingerprintPattern.MatchString(image.PreviousFingerprint) {
+				return fmt.Errorf("worker_images.%s.previous_fingerprint must be a lowercase SHA-256 digest", flavor)
+			}
+			if image.PreviousFingerprint == image.Fingerprint {
+				return fmt.Errorf("worker_images.%s.previous_fingerprint must differ from current fingerprint", flavor)
+			}
 		}
 		if image.Variant != "standard" && image.Variant != "integration" {
 			return fmt.Errorf("worker_images.%s.variant must be standard or integration", flavor)
