@@ -17,6 +17,9 @@ runtime evidence belong in the consuming private estate.
 - Each worker executes one job and is destroyed.
 - Diagnostic data is retained locally until remote size, digest and schema are
   confirmed.
+- Host-local CPU, memory and I/O PSI is converted into a hysteretic, expiring
+  Incus member signal; missing, stale or closed signals remove capacity rather
+  than becoming provider failures or hidden overcommit.
 - Public repository CI runs only on standard GitHub-hosted runners.
 - Configuration examples use documentation identities and address ranges.
 

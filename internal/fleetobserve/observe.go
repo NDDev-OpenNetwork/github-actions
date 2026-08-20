@@ -42,6 +42,7 @@ var computeHostServices = []string{
 	"gha-rustfs",
 	"gha-warm-pool.timer",
 	"gha-zot",
+	"gha-pressure-gate.timer",
 	"gha-diagnostic-exporter.service",
 	"gha-diagnostic-exporter.timer",
 	"otelcol-fleet",

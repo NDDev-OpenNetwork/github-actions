@@ -28,6 +28,12 @@ Versioning.
   proved a public synthetic hostname allowlist still made private deployments
   impossible. Platform identity is now bound to the provider process's exact
   runtime hostname, with no private host inventory compiled into public code.
+- Added typed CPU, memory and I/O PSI admission with bounded staleness,
+  hysteresis and OOM-delta handling. A host publisher updates only its Incus
+  member metadata, clustered admission excludes closed members, and every
+  pressure/capacity refusal stays in the retry backpressure class.
+- Cut GARM derivative `v0.2.1-nddev.46` so I/O pressure and host-unhealthy
+  refusals cannot consume terminal provider circuit attempts.
 
 ## [0.1.1] - 2026-08-16
 

@@ -35,6 +35,8 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/pressurepublish"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
@@ -42,6 +44,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetrymanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/zotcredentials"
+	incusclient "github.com/lxc/incus/v7/client"
 )
 
 var (
@@ -68,6 +71,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAdmit(args[1:], stdout, stderr)
 	case "preflight":
 		return runPreflight(args[1:], stdout, stderr)
+	case "publish-pressure":
+		return runPublishPressure(args[1:], stdout, stderr)
 	case "reconcile-incus":
 		return runReconcileIncus(args[1:], stdout, stderr)
 	case "reconcile-image":
@@ -1010,6 +1015,74 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runPublishPressure(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("publish-pressure", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "", "exact platform configuration path")
+	statePath := flags.String("state-path", "/var/lib/gha-fleet/pressure-gate.json", "private pressure gate state")
+	incusSocket := flags.String("incus-socket", "/var/lib/incus/unix.socket", "local Incus unix socket")
+	forceClose := flags.String("force-close-reason", "", "publish a fail-closed state without reading PSI")
+	apply := flags.Bool("apply", false, "publish member metadata and persist hysteresis state")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: publish-pressure requires --config and no positional arguments")
+		return 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if !cfg.Incus.Cluster.Enabled || cfg.Incus.Cluster.MemberName == "" {
+		fmt.Fprintln(stderr, "gha-fleet: publish-pressure requires an Incus cluster member config")
+		return 1
+	}
+	if !cfg.Pressure.Required {
+		fmt.Fprintln(stderr, "gha-fleet: publish-pressure requires an enabled pressure_admission policy")
+		return 1
+	}
+	hostname, err := os.Hostname()
+	if err != nil || hostname != cfg.Platform.Host || hostname != cfg.Incus.Cluster.MemberName {
+		fmt.Fprintf(stderr, "gha-fleet: pressure publisher host %q differs from platform/member %q/%q\n", hostname, cfg.Platform.Host, cfg.Incus.Cluster.MemberName)
+		return 1
+	}
+	now := time.Now().UTC()
+	sample := pressuregate.Sample{ObservedAt: now}
+	if *forceClose == "" {
+		host, collectErr := hostprobe.Collect(context.Background())
+		if collectErr != nil {
+			fmt.Fprintf(stderr, "gha-fleet: collect pressure: %v\n", collectErr)
+			return 1
+		}
+		if !host.Pressure.Available {
+			fmt.Fprintln(stderr, "gha-fleet: Linux PSI is unavailable")
+			return 1
+		}
+		sample.CPUSomeAvg10 = host.Pressure.CPU.Some.Avg10
+		sample.MemoryFullAvg10 = host.Pressure.Memory.Full.Avg10
+		sample.IOFullAvg10 = host.Pressure.IO.Full.Avg10
+		sample.OOMKillsTotal = host.Memory.OOMKillsTotal
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client, err := incusclient.ConnectIncusUnixWithContext(ctx, *incusSocket, &incusclient.ConnectionArgs{})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: connect Incus: %v\n", err)
+		return 1
+	}
+	result, err := pressurepublish.Reconcile(ctx, client, pressurepublish.Options{
+		MemberName: cfg.Incus.Cluster.MemberName, StatePath: *statePath, Policy: cfg.Pressure,
+		Sample: sample, Apply: *apply, Now: now, ForceCloseReason: *forceClose,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: publish pressure: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, result)
+}
+
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -1375,5 +1448,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|render|admit|preflight|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

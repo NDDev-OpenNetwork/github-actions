@@ -2,19 +2,22 @@ package config
 
 import "github.com/NDDev-OpenNetwork/github-actions/internal/tenant"
 
+import "github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
+
 // Config is the versioned, portable policy consumed by the control plane.
 // Secret values are intentionally absent: only environment-variable locators
 // may appear in repository configuration.
 type Config struct {
-	SchemaVersion int          `json:"schema_version" yaml:"schema_version"`
-	Platform      Platform     `json:"platform" yaml:"platform"`
-	ControlPlane  ControlPlane `json:"control_plane" yaml:"control_plane"`
-	Incus         Incus        `json:"incus" yaml:"incus"`
-	Guardrails    Guardrails   `json:"guardrails" yaml:"guardrails"`
-	HostReserve   HostReserve  `json:"host_reserve" yaml:"host_reserve"`
-	Cache         Cache        `json:"cache" yaml:"cache"`
-	Backends      []Backend    `json:"backends" yaml:"backends"`
-	Pools         []Pool       `json:"pools" yaml:"pools"`
+	SchemaVersion int                 `json:"schema_version" yaml:"schema_version"`
+	Platform      Platform            `json:"platform" yaml:"platform"`
+	ControlPlane  ControlPlane        `json:"control_plane" yaml:"control_plane"`
+	Incus         Incus               `json:"incus" yaml:"incus"`
+	Guardrails    Guardrails          `json:"guardrails" yaml:"guardrails"`
+	HostReserve   HostReserve         `json:"host_reserve" yaml:"host_reserve"`
+	Pressure      pressuregate.Policy `json:"pressure_admission" yaml:"pressure_admission"`
+	Cache         Cache               `json:"cache" yaml:"cache"`
+	Backends      []Backend           `json:"backends" yaml:"backends"`
+	Pools         []Pool              `json:"pools" yaml:"pools"`
 }
 
 // Backend is one independently operated execution implementation. Platform and

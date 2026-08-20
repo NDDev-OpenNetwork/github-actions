@@ -75,6 +75,7 @@ func TestDeploymentOverlayCannotWeakenContract(t *testing.T) {
 		"provider version drift": func(candidate *config.Config) { candidate.ControlPlane.ProviderVersion = "v0.1.5-nddev.40" },
 		"vm worker":              func(candidate *config.Config) { candidate.ControlPlane.WorkerKind = "incus-vm" },
 		"schedulable swap":       func(candidate *config.Config) { candidate.Guardrails.EmergencySwapSchedulable = true },
+		"pressure disabled":      func(candidate *config.Config) { candidate.Pressure.Required = false },
 		"resource drift":         func(candidate *config.Config) { candidate.Pools[0].Resources.MemoryMiB++ },
 	} {
 		t.Run(name, func(t *testing.T) {

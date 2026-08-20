@@ -15,6 +15,7 @@ const (
 	ReasonPressureUnavailable Reason = "pressure-unavailable"
 	ReasonCPUPressure         Reason = "cpu-pressure"
 	ReasonMemoryPressure      Reason = "memory-pressure"
+	ReasonIOPressure          Reason = "io-pressure"
 	ReasonRecentOOM           Reason = "recent-oom"
 	ReasonDiagnosticWAL       Reason = "storage-high-watermark"
 )
@@ -30,6 +31,7 @@ type HostSnapshot struct {
 	PressureAvailable  bool    `json:"pressure_available" yaml:"pressure_available"`
 	CPUSomeAvg10       float64 `json:"cpu_some_avg10" yaml:"cpu_some_avg10"`
 	MemoryFullAvg10    float64 `json:"memory_full_avg10" yaml:"memory_full_avg10"`
+	IOFullAvg10        float64 `json:"io_full_avg10" yaml:"io_full_avg10"`
 	RecentOOMKills     int     `json:"recent_oom_kills" yaml:"recent_oom_kills"`
 }
 
@@ -45,6 +47,7 @@ type ReservePolicy struct {
 	RequirePressure        bool
 	MaxCPUSomeAvg10        float64
 	MaxMemoryFullAvg10     float64
+	MaxIOFullAvg10         float64
 	MaxRecentOOMKills      int
 }
 
@@ -104,6 +107,8 @@ func Evaluate(snapshot HostSnapshot, policy ReservePolicy, request Request) (Dec
 		decision.Reason = ReasonMemoryPressure
 	case policy.RequirePressure && snapshot.PressureAvailable && snapshot.CPUSomeAvg10 > policy.MaxCPUSomeAvg10:
 		decision.Reason = ReasonCPUPressure
+	case policy.RequirePressure && snapshot.PressureAvailable && snapshot.IOFullAvg10 > policy.MaxIOFullAvg10:
+		decision.Reason = ReasonIOPressure
 	case remainingCPU < cpuReserve:
 		decision.Reason = ReasonInsufficientCPU
 	case remainingMemory < memoryReserve || remainingAvailableMemory < memoryReserve:
@@ -122,16 +127,16 @@ func validate(snapshot HostSnapshot, policy ReservePolicy, request Request) erro
 	if snapshot.AvailableMemoryMiB > snapshot.TotalMemoryMiB {
 		return fmt.Errorf("available memory exceeds host capacity")
 	}
-	if snapshot.AllocatedCPUUnits < 0 || snapshot.AllocatedCPUUnits > snapshot.TotalCPUUnits {
-		return fmt.Errorf("allocated CPU units are outside host capacity")
+	if snapshot.AllocatedCPUUnits < 0 {
+		return fmt.Errorf("allocated CPU units are negative")
 	}
-	if snapshot.AllocatedMemoryMiB < 0 || snapshot.AllocatedMemoryMiB > snapshot.TotalMemoryMiB {
-		return fmt.Errorf("allocated memory is outside host capacity")
+	if snapshot.AllocatedMemoryMiB < 0 {
+		return fmt.Errorf("allocated memory is negative")
 	}
 	if snapshot.FreeDiskPercent < 0 || snapshot.FreeDiskPercent > 100 {
 		return fmt.Errorf("free disk percent must be between 0 and 100")
 	}
-	if snapshot.CPUSomeAvg10 < 0 || snapshot.CPUSomeAvg10 > 100 || snapshot.MemoryFullAvg10 < 0 || snapshot.MemoryFullAvg10 > 100 || snapshot.RecentOOMKills < 0 {
+	if snapshot.CPUSomeAvg10 < 0 || snapshot.CPUSomeAvg10 > 100 || snapshot.MemoryFullAvg10 < 0 || snapshot.MemoryFullAvg10 > 100 || snapshot.IOFullAvg10 < 0 || snapshot.IOFullAvg10 > 100 || snapshot.RecentOOMKills < 0 {
 		return fmt.Errorf("pressure snapshot is invalid")
 	}
 	if policy.MinimumCPUUnits < 0 || policy.MinimumMemoryMiB < 0 || policy.MinimumPercent < 0 || policy.MinimumPercent > 100 {
@@ -143,7 +148,7 @@ func validate(snapshot HostSnapshot, policy ReservePolicy, request Request) erro
 	if policy.MinimumFreeDiskPercent < 0 || policy.MinimumFreeDiskPercent > 100 {
 		return fmt.Errorf("disk reserve policy is invalid")
 	}
-	if policy.MaxCPUSomeAvg10 < 0 || policy.MaxCPUSomeAvg10 > 100 || policy.MaxMemoryFullAvg10 < 0 || policy.MaxMemoryFullAvg10 > 100 || policy.MaxRecentOOMKills < 0 {
+	if policy.MaxCPUSomeAvg10 < 0 || policy.MaxCPUSomeAvg10 > 100 || policy.MaxMemoryFullAvg10 < 0 || policy.MaxMemoryFullAvg10 > 100 || policy.MaxIOFullAvg10 < 0 || policy.MaxIOFullAvg10 > 100 || policy.MaxRecentOOMKills < 0 {
 		return fmt.Errorf("pressure policy is invalid")
 	}
 	if request.PoolName == "" || request.VCPU <= 0 || request.MemoryMiB <= 0 {

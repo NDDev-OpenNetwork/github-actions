@@ -124,6 +124,9 @@ func (c Config) Validate() error {
 	if c.HostReserve.MinimumFreeDiskPercent < 20 || c.HostReserve.MinimumFreeDiskPercent > 80 {
 		add("host_reserve.minimum_free_disk_percent", "must be between 20 and 80")
 	}
+	if err := c.Pressure.Validate(); err != nil {
+		add("pressure_admission", err.Error())
+	}
 
 	requireEqual(add, "cache.object_store.implementation", c.Cache.ObjectStore.Implementation, "rustfs")
 	validateEnv(add, "cache.object_store.endpoint_env", c.Cache.ObjectStore.EndpointEnv)

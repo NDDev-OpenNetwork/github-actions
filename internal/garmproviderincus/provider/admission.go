@@ -10,6 +10,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/provideradmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
@@ -57,6 +58,7 @@ type nddevAdmission struct {
 	platform             platformconfig.Config
 	controllerID         string
 	workerImages         map[string]providerconfig.WorkerImage
+	pressurePolicy       pressuregate.Policy
 	controller           provideradmission.Controller
 	queueIntents         queueintent.Reader
 	diagnosticsDirectory string
@@ -92,10 +94,11 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 		return nil, err
 	}
 	return &nddevAdmission{
-		cfg:          cfg,
-		platform:     platform,
-		controllerID: controllerID,
-		workerImages: cfg.WorkerImages,
+		cfg:            cfg,
+		platform:       platform,
+		controllerID:   controllerID,
+		workerImages:   cfg.WorkerImages,
+		pressurePolicy: platform.Pressure,
 		controller: provideradmission.Controller{
 			Store: providerjournal.Store{
 				Path:     cfg.JournalFile,
@@ -108,6 +111,11 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 				MinimumMemoryMiB:       platform.HostReserve.MinimumMemoryMiB,
 				MinimumPercent:         platform.HostReserve.MinimumPercent,
 				MinimumFreeDiskPercent: platform.HostReserve.MinimumFreeDiskPercent,
+				RequirePressure:        platform.Pressure.Required,
+				MaxCPUSomeAvg10:        platform.Pressure.CPUSomeClose,
+				MaxMemoryFullAvg10:     platform.Pressure.MemoryFullClose,
+				MaxIOFullAvg10:         platform.Pressure.IOFullClose,
+				MaxRecentOOMKills:      int(platform.Pressure.MaximumRecentOOMKills),
 			},
 			LeaseTTL: time.Duration(cfg.AdmissionLeaseSeconds) * time.Second,
 		},
@@ -193,7 +201,7 @@ func (n *nddevAdmission) Admit(
 	if err != nil {
 		return provideradmission.AdmissionResult{}, err
 	}
-	host, err := fleetHostState(ctx, cli, n.platform, pool)
+	host, err := fleetHostState(ctx, cli, n.platform, pool, n.pressurePolicy)
 	if err != nil {
 		return provideradmission.AdmissionResult{}, err
 	}
@@ -236,7 +244,7 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 	if err != nil {
 		return admission.Decision{}, err
 	}
-	host, err := fleetHostState(ctx, cli, n.platform, pool)
+	host, err := fleetHostState(ctx, cli, n.platform, pool, n.pressurePolicy)
 	if err != nil {
 		return admission.Decision{}, err
 	}

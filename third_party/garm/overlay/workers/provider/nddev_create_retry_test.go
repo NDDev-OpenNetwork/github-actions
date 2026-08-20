@@ -60,6 +60,7 @@ func TestNDDevCapacityClassificationCoversEveryAdmissionAndStorageReason(t *test
 	for _, message := range []string{
 		"pool-saturated", "insufficient-cpu", "insufficient-memory", "memory-pressure",
 		"cpu-pressure", "disk-pressure", "pressure-unavailable", "recent-oom",
+		"io-pressure", "host-unhealthy",
 		"project memory limit exceeded", "project disk limit exceeded",
 		"instance-count limit exceeded", "storage high-watermark", "no eligible member",
 	} {
