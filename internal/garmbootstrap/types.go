@@ -40,7 +40,7 @@ const (
 	// standard image so OIDC authority does not inherit Docker/nesting.
 	FastImage                   = ContainerCanaryImage
 	UntrustedImage              = IntegrationImage
-	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b8"
+	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b7"
 	ContainerCanaryImage        = "nddev-ubuntu-24.04-amd64-container-current"
 	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2"
 	DefaultFlavor               = "nddev-linux-standard"
