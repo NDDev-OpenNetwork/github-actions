@@ -601,4 +601,7 @@ func TestVerifyInstallationRecordsTheOrganizationScopeItProved(t *testing.T) {
 	if !strings.Contains(tokenRequestBody, `"`+OrganizationRunnersPermission+`":"write"`) {
 		t.Fatalf("token request %s does not ask for the organization scope", tokenRequestBody)
 	}
+	if !strings.Contains(tokenRequestBody, `"`+ActionsReadPermission+`":"read"`) {
+		t.Fatalf("token request %s does not ask for authoritative Actions read scope", tokenRequestBody)
+	}
 }
