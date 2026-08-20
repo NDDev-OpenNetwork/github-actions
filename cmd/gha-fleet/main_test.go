@@ -98,6 +98,15 @@ func TestValidateRustFSCacheCanonicalConfig(t *testing.T) {
 	}
 }
 
+func TestValidateTenantRegistryCanonicalConfig(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"validate-tenant-registry", "--config", "../../config/tenant-registry.yaml"}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), `"default_tenant": "example"`) {
+		t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestBootstrapGitHubAppRequiresOutputDirectory(t *testing.T) {
 	t.Parallel()
 
@@ -114,6 +123,7 @@ func TestBootstrapGitHubAppRejectsNonLoopbackListener(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
 		"bootstrap-github-app",
+		"--tenant-config", "../../config/tenant-registry.yaml",
 		"--listen", "0.0.0.0:0",
 		"--output-dir", filepath.Join(t.TempDir(), "credentials"),
 	}, &stdout, &stderr)
