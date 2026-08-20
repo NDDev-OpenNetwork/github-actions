@@ -52,6 +52,7 @@ incus:
     - 203.0.113.12
     - 203.0.113.13
     - 203.0.113.14
+  services_host_address: 10.200.0.7
   project_max_instances: 8
   project_max_cpu_units: 10
   project_max_memory_mib: 14336

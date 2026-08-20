@@ -284,6 +284,10 @@ func validateIncus(add func(string, string), incus Incus) {
 	if err != nil || !publicAddress.Is4() || !publicAddress.IsGlobalUnicast() || publicAddress.IsPrivate() {
 		add("incus.public_host_address", "must be the host public IPv4 address")
 	}
+	servicesAddress, err := netip.ParseAddr(incus.ServicesHostAddress)
+	if err != nil || !servicesAddress.Is4() || !servicesAddress.IsGlobalUnicast() || !servicesAddress.IsPrivate() {
+		add("incus.services_host_address", "must be the private unicast IPv4 address of the queue/services host")
+	}
 	if incus.Cluster.Enabled {
 		if len(incus.EstatePublicHostAddresses) != incus.Cluster.Members+1 {
 			add("incus.estate_public_host_addresses", "must contain every cluster member plus the queue host")

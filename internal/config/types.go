@@ -64,6 +64,7 @@ type Incus struct {
 	EgressACL                 string   `json:"egress_acl" yaml:"egress_acl"`
 	PublicHostAddress         string   `json:"public_host_address" yaml:"public_host_address"`
 	EstatePublicHostAddresses []string `json:"estate_public_host_addresses" yaml:"estate_public_host_addresses"`
+	ServicesHostAddress       string   `json:"services_host_address" yaml:"services_host_address"`
 	ProjectMaxInstances       int      `json:"project_max_instances" yaml:"project_max_instances"`
 	ProjectMaxCPUUnits        int      `json:"project_max_cpu_units" yaml:"project_max_cpu_units"`
 	ProjectMaxMemoryMiB       int      `json:"project_max_memory_mib" yaml:"project_max_memory_mib"`

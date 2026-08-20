@@ -49,6 +49,7 @@ func TestRepositoryConfigurationIsValid(t *testing.T) {
 func TestClusterConfigsShareTheCompletePublicHostDenySet(t *testing.T) {
 	t.Parallel()
 	want := []string{"203.0.113.10", "203.0.113.11", "203.0.113.12", "203.0.113.13", "203.0.113.14"}
+	const services = "10.200.0.7"
 	for _, filename := range []string{
 		"example-runner-1.yaml", "example-runner-2.yaml", "example-runner-3.yaml",
 		"example-runner-4.yaml", "example-services.yaml",
@@ -59,6 +60,9 @@ func TestClusterConfigsShareTheCompletePublicHostDenySet(t *testing.T) {
 		}
 		if !slices.Equal(cfg.Incus.EstatePublicHostAddresses, want) {
 			t.Errorf("%s estate public hosts = %v, want %v", filename, cfg.Incus.EstatePublicHostAddresses, want)
+		}
+		if cfg.Incus.ServicesHostAddress != services {
+			t.Errorf("%s services host = %q, want %q", filename, cfg.Incus.ServicesHostAddress, services)
 		}
 	}
 }
@@ -181,6 +185,8 @@ func TestUnsafeIncusSettingsAreRejected(t *testing.T) {
 		{"wrong version", func(cfg *Config) { cfg.Incus.Version = "v6.1.0" }, "incus.version"},
 		{"unbounded driver", func(cfg *Config) { cfg.Incus.StorageDriver = "dir" }, "incus.storage_driver"},
 		{"overlapping bridge", func(cfg *Config) { cfg.Incus.NetworkCIDR = "10.10.10.2/24" }, "incus.network_cidr"},
+		{"missing services host", func(cfg *Config) { cfg.Incus.ServicesHostAddress = "" }, "incus.services_host_address"},
+		{"public services host", func(cfg *Config) { cfg.Incus.ServicesHostAddress = "203.0.113.10" }, "incus.services_host_address"},
 		{"undersized project disk", func(cfg *Config) { cfg.Incus.ProjectDiskLimitGiB = 40 }, "must fit the largest pool disk request"},
 	}
 	for _, test := range tests {
