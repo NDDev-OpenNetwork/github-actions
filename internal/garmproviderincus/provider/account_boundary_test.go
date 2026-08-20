@@ -151,6 +151,32 @@ func TestAPoolThatDeclaresNoTenantKeepsTheRegistryBoundary(t *testing.T) {
 	}
 }
 
+func TestProviderBoundaryComesFromDeploymentConfig(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	provider.cfg.AllowedGitHubAccounts = []string{"private-example"}
+	provider.cfg.AllowedGitHubRepositories = []string{"another-owner/exact-repository"}
+
+	for _, admitted := range []string{
+		"https://github.com/private-example/project",
+		"https://github.com/private-example",
+		"https://github.com/another-owner/exact-repository",
+	} {
+		if !provider.isRegisteredRepositoryURL(admitted) {
+			t.Fatalf("deployment identity was refused: %s", admitted)
+		}
+	}
+	for _, refused := range []string{
+		"https://github.com/example-org/example-actions",
+		"https://github.com/another-owner/other-repository",
+		"https://github.com/private-example/nested/path",
+		"https://example.invalid/private-example/project",
+	} {
+		if provider.isRegisteredRepositoryURL(refused) {
+			t.Fatalf("identity outside deployment boundary was admitted: %s", refused)
+		}
+	}
+}
+
 func declarePoolTenant(t *testing.T, provider *Incus, flavor, id string) {
 	t.Helper()
 	for index := range provider.platform.Pools {
