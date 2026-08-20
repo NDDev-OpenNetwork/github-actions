@@ -172,6 +172,12 @@ func NewIncusProvider(configFile, controllerID string) (*Incus, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, errors.Wrap(err, "validating provider config")
 	}
+	if cfg.CurrentProviderIdentity.Version != Version || cfg.CurrentProviderIdentity.Commit != Commit {
+		return nil, errors.Errorf(
+			"provider config pins %s (%s), binary reports %s (%s)",
+			cfg.CurrentProviderIdentity.Version, cfg.CurrentProviderIdentity.Commit, Version, Commit,
+		)
+	}
 
 	provider := &Incus{
 		cfg:               cfg,
@@ -367,6 +373,42 @@ func isRegisteredRepositoryURL(repositoryURL string) bool {
 	return false
 }
 
+func (l *Incus) isRegisteredRepositoryURL(repositoryURL string) bool {
+	if l == nil || l.cfg == nil {
+		return isRegisteredRepositoryURL(repositoryURL)
+	}
+	parsed, err := url.ParseRequestURI(repositoryURL)
+	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, "github.com") ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	identity := strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
+	parts := strings.Split(identity, "/")
+	if len(parts) == 1 && parts[0] != "" {
+		for _, account := range l.cfg.AllowedGitHubAccounts {
+			if strings.EqualFold(parts[0], account) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, repository := range l.cfg.AllowedGitHubRepositories {
+		if strings.EqualFold(identity, repository) {
+			return true
+		}
+	}
+	owner := parts[0]
+	for _, account := range l.cfg.AllowedGitHubAccounts {
+		if strings.EqualFold(owner, account) {
+			return true
+		}
+	}
+	return false
+}
+
 // repositoryWithinTenant reports whether a repository URL names something this
 // exact tenant may serve. It is the same shape as isRegisteredRepositoryURL
 // above, evaluated against one row instead of the whole registry.
@@ -432,7 +474,7 @@ func (l *Incus) validateBootstrapParams(bootstrapParams commonParams.BootstrapIn
 		return runnerErrors.NewBadRequestError("missing pool ID")
 	case bootstrapParams.Flavor == "":
 		return runnerErrors.NewBadRequestError("missing flavor")
-	case !isRegisteredRepositoryURL(bootstrapParams.RepoURL):
+	case !l.isRegisteredRepositoryURL(bootstrapParams.RepoURL):
 		return runnerErrors.NewBadRequestError(
 			"repository is outside the configured provider boundary: %q", bootstrapParams.RepoURL)
 	case bootstrapParams.CallbackURL != expectedCallbackURL:
@@ -1141,7 +1183,7 @@ func canonicalRepositoryIdentity(value string) (string, error) {
 }
 
 func (l *Incus) narrowBootstrapRepository(ctx context.Context, bootstrap commonParams.BootstrapInstance) (commonParams.BootstrapInstance, error) {
-	if isRegisteredRepositoryURL(bootstrap.RepoURL) {
+	if l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
 		return bootstrap, nil
 	}
 	if _, err := canonicalRepositoryIdentity(bootstrap.RepoURL); err == nil {

@@ -173,6 +173,12 @@ type Incus struct {
 	// open-ended allowlist would turn rolling compatibility into permanent
 	// acceptance of obsolete worker policy.
 	PreviousProviderIdentities []ProviderIdentity `toml:"previous_provider_identities" json:"previous-provider-identities"`
+	CurrentProviderIdentity    ProviderIdentity   `toml:"current_provider_identity" json:"current-provider-identity"`
+	// AllowedGitHubAccounts and AllowedGitHubRepositories are the deployment
+	// boundary accepted from GARM. Public source supplies only validation and
+	// synthetic examples; the private estate owns the real account identities.
+	AllowedGitHubAccounts     []string `toml:"allowed_github_accounts" json:"allowed-github-accounts"`
+	AllowedGitHubRepositories []string `toml:"allowed_github_repositories" json:"allowed-github-repositories"`
 
 	// Diagnostics are captured outside a disposable VM immediately before
 	// teardown. These pilot limits are exact so config drift cannot silently
@@ -201,6 +207,39 @@ func (l *Incus) AllowsProviderIdentity(actualVersion, actualCommit, currentVersi
 }
 
 func (l *Incus) Validate() error {
+	if len(l.AllowedGitHubAccounts) == 0 && len(l.AllowedGitHubRepositories) == 0 {
+		return fmt.Errorf("allowed_github_accounts or allowed_github_repositories must declare the provider boundary")
+	}
+	if !strings.HasPrefix(l.CurrentProviderIdentity.Version, "v0.1.5-nddev.") ||
+		!commitPattern.MatchString(l.CurrentProviderIdentity.Commit) {
+		return fmt.Errorf("current_provider_identity must contain the exact release version and commit")
+	}
+	validateGitHubIdentities := func(label string, values []string, repository bool) error {
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			if value == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, "/\\") != repository {
+				return fmt.Errorf("%s contains invalid identity %q", label, value)
+			}
+			if repository {
+				parts := strings.Split(value, "/")
+				if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+					return fmt.Errorf("%s contains invalid repository %q", label, value)
+				}
+			}
+			key := strings.ToLower(value)
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("%s contains duplicate identity %q", label, value)
+			}
+			seen[key] = struct{}{}
+		}
+		return nil
+	}
+	if err := validateGitHubIdentities("allowed_github_accounts", l.AllowedGitHubAccounts, false); err != nil {
+		return err
+	}
+	if err := validateGitHubIdentities("allowed_github_repositories", l.AllowedGitHubRepositories, true); err != nil {
+		return err
+	}
 	if l.UnixSocket != "" {
 		return fmt.Errorf("unix_socket_path is forbidden; use the pinned loopback TLS endpoint")
 	}

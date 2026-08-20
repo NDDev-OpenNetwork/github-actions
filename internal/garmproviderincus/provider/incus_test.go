@@ -74,6 +74,7 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 					RunnerGID:    1002,
 				},
 			},
+			AllowedGitHubAccounts: []string{"example-org", "example-guild", "example-media"},
 		},
 		cli:          cli,
 		imageManager: &image{},

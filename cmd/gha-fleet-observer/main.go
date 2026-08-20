@@ -149,6 +149,12 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 	if err != nil {
 		return fleetobserve.Collector{}, err
 	}
+	// The observer does not execute as the provider artifact, so its own linker
+	// stamp must not impersonate that artifact. The root-owned provider config
+	// carries the exact current identity, while NewIncusProvider still verifies
+	// a real provider binary's independent stamp against the same pair.
+	provider.Version = providerConfiguration.CurrentProviderIdentity.Version
+	provider.Commit = providerConfiguration.CurrentProviderIdentity.Commit
 	journalStore := providerjournal.Store{
 		Path:     providerConfiguration.JournalFile,
 		LockPath: providerConfiguration.JournalLockFile,
