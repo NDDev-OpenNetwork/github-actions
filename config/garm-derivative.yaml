@@ -63,7 +63,7 @@ overlays:
     sha256: 7d8e5e06331cb9e3b93c5947d0eff6409eedd6072f20deeb997133fbb5ae9cdd
     purpose: Fsync-backed central queue admission where sparse JobAssigned owns a short provisional token to bootstrap an empty scale set, JobAvailable binds complete AcquireJobs identity, pre-execution states have phase TTLs, and priority aging, repository quotas, weighted stride scheduling and completion-driven promotion remain durable without message redelivery.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 089e80f0390b85245cd1022a59c7c823934e1e6c3e3e8f705788c4496edf2fc1
+    sha256: a668ae793b7605a2097949605732117e918c3fab034e9582ec4d5dc69e8a4083
     purpose: Deterministic provisional bootstrap, one-time legacy migration, phase expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 18709cebc5f909b762bf10bdf6cc5c8c65d651edc4cbb26132c739a19b2f2c7f

@@ -999,7 +999,7 @@ func TestOrganizationEntityIsAdmittedAndBindsItsRepositoryLater(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound := journal.Intents[key]
-	if bound.Repository != "example-guild/example-project" {
+	if bound.Repository != "example-guild/ai_stp" {
 		t.Fatalf("bound repository = %q", bound.Repository)
 	}
 	if bound.RunnerRequestID != 301 {
@@ -1059,7 +1059,7 @@ func TestRepositoryEntityStillBindsAtAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := journal.Intents[queueIntentKey(22, assigned.JobID)]
-	if intent.Repository != "example-org/example-actions" || !queueIntentRepositoryBound(intent) || intent.State != queueStateAssigned {
+	if intent.Repository != "example-org/github-actions" || !queueIntentRepositoryBound(intent) || intent.State != queueStateAssigned {
 		t.Fatalf("repository entity intent = %q, want it bound at assignment", intent.Repository)
 	}
 }
