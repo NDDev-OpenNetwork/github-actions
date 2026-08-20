@@ -257,8 +257,8 @@ func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {
 	for name, script := range map[string]string{
 		"setup":  string(renderCacheSetupScript()),
 		"hook":   cacheJobStartedHook(),
-		"warm":   string(mergeCacheIntoWarmAssignment(renderWarmAssignment("opaque", nil, ""), []byte(`{"secret":"opaque"}`))),
-		"direct": string(mergeCacheIntoWarmAssignment(renderWarmAssignment("", nil, testEncodedDirectJIT(t)), []byte(`{"secret":"opaque"}`))),
+		"warm":   string(mergeCacheIntoWarmAssignment(renderWarmAssignment(expectedMetadataURL, "opaque", nil, ""), []byte(`{"secret":"opaque"}`))),
+		"direct": string(mergeCacheIntoWarmAssignment(renderWarmAssignment(expectedMetadataURL, "", nil, testEncodedDirectJIT(t)), []byte(`{"secret":"opaque"}`))),
 	} {
 		command := exec.Command("bash", "-n")
 		command.Stdin = strings.NewReader(script)

@@ -477,9 +477,9 @@ func (l *Incus) validateBootstrapParams(bootstrapParams commonParams.BootstrapIn
 	case !l.isRegisteredRepositoryURL(bootstrapParams.RepoURL):
 		return runnerErrors.NewBadRequestError(
 			"repository is outside the configured provider boundary: %q", bootstrapParams.RepoURL)
-	case bootstrapParams.CallbackURL != expectedCallbackURL:
+	case bootstrapParams.CallbackURL != l.expectedCallbackURL():
 		return runnerErrors.NewBadRequestError("callback URL is outside the configured worker gateway boundary")
-	case bootstrapParams.MetadataURL != expectedMetadataURL:
+	case bootstrapParams.MetadataURL != l.expectedMetadataURL():
 		return runnerErrors.NewBadRequestError("metadata URL is outside the configured worker gateway boundary")
 	case !instanceTokenPattern.MatchString(bootstrapParams.InstanceToken):
 		return runnerErrors.NewBadRequestError("missing or malformed instance token")
@@ -522,6 +522,10 @@ func (l *Incus) validateBootstrapParams(bootstrapParams commonParams.BootstrapIn
 	}
 	return nil
 }
+
+func (l *Incus) expectedCallbackURL() string { return l.cfg.WorkerGatewayURL + "/api/v1/callbacks" }
+
+func (l *Incus) expectedMetadataURL() string { return l.cfg.WorkerGatewayURL + "/api/v1/metadata" }
 
 func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapParams commonParams.BootstrapInstance) error {
 	if instance == nil {
@@ -928,7 +932,7 @@ func warmAssignmentPath(jobName string) string {
 	return fmt.Sprintf("%s/%x.sh", warmAssignmentDirectory, digest[:])
 }
 
-func renderMetadataWarmAssignment(instanceToken string, caBundle []byte) []byte {
+func renderMetadataWarmAssignment(metadataURL, instanceToken string, caBundle []byte) []byte {
 	encodedToken := base64.StdEncoding.EncodeToString([]byte(instanceToken))
 	encodedCA := base64.StdEncoding.EncodeToString(caBundle)
 	return []byte(fmt.Sprintf(`#!/bin/bash
@@ -966,7 +970,7 @@ chmod 0700 "${install_script}"
 exec 19>/dev/null
 export BASH_XTRACEFD=19
 /bin/bash "${install_script}"
-`, expectedMetadataURL, encodedToken, encodedCA))
+`, metadataURL, encodedToken, encodedCA))
 }
 
 func renderDirectJITWarmAssignment(encodedJIT string) []byte {
@@ -1034,11 +1038,11 @@ func (l *Incus) waitDirectJITAssignmentStarted(ctx context.Context, cli Instance
 	}
 }
 
-func renderWarmAssignment(instanceToken string, caBundle []byte, encodedJIT string) []byte {
+func renderWarmAssignment(metadataURL, instanceToken string, caBundle []byte, encodedJIT string) []byte {
 	if encodedJIT != "" {
 		return renderDirectJITWarmAssignment(encodedJIT)
 	}
-	return renderMetadataWarmAssignment(instanceToken, caBundle)
+	return renderMetadataWarmAssignment(metadataURL, instanceToken, caBundle)
 }
 
 func (l *Incus) activateWarmInstance(
@@ -1108,7 +1112,7 @@ func (l *Incus) activateWarmInstance(
 			return commonParams.ProviderInstance{}, err
 		}
 		defer clear(cacheAssignment)
-		assignment := renderWarmAssignment(bootstrapParams.InstanceToken, bootstrapParams.CACertBundle, encodedJIT)
+		assignment := renderWarmAssignment(l.expectedMetadataURL(), bootstrapParams.InstanceToken, bootstrapParams.CACertBundle, encodedJIT)
 		if cacheEnabled {
 			assignment = mergeCacheIntoWarmAssignment(assignment, cacheAssignment)
 			if len(assignment) == 0 {
