@@ -46,6 +46,10 @@ Versioning.
   started instead of losing exact lifecycle correlation. A uniquely verified
   still-queued DB job also rehydrates its expired provisional intent, so an
   acknowledged JobAssigned message cannot strand valid old work forever.
+- Added GARM derivative `v0.2.1-nddev.48` after live `.47` acceptance proved
+  the existing entity query excludes every scale-set row with
+  `workflow_job_id=0`. A dedicated scale-set-only SQL query makes cleanup and
+  rehydration reachable without exposing those rows to webhook pool consumers.
 
 ## [0.1.1] - 2026-08-16
 

@@ -1,0 +1,128 @@
+diff --git a/database/sql/jobs.go b/database/sql/jobs.go
+index bb8b93b..2b10895 100644
+--- a/database/sql/jobs.go
++++ b/database/sql/jobs.go
+@@ -481,6 +481,44 @@ func (s *sqlDatabase) ListEntityJobsByStatus(_ context.Context, entityType param
+ 	return ret, nil
+ }
+ 
++// ListEntityScaleSetJobsByStatus lists only scale-set protocol jobs. The
++// ordinary entity query deliberately excludes these rows so webhook pool
++// consumers cannot create a second runner for work owned by a scale set.
++func (s *sqlDatabase) ListEntityScaleSetJobsByStatus(_ context.Context, entityType params.ForgeEntityType, entityID string, status params.JobStatus) ([]params.Job, error) {
++	u, err := uuid.Parse(entityID)
++	if err != nil {
++		return nil, err
++	}
++	var jobs []WorkflowJob
++	query := s.conn.Model(&WorkflowJob{}).Preload("Instance").
++		Where("status = ?", status).
++		Where("workflow_job_id = 0").
++		Where("scale_set_job_id != ?", "")
++	switch entityType {
++	case params.ForgeEntityTypeOrganization:
++		query = query.Where("org_id = ?", u)
++	case params.ForgeEntityTypeRepository:
++		query = query.Where("repo_id = ?", u)
++	case params.ForgeEntityTypeEnterprise:
++		query = query.Where("enterprise_id = ?", u)
++	}
++	if err := query.Find(&jobs); err.Error != nil {
++		if errors.Is(err.Error, gorm.ErrRecordNotFound) {
++			return []params.Job{}, nil
++		}
++		return nil, err.Error
++	}
++	ret := make([]params.Job, len(jobs))
++	for index, job := range jobs {
++		converted, convertErr := sqlWorkflowJobToParamsJob(job)
++		if convertErr != nil {
++			return nil, fmt.Errorf("error converting scale-set job: %w", convertErr)
++		}
++		ret[index] = converted
++	}
++	return ret, nil
++}
++
+ func (s *sqlDatabase) ListAllJobs(_ context.Context) ([]params.Job, error) {
+ 	var jobs []WorkflowJob
+ 	query := s.conn.Model(&WorkflowJob{})
+diff --git a/database/sql/jobs_test.go b/database/sql/jobs_test.go
+index 7abaab0..510eadf 100644
+--- a/database/sql/jobs_test.go
++++ b/database/sql/jobs_test.go
+@@ -20,6 +20,7 @@ import (
+ 	"testing"
+ 	"time"
+ 
++	"github.com/google/uuid"
+ 	"github.com/stretchr/testify/suite"
+ 
+ 	dbCommon "github.com/cloudbase/garm/database/common"
+@@ -57,6 +58,34 @@ func TestJobsTestSuite(t *testing.T) {
+ 	suite.Run(t, new(JobsTestSuite))
+ }
+ 
++func (s *JobsTestSuite) TestListEntityScaleSetJobsDoesNotLeakIntoWebhookQuery() {
++	endpoint := garmTesting.CreateDefaultGithubEndpoint(s.adminCtx, s.Store, s.T())
++	credentials := garmTesting.CreateTestGithubCredentials(s.adminCtx, "scale-job-creds", s.Store, s.T(), endpoint)
++	repository, err := s.Store.CreateRepository(
++		s.adminCtx, "example-owner", "example-repo", credentials, "webhook-secret",
++		params.PoolBalancerTypeRoundRobin, false,
++	)
++	s.Require().NoError(err)
++	entity, err := repository.GetEntity()
++	s.Require().NoError(err)
++	repositoryID := uuid.MustParse(entity.ID)
++	webhook := params.Job{WorkflowJobID: 42, RunID: 100, Status: string(params.JobStatusQueued), Name: "webhook", RepoID: &repositoryID}
++	scaleSet := params.Job{ScaleSetJobID: "00000000-0000-4000-8000-000000000404", RunID: 101, Status: string(params.JobStatusQueued), Name: "scale", RepoID: &repositoryID}
++	_, err = s.Store.CreateOrUpdateJob(s.adminCtx, webhook)
++	s.Require().NoError(err)
++	_, err = s.Store.CreateOrUpdateJob(s.adminCtx, scaleSet)
++	s.Require().NoError(err)
++
++	ordinary, err := s.Store.ListEntityJobsByStatus(s.adminCtx, params.ForgeEntityTypeRepository, entity.ID, params.JobStatusQueued)
++	s.Require().NoError(err)
++	s.Require().Len(ordinary, 1)
++	s.Equal(int64(42), ordinary[0].WorkflowJobID)
++	rows, err := s.Store.(*sqlDatabase).ListEntityScaleSetJobsByStatus(s.adminCtx, params.ForgeEntityTypeRepository, entity.ID, params.JobStatusQueued)
++	s.Require().NoError(err)
++	s.Require().Len(rows, 1)
++	s.Equal(scaleSet.ScaleSetJobID, rows[0].ScaleSetJobID)
++}
++
+ // TestDeleteInactionableJobs verifies the deletion logic for jobs
+ func (s *JobsTestSuite) TestDeleteInactionableJobs() {
+ 	db := s.Store.(*sqlDatabase)
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 55c84d0..49d405b 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -53,6 +53,10 @@ import (
+ var nddevRemoveAuthoritativeQueueIntent = scaleSetWorker.NDDevRemoveQueueIntent
+ var nddevEnsureAuthoritativeQueueIntent = scaleSetWorker.NDDevEnsureQueueIntent
+ 
++type entityScaleSetJobsStore interface {
++	ListEntityScaleSetJobsByStatus(context.Context, params.ForgeEntityType, string, params.JobStatus) ([]params.Job, error)
++}
++
+ var (
+ 	poolIDLabelprefix     = "runner-pool-id"
+ 	controllerLabelPrefix = "runner-controller-id"
+@@ -1987,6 +1991,15 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 		}
+ 		return fmt.Errorf("error listing queued jobs: %w", err)
+ 	}
++	scaleSetStore, ok := r.store.(entityScaleSetJobsStore)
++	if !ok {
++		return fmt.Errorf("database does not expose bounded scale-set job reconciliation")
++	}
++	scaleSetQueued, err := scaleSetStore.ListEntityScaleSetJobsByStatus(r.ctx, r.entity.EntityType, r.entity.ID, params.JobStatusQueued)
++	if err != nil {
++		return fmt.Errorf("error listing queued scale-set jobs: %w", err)
++	}
++	queued = append(queued, scaleSetQueued...)
+ 
+ 	queued = oldestQueuedJobs(queued)
+ 	checked := 0
+
