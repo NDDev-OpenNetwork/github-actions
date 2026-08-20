@@ -19,6 +19,32 @@ func TestLoadCanonicalConfig(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsDeploymentIdentityAndLiteralEndpoint(t *testing.T) {
+	config, err := Load(filepath.Join("..", "..", "config", "rustfs-cache-identities.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Endpoint = "https://192.0.2.1:9002"
+	for index := range config.Identities {
+		config.Identities[index].Prefix = strings.Replace(
+			config.Identities[index].Prefix,
+			"example-org/example-actions/",
+			"example-tenant/example-repository/",
+			1,
+		)
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := config.Repository()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository != "example-tenant/example-repository" {
+		t.Fatalf("repository = %q", repository)
+	}
+}
+
 func TestConfigRejectsTrustContractDrift(t *testing.T) {
 	t.Parallel()
 

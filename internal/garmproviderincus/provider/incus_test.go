@@ -52,7 +52,7 @@ const (
 )
 
 func newTestProvider(cli *MockIncusServer) *Incus {
-	return &Incus{
+	provider := &Incus{
 		cfg: &config.Incus{
 			ProjectName: config.ExpectedProjectName,
 			SecureBoot:  true,
@@ -106,6 +106,8 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 			},
 		}, ControlPlane: platformconfig.ControlPlane{RunnerVersion: "v2.336.0"}},
 	}
+	provider.cacheRepository = func() (string, error) { return "example-org/example-actions", nil }
+	return provider
 }
 
 type allowAllAdmission struct{}

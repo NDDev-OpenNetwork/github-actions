@@ -234,7 +234,9 @@ func TestJobStartedHookMasksExportsAndDeletesOneJobSecret(t *testing.T) {
 	command := exec.Command("bash", "-c", hook)
 	command.Env = append(os.Environ(), "GITHUB_ENV="+githubEnv)
 	output, err := command.CombinedOutput()
-	require.NoError(t, err, "%s", output)
+	if err != nil {
+		t.Fatalf("job-start hook failed: %v\n%s", err, output)
+	}
 	require.Contains(t, string(output), "::add-mask::"+delivery.AccessKey)
 	require.Contains(t, string(output), "::add-mask::"+string(delivery.SecretKey))
 	environment, err := os.ReadFile(githubEnv)

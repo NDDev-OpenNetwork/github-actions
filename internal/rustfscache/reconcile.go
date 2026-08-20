@@ -108,17 +108,15 @@ type lifecycleRule struct {
 // the one it holds. Writing the pair by hand is how an isolation proof turns
 // into a test of a class nothing was ever granted.
 func deniedCounterpart(prefix string) (string, error) {
-	for class, root := range cachenamespace.PrefixRoots() {
-		if root != prefix {
-			continue
-		}
-		counterpart, err := cachenamespace.Counterpart(class)
-		if err != nil {
-			return "", err
-		}
-		return cachenamespace.MustPrefixRoot(counterpart), nil
+	repository, class, err := cachenamespace.ParsePrefixRoot(prefix)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("credential prefix %q is not a fleet cache namespace", prefix)
+	counterpart, err := cachenamespace.Counterpart(class)
+	if err != nil {
+		return "", err
+	}
+	return cachenamespace.PrefixRootFor(repository, counterpart)
 }
 
 func (r Runner) Run(ctx context.Context, options Options) (Result, error) {

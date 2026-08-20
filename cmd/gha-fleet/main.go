@@ -21,6 +21,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachemanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetcontract"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmbootstrap"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmderivative"
@@ -77,6 +78,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateTelemetry(args[1:], stdout, stderr)
 	case "validate-rustfs-cache":
 		return runValidateRustFSCache(args[1:], stdout, stderr)
+	case "validate-diagnostic-exporter":
+		return runValidateDiagnosticExporter(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -115,6 +118,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stderr)
 		return 2
 	}
+}
+
+func runValidateDiagnosticExporter(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-diagnostic-exporter", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "", "committed diagnostic exporter configuration")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: validate-diagnostic-exporter requires --config")
+		return 2
+	}
+	raw, err := os.ReadFile(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read diagnostic exporter config: %v\n", err)
+		return 1
+	}
+	config, err := diagnosticexport.ParseConfig(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, config); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
@@ -1296,5 +1327,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|render|admit|preflight|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|render|admit|preflight|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

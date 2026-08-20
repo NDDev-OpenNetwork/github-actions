@@ -39,6 +39,15 @@ const (
 )
 
 type cacheDeliveryLoader func(string) (rustfscache.Delivery, error)
+type cacheRepositoryLoader func() (string, error)
+
+func productionCacheRepository() (string, error) {
+	config, err := rustfscache.Load(rustfscache.DefaultConfigPath)
+	if err != nil {
+		return "", err
+	}
+	return config.Repository()
+}
 
 type workerCacheAssignment struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -121,6 +130,9 @@ func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance
 	if err != nil || !enabled || l.cacheDelivery == nil {
 		return role, enabled && l.cacheDelivery != nil, err
 	}
+	if l.cacheRepository == nil {
+		return role, false, nil
+	}
 	repository, err := canonicalRepositoryIdentity(bootstrap.RepoURL)
 	if err != nil {
 		return role, false, fmt.Errorf("derive cache repository identity: %w", err)
@@ -130,7 +142,10 @@ func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance
 	// a cache mismatch is an optional optimization miss, not authorization to
 	// cross the repository boundary. Estate-generated per-repository identities
 	// can widen this safely without changing the one-job delivery protocol.
-	cacheRepository := cachenamespace.Organization + "/" + cachenamespace.Repository
+	cacheRepository, err := l.cacheRepository()
+	if err != nil {
+		return role, false, fmt.Errorf("load configured cache repository identity: %w", err)
+	}
 	if repository != cacheRepository {
 		return role, false, nil
 	}
@@ -186,12 +201,20 @@ type workerCacheRole struct {
 //
 // The promoter role is deliberately absent: it writes to the promoted namespace
 // from the host, and no worker is ever given it.
-func workerCacheRoles() []workerCacheRole {
+func workerCacheRoles(repository string) []workerCacheRole {
 	return []workerCacheRole{
-		{Role: "trusted-writer", Mode: "read-write", Prefix: cachenamespace.MustPrefixRoot(cachenamespace.Trusted)},
-		{Role: "untrusted-writer", Mode: "read-write", Prefix: cachenamespace.MustPrefixRoot(cachenamespace.Untrusted)},
-		{Role: "release-reader", Mode: "read-only", Prefix: cachenamespace.MustPrefixRoot(cachenamespace.Promoted)},
+		{Role: "trusted-writer", Mode: "read-write", Prefix: mustCachePrefix(repository, cachenamespace.Trusted)},
+		{Role: "untrusted-writer", Mode: "read-write", Prefix: mustCachePrefix(repository, cachenamespace.Untrusted)},
+		{Role: "release-reader", Mode: "read-only", Prefix: mustCachePrefix(repository, cachenamespace.Promoted)},
 	}
+}
+
+func mustCachePrefix(repository string, class cachenamespace.TrustClass) string {
+	prefix, err := cachenamespace.PrefixRootFor(repository, class)
+	if err != nil {
+		panic(err)
+	}
+	return prefix
 }
 
 // cacheRoleClausePlaceholder is substituted into the guest scripts rather than
@@ -202,11 +225,16 @@ const cacheRoleClausePlaceholder = "@@NDDEV_CACHE_ROLE_CLAUSE@@"
 // cacheRoleJQClause renders the role check the guest performs, from the same
 // list the host checks against.
 func cacheRoleJQClause() string {
-	lines := make([]string, 0, len(workerCacheRoles()))
-	for _, entry := range workerCacheRoles() {
+	entries := []struct{ role, mode, class string }{
+		{"trusted-writer", "read-write", "trusted"},
+		{"untrusted-writer", "read-write", "untrusted"},
+		{"release-reader", "read-only", "promoted"},
+	}
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
 		lines = append(lines, fmt.Sprintf(
-			`    (.role == %q and .mode == %q and .prefix_root == %q)`,
-			entry.Role, entry.Mode, entry.Prefix))
+			`    (.role == %q and .mode == %q and (.prefix_root | test("^[^/]+/[^/]+/trust/%s$")))`,
+			entry.role, entry.mode, entry.class))
 	}
 	return strings.Join(lines, " or\n")
 }
@@ -218,13 +246,17 @@ func cacheJobStartedHook() string {
 }
 
 func validateCacheDelivery(role string, delivery rustfscache.Delivery) error {
-	wanted := make(map[string]workerCacheRole, len(workerCacheRoles()))
-	for _, entry := range workerCacheRoles() {
+	repository, _, err := cachenamespace.ParsePrefixRoot(delivery.Prefix)
+	if err != nil {
+		return fmt.Errorf("loaded %s cache delivery does not match the worker trust contract", role)
+	}
+	wanted := make(map[string]workerCacheRole, len(workerCacheRoles(repository)))
+	for _, entry := range workerCacheRoles(repository) {
 		wanted[entry.Role] = entry
 	}
 	expected, exists := wanted[role]
 	if !exists || delivery.Role != role || delivery.Mode != expected.Mode || delivery.Prefix != expected.Prefix ||
-		delivery.Endpoint != "https://198.51.100.1:9002" || delivery.Region != "us-east-1" ||
+		rustfscache.ValidateEndpoint(delivery.Endpoint) != nil || delivery.Region != "us-east-1" ||
 		delivery.Bucket != "github-actions-cache" || !cacheAccessKeyPattern.MatchString(delivery.AccessKey) ||
 		!cacheSecretPattern.Match(delivery.SecretKey) || len(delivery.CAPEM) == 0 {
 		return fmt.Errorf("loaded %s cache delivery does not match the worker trust contract", role)
@@ -270,7 +302,7 @@ jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
-  .endpoint == "https://198.51.100.1:9002" and
+  (.endpoint | startswith("https://") and endswith(":9002")) and
   .region == "us-east-1" and
   .bucket == "github-actions-cache" and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and
@@ -341,7 +373,7 @@ jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
-  .endpoint == "https://198.51.100.1:9002" and
+  (.endpoint | startswith("https://") and endswith(":9002")) and
   .region == "us-east-1" and
   .bucket == "github-actions-cache" and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and

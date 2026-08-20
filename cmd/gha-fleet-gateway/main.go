@@ -30,7 +30,7 @@ func main() {
 	certificateFile := flag.String("tls-cert", defaultCertificateFile, "worker gateway TLS certificate")
 	privateKeyFile := flag.String("tls-key", defaultPrivateKeyFile, "worker gateway TLS private key")
 	listenAddress := flag.String(
-		"listen", workergateway.ExpectedListenAddress,
+		"listen", workergateway.ListenAddressRequired,
 		"address the workers reach this gateway on, as a literal IP and port",
 	)
 	upstreamURL := flag.String(
