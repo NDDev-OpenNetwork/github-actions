@@ -19,6 +19,11 @@ Versioning.
   contract with `gha-fleet fleet-contract --config <path>`.
 - Cut provider derivative `v0.1.5-nddev.41` so the hard-memory admission change
   cannot deploy under the previous `.40` identity.
+- Cut provider derivative `v0.1.5-nddev.42` after the `.41` canary proved the
+  public provider-config validator incorrectly coupled private deployments to
+  the synthetic example subnet. Private-unicast TLS cluster endpoints on port
+  8443 are accepted; public, link-local and alternate-loopback endpoints remain
+  rejected.
 
 ## [0.1.1] - 2026-08-16
 
