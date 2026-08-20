@@ -42,6 +42,7 @@ func TestValidateRejectsAnIdentityNothingCouldRelyOn(t *testing.T) {
 		{"sdk is not a version", func(m *Manifest) { m.Runtime.IncusSDKVersion = "latest" }, "incus_sdk_version"},
 		{"source commit is short", func(m *Manifest) { m.Build.SourceCommit = "bb11bfb" }, "build.source_commit"},
 		{"binary digest is absent", func(m *Manifest) { m.Build.BinarySHA256 = "" }, "build.binary_sha256"},
+		{"CGO enabled", func(m *Manifest) { m.Build.CGOEnabled = true }, "CGO disabled"},
 		{"one rebuild", func(m *Manifest) { m.Build.ReproducibleRebuilds = 1 }, "build: release requires"},
 	} {
 		mutated := base

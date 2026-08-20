@@ -107,7 +107,7 @@ jobs:
         run: |
           set -eu
           for output in provider-a provider-b; do
-            CGO_ENABLED=1 go build -trimpath \
+            CGO_ENABLED=0 go build -trimpath \
               -ldflags "-buildid= -s -w -X main.version=${VERSION} -X main.commit=${SOURCE_COMMIT}" \
               -o "${RUNNER_TEMP}/${output}" ./cmd/garm-provider-incus-nddev
           done

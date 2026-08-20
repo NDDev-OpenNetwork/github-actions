@@ -149,10 +149,10 @@ func (m Manifest) Validate() error {
 	if !hex64.MatchString(m.Build.BinarySHA256) {
 		return fmt.Errorf("build.binary_sha256: %q is not a sha256", m.Build.BinarySHA256)
 	}
-	if m.Build.GoVersion != "go1.26.6" || !m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
+	if m.Build.GoVersion != "go1.26.6" || m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
 		m.Build.TargetArch != "amd64" || !m.Build.Trimpath || !m.Build.EmptyBuildID ||
 		m.Build.ReproducibleRebuilds < 2 {
-		return fmt.Errorf("build: release requires go1.26.6, CGO, linux/amd64, trimpath, empty build ID and two rebuilds")
+		return fmt.Errorf("build: release requires go1.26.6, CGO disabled, linux/amd64, trimpath, empty build ID and two rebuilds")
 	}
 	return nil
 }
