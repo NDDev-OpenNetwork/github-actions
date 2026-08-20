@@ -198,7 +198,7 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
 			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
 			QueueTime: queueTime, State: queueStateQueued,
-			Priority: baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
+			Priority:  baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
 			UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
 		}
 		ensureRepositoryState(journal, config, repository)

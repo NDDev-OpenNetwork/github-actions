@@ -66,10 +66,10 @@ patches:
     purpose: Rehydrate one bounded queue intent when GitHub authoritatively confirms an acknowledged JobAssigned DB row is still queued, preventing valid old work from deadlocking after its provisional TTL.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: c02d779fc421315ef2e614992e7f48bcbe73fcfa3bb0002f61ef8b240f9aa2d5
+    sha256: 889086c63a7d3244efb37cbd5bfbd72db1b5b1ce2078397b69f29cc5f6333792
     purpose: Fsync-backed central queue admission where sparse JobAssigned owns a short provisional token to bootstrap an empty scale set, JobAvailable binds complete AcquireJobs identity, pre-execution states have phase TTLs, and priority aging, repository quotas, weighted stride scheduling and completion-driven promotion remain durable without message redelivery.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: be24513fb39a9187c0e37a3cef3e15459c96904e3d3e3d89b35cd1118c2fc48e
+    sha256: 9f78810612b237e6afd3495298dc11c573da1ef1c403a264772c2e2646733318
     purpose: Deterministic provisional bootstrap, one-time legacy migration, phase expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 2ac19df649b166a1ea987bb491200baae5fcc846446ff9faef402972c2b43b27

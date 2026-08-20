@@ -591,7 +591,7 @@ func TestQueueCoordinatorRehydratesOnlyAnAuthoritativeCurrentScaleSetJob(t *test
 	scaleSet := testQueueScaleSet(11, "nddev-linux-untrusted")
 	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
 	job := params.Job{
-		ScaleSetJobID: "00000000-0000-4000-8000-000000000303",
+		ScaleSetJobID:   "00000000-0000-4000-8000-000000000303",
 		RepositoryOwner: "example-org", RepositoryName: "example-repo", Action: "pull_request",
 	}
 	job.CreatedAt = now.Add(-time.Hour)
