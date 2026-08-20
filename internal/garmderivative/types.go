@@ -90,6 +90,7 @@ type RuntimeContract struct {
 	AuthoritativeQueueIntentReconciliation   bool `json:"authoritative_queue_intent_reconciliation" yaml:"authoritative_queue_intent_reconciliation"`
 	AuthoritativeIdleOfflineRunnerReaping    bool `json:"authoritative_idle_offline_runner_reaping" yaml:"authoritative_idle_offline_runner_reaping"`
 	AuthoritativeAccessRefusalBackoffSeconds int  `json:"authoritative_access_refusal_backoff_seconds" yaml:"authoritative_access_refusal_backoff_seconds"`
+	JobStartedRunnerIdentity                 bool `json:"job_started_runner_identity" yaml:"job_started_runner_identity"`
 	JobReconciliationIntervalSeconds         int  `json:"job_reconciliation_interval_seconds" yaml:"job_reconciliation_interval_seconds"`
 	JobReconciliationBatchSize               int  `json:"job_reconciliation_batch_size" yaml:"job_reconciliation_batch_size"`
 	OfficialActionsRunnerUnchanged           bool `json:"official_actions_runner_unchanged" yaml:"official_actions_runner_unchanged"`

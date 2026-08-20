@@ -43,7 +43,7 @@ func jsonFieldNames(t *testing.T, value any) []string {
 // that decision -- internal/providerjournal already carries a worked example of
 // a version ladder that upgrades in memory.
 func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
-	if SchemaVersion != 1 {
+	if SchemaVersion != 2 {
 		t.Fatalf("SchemaVersion = %d; update the golden field sets below with it", SchemaVersion)
 	}
 	for _, testCase := range []struct {
@@ -63,7 +63,7 @@ func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
 			value: Intent{},
 			wanted: []string{
 				"key", "scale_set_id", "job_id", "runner_request_id", "scale_set_name",
-				"owner", "repository", "workflow_ref", "event_name", "queue_time",
+				"runner_name", "owner", "repository", "workflow_ref", "event_name", "queue_time",
 				"state", "priority", "updated_at", "expires_at",
 			},
 		},

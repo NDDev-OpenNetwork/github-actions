@@ -60,6 +60,12 @@ Versioning.
   entire target-sized herd before the first saturation result can back it off.
   A denied or rate-limited authoritative read also establishes a manager-wide
   fifteen-minute fail-closed backoff instead of retrying once per stale row.
+- Added GARM derivative `v0.2.1-nddev.50` and queue journal schema v2. JobStarted
+  now binds the exact ephemeral runner name to the running intent; v1 journals
+  upgrade in memory without inventing identity for already-running work.
+  Observer metrics expose both running intents without runner identity and
+  created provider leases without a matching running identity, closing the
+  previous one-direction-only lifecycle blind spot.
 
 ## [0.1.1] - 2026-08-16
 

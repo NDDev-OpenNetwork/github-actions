@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	SchemaVersion   = 1
-	maxJournalBytes = 4 * 1024 * 1024
+	LegacySchemaVersion = 1
+	SchemaVersion       = 2
+	maxJournalBytes     = 4 * 1024 * 1024
 )
 
 type State string
@@ -44,6 +45,7 @@ type Intent struct {
 	JobID           string `json:"job_id"`
 	RunnerRequestID int64  `json:"runner_request_id"`
 	ScaleSetName    string `json:"scale_set_name"`
+	RunnerName      string `json:"runner_name,omitempty"`
 	// Owner is the forge account the scale set hangs from, written by GARM.
 	// GitHub scopes a scale set name to one entity, so the name alone stopped
 	// being an identity when the fleet gained a second tenant. Empty reads as
@@ -261,6 +263,13 @@ func readJournal(path string) (Journal, error) {
 		}
 		return Journal{}, fmt.Errorf("decode trailing queue-intent journal data: %w", err)
 	}
+	switch journal.SchemaVersion {
+	case LegacySchemaVersion:
+		journal.SchemaVersion = SchemaVersion
+	case SchemaVersion:
+	default:
+		return Journal{}, fmt.Errorf("queue-intent journal schema_version must be %d", SchemaVersion)
+	}
 	if err := journal.Validate(); err != nil {
 		return Journal{}, err
 	}
@@ -279,6 +288,7 @@ func (j Journal) Validate() error {
 			return fmt.Errorf("queue intent key %q does not match embedded key %q", key, intent.Key)
 		}
 		if intent.ScaleSetID <= 0 || !validText(intent.JobID) || intent.RunnerRequestID < 0 || !validText(intent.ScaleSetName) ||
+			(intent.RunnerName != "" && !validText(intent.RunnerName)) ||
 			!validAccountOrRepository(intent.Repository) || !validText(intent.WorkflowRef) || !validText(intent.EventName) {
 			return fmt.Errorf("queue intent %q has incomplete identity", key)
 		}

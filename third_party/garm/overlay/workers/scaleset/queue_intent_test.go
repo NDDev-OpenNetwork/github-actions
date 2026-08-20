@@ -675,6 +675,36 @@ func TestQueueCoordinatorStillRecordsAStartedJobBesideAnOrphan(t *testing.T) {
 	}
 }
 
+func TestQueueCoordinatorAcknowledgesStartedJobWithMissingRunnerIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 20, 22, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	assigned := testQueueJob(303, "owner", "repository", now.Add(-time.Minute))
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.RunnerName = ""
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(assigned), []params.ScaleSetJobMessage{assigned}, nil, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	started := assigned
+	started.MessageType = params.MessageTypeJobStarted
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(assigned), nil, []params.ScaleSetJobMessage{started}, nil,
+	); err != nil {
+		t.Fatalf("missing runner identity recreated lifecycle head-of-line blocking: %v", err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := journal.Intents[queueIntentKey(11, assigned.JobID)]
+	if intent.State != queueStateRunning || intent.RunnerName != "" {
+		t.Fatalf("missing runner identity was hidden or changed running state: %#v", intent)
+	}
+}
+
 // A scale set's own ceiling and the queue's width are different statements.
 // The queue enforces max_in_flight; the scale set ceiling belongs to GitHub and
 // GARM. Refusing a wider scale set here made growing the fleet look like a
@@ -1002,6 +1032,7 @@ func testQueueJob(id int64, owner, repository string, queuedAt time.Time) params
 		MessageType:     params.MessageTypeJobAvailable,
 		JobID:           fmt.Sprintf("00000000-0000-4000-8000-%012d", id),
 		RunnerRequestID: id,
+		RunnerName:      fmt.Sprintf("runner-%d", id),
 		RepositoryName:  repository,
 		OwnerName:       owner,
 		JobWorkflowRef:  owner + "/" + repository + "/.github/workflows/ci.yml@refs/heads/feature",

@@ -127,6 +127,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_queue_intents_in_flight", "Acquiring, acquired, assigned or running queue intents.", float64(snapshot.Queue.InFlight))
 	gauge(&output, "gha_fleet_queue_oldest_age_seconds", "Age of the oldest active GitHub queue intent.", float64(snapshot.Queue.OldestQueueAgeSeconds))
 	gauge(&output, "gha_fleet_queue_uncovered_running", "Running queue intents without a durable created or warm-claimed execution lease.", float64(snapshot.Queue.UncoveredRunning))
+	gauge(&output, "gha_fleet_queue_running_without_runner_identity", "Running queue intents written before or without an exact JobStarted runner identity.", float64(snapshot.Queue.RunningWithoutRunnerIdentity))
 	labeledGaugeHeader(&output, "gha_fleet_queue_intents_by_state", "Active central queue intents by bounded state.")
 	for _, state := range []queueintent.State{
 		queueintent.StateQueued,
@@ -160,6 +161,8 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
 	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without an admitted, created, deleting or warm journal lease.", float64(snapshot.Incus.OrphanInstances))
 	gauge(&output, "gha_fleet_journal_missing_instances", "Created or deleting journal leases without a visible Incus instance.", float64(snapshot.Incus.MissingInstances))
+	gauge(&output, "gha_fleet_provider_created_without_running_identity", "Created provider leases not named by an active running queue intent; alert only after bounded pre-start or teardown grace.", float64(snapshot.Journal.CreatedWithoutRunningIdentity))
+	gauge(&output, "gha_fleet_provider_created_without_running_identity_oldest_age_seconds", "Age from admission of the oldest created provider lease not named by an active running queue intent.", float64(snapshot.Journal.OldestCreatedWithoutRunningIdentityAgeSeconds))
 
 	gauge(&output, "gha_fleet_diagnostic_bundles", "Private retained worker diagnostic bundle count.", float64(snapshot.Diagnostics.Bundles))
 	gauge(&output, "gha_fleet_diagnostic_bytes", "Private retained worker diagnostic bundle bytes.", float64(snapshot.Diagnostics.Bytes))
