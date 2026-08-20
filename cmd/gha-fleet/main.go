@@ -731,7 +731,7 @@ func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gha-fleet: image profile %q does not exist\n", *profile)
 		return 2
 	}
-	decision, err := collectColdPilotDecision(cfg, pool)
+	decision, err := collectImageBuildDecision(cfg, pool, manifest.Image.EffectiveType())
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: collect image-build preflight: %v\n", err)
 		return 1
@@ -753,7 +753,7 @@ func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gha-fleet: fetch verified image artifacts: %v\n", err)
 		return 1
 	}
-	launchDecision, err := collectColdPilotDecision(cfg, pool)
+	launchDecision, err := collectImageBuildDecision(cfg, pool, manifest.Image.EffectiveType())
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: collect image-build launch preflight: %v\n", err)
 		if cleanupErr := artifacts.Cleanup(); cleanupErr != nil {
@@ -798,6 +798,17 @@ func collectColdPilotDecision(cfg config.Config, pool config.Pool) (hostprobe.De
 	snapshot, err := hostprobe.Collect(context.Background())
 	if err != nil {
 		return hostprobe.Decision{}, err
+	}
+	return hostprobe.EvaluateColdPilot(snapshot, cfg.HostReserve, pool), nil
+}
+
+func collectImageBuildDecision(cfg config.Config, pool config.Pool, imageType string) (hostprobe.Decision, error) {
+	snapshot, err := hostprobe.Collect(context.Background())
+	if err != nil {
+		return hostprobe.Decision{}, err
+	}
+	if imageType == "container" {
+		return hostprobe.EvaluateContainerImageBuild(snapshot, cfg.HostReserve, pool), nil
 	}
 	return hostprobe.EvaluateColdPilot(snapshot, cfg.HostReserve, pool), nil
 }

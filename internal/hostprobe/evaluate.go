@@ -35,6 +35,19 @@ type Decision struct {
 // resource policy used by runtime admission. Legacy listeners and workers are
 // reported but are not treated as a blocker because coexistence is required.
 func EvaluateColdPilot(snapshot Snapshot, reserve config.HostReserve, pool config.Pool) Decision {
+	return evaluateBuildHost(snapshot, reserve, pool, true, true, "VM pilot")
+}
+
+// EvaluateContainerImageBuild verifies the host that will build and smoke an
+// Incus container image. It deliberately excludes KVM and nested-KVM: neither
+// participates in a container build. A pending host reboot remains visible but
+// cannot invalidate image bytes produced entirely in the container userspace;
+// runtime capacity and failed fleet dependencies still fail closed.
+func EvaluateContainerImageBuild(snapshot Snapshot, reserve config.HostReserve, pool config.Pool) Decision {
+	return evaluateBuildHost(snapshot, reserve, pool, false, false, "container image build")
+}
+
+func evaluateBuildHost(snapshot Snapshot, reserve config.HostReserve, pool config.Pool, requireKVM, rebootBlocks bool, operation string) Decision {
 	cpuReserve := max(reserve.MinimumCPUUnits, ceilingPercent(snapshot.CPU.PhysicalCores, reserve.MinimumPercent))
 	memoryReserve := max(reserve.MinimumMemoryMiB, ceilingPercent(snapshot.Memory.TotalMiB, reserve.MinimumPercent))
 	decision := Decision{
@@ -72,7 +85,7 @@ func EvaluateColdPilot(snapshot Snapshot, reserve config.HostReserve, pool confi
 		add("insufficient-memory", SeverityBlocker, fmt.Sprintf("need %d MiB total memory, observed %d MiB", decision.RequiredMemoryMiB, snapshot.Memory.TotalMiB))
 	}
 	if snapshot.Memory.AvailableMiB < decision.RequiredMemoryMiB {
-		add("insufficient-available-memory", SeverityBlocker, fmt.Sprintf("need %d MiB currently available to start the VM and preserve reserve, observed %d MiB", decision.RequiredMemoryMiB, snapshot.Memory.AvailableMiB))
+		add("insufficient-available-memory", SeverityBlocker, fmt.Sprintf("need %d MiB currently available for the %s and reserve, observed %d MiB", decision.RequiredMemoryMiB, operation, snapshot.Memory.AvailableMiB))
 	}
 	if snapshot.RootFilesystem.FreePercent < reserve.MinimumFreeDiskPercent {
 		add("disk-pressure", SeverityBlocker, fmt.Sprintf("need at least %d percent free disk, observed %d", reserve.MinimumFreeDiskPercent, snapshot.RootFilesystem.FreePercent))
@@ -81,18 +94,24 @@ func EvaluateColdPilot(snapshot Snapshot, reserve config.HostReserve, pool confi
 		add("inode-pressure", SeverityBlocker, fmt.Sprintf("need at least %d percent free inodes, observed %d", reserve.MinimumFreeDiskPercent, snapshot.RootFilesystem.FreeInodesPercent))
 	}
 	if snapshot.RootFilesystem.RotationalKnown && snapshot.RootFilesystem.Rotational {
-		add("rotational-storage", SeverityWarning, "root storage is reported as rotational; VM and cache latency must be benchmarked")
+		add("rotational-storage", SeverityWarning, "root storage is reported as rotational; image and cache latency must be benchmarked")
 	}
-	if !snapshot.KVM.Present {
-		add("kvm-missing", SeverityBlocker, "/dev/kvm is missing")
-	} else if !snapshot.KVM.Accessible {
-		add("kvm-inaccessible", SeverityBlocker, "/dev/kvm is not accessible to the preflight process")
-	}
-	if snapshot.Virtualization != "none" && !snapshot.KVM.Nested {
-		add("nested-kvm-disabled", SeverityBlocker, "nested KVM is required on a virtual host")
+	if requireKVM {
+		if !snapshot.KVM.Present {
+			add("kvm-missing", SeverityBlocker, "/dev/kvm is missing")
+		} else if !snapshot.KVM.Accessible {
+			add("kvm-inaccessible", SeverityBlocker, "/dev/kvm is not accessible to the preflight process")
+		}
+		if snapshot.Virtualization != "none" && !snapshot.KVM.Nested {
+			add("nested-kvm-disabled", SeverityBlocker, "nested KVM is required on a virtual host")
+		}
 	}
 	if snapshot.Maintenance.RebootRequired {
-		add("reboot-required", SeverityBlocker, "complete the pending host reboot before the VM pilot")
+		severity := SeverityWarning
+		if rebootBlocks {
+			severity = SeverityBlocker
+		}
+		add("reboot-required", severity, "complete the pending host reboot before the next host lifecycle operation")
 	}
 	switch failed, required := snapshot.Maintenance.FailedUnits, requiredFailedUnits(snapshot.Maintenance.FailedUnits); {
 	case snapshot.Maintenance.SystemState == "running":
