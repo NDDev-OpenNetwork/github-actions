@@ -35,6 +35,7 @@ type Manifest struct {
 	InterfaceVersion  string   `json:"interface_version" yaml:"interface_version"`
 	Upstream          Upstream `json:"upstream" yaml:"upstream"`
 	Runtime           Runtime  `json:"runtime" yaml:"runtime"`
+	Build             Build    `json:"build" yaml:"build"`
 }
 
 type Upstream struct {
@@ -46,6 +47,18 @@ type Upstream struct {
 
 type Runtime struct {
 	IncusSDKVersion string `json:"incus_sdk_version" yaml:"incus_sdk_version"`
+}
+
+type Build struct {
+	SourceCommit         string `json:"source_commit" yaml:"source_commit"`
+	BinarySHA256         string `json:"binary_sha256" yaml:"binary_sha256"`
+	GoVersion            string `json:"go_version" yaml:"go_version"`
+	CGOEnabled           bool   `json:"cgo_enabled" yaml:"cgo_enabled"`
+	TargetOS             string `json:"target_os" yaml:"target_os"`
+	TargetArch           string `json:"target_arch" yaml:"target_arch"`
+	Trimpath             bool   `json:"trimpath" yaml:"trimpath"`
+	EmptyBuildID         bool   `json:"empty_build_id" yaml:"empty_build_id"`
+	ReproducibleRebuilds int    `json:"reproducible_rebuilds" yaml:"reproducible_rebuilds"`
 }
 
 var (
@@ -129,6 +142,17 @@ func (m Manifest) Validate() error {
 	}
 	if !plainSemver.MatchString(m.Runtime.IncusSDKVersion) {
 		return fmt.Errorf("runtime.incus_sdk_version: %q must be a plain vMAJOR.MINOR.PATCH", m.Runtime.IncusSDKVersion)
+	}
+	if !hex40.MatchString(m.Build.SourceCommit) {
+		return fmt.Errorf("build.source_commit: %q is not a full commit id", m.Build.SourceCommit)
+	}
+	if !hex64.MatchString(m.Build.BinarySHA256) {
+		return fmt.Errorf("build.binary_sha256: %q is not a sha256", m.Build.BinarySHA256)
+	}
+	if m.Build.GoVersion != "go1.26.6" || !m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
+		m.Build.TargetArch != "amd64" || !m.Build.Trimpath || !m.Build.EmptyBuildID ||
+		m.Build.ReproducibleRebuilds < 2 {
+		return fmt.Errorf("build: release requires go1.26.6, CGO, linux/amd64, trimpath, empty build ID and two rebuilds")
 	}
 	return nil
 }

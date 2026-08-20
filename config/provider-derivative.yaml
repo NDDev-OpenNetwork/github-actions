@@ -34,3 +34,14 @@ runtime:
   # Incus API the fleet can speak, so it belongs to the release identity rather
   # than to the code that happens to import it.
   incus_sdk_version: v7.3.0
+
+build:
+  source_commit: bb11bfbfb107e63f623d29dd417555e4a44bbfde
+  binary_sha256: f9b519e2ec61a0281e1c4c1c93a00eec9e682e22fb60d6a6470b55c835b286ad
+  go_version: go1.26.6
+  cgo_enabled: true
+  target_os: linux
+  target_arch: amd64
+  trimpath: true
+  empty_build_id: true
+  reproducible_rebuilds: 2
