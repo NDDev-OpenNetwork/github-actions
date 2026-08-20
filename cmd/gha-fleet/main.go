@@ -1189,6 +1189,8 @@ func runProviderRelease(args []string, stdout, stderr io.Writer) int {
 		"upstream_release":   manifest.Upstream.Release,
 		"upstream_commit":    manifest.Upstream.Commit,
 		"incus_sdk_version":  manifest.Runtime.IncusSDKVersion,
+		"source_commit":      manifest.Build.SourceCommit,
+		"binary_sha256":      manifest.Build.BinarySHA256,
 	}
 	if *field != "" {
 		value, known := fields[*field]

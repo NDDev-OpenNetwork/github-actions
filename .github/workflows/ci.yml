@@ -70,21 +70,67 @@ jobs:
           persist-credentials: false
       - run: make build-garm-derivative
 
+  provider-derivative:
+    name: Reproducible provider derivative
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout release manifest
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve validated artifact identity
+        id: release
+        run: |
+          set -eu
+          {
+            printf 'version=%s\n' "$(go run ./cmd/gha-fleet provider-release --field derivative_version)"
+            printf 'source_commit=%s\n' "$(go run ./cmd/gha-fleet provider-release --field source_commit)"
+            printf 'binary_sha256=%s\n' "$(go run ./cmd/gha-fleet provider-release --field binary_sha256)"
+          } >>"${GITHUB_OUTPUT}"
+      - name: Checkout exact provider source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.source_commit }}
+          path: provider-source
+      - name: Rebuild and verify exact provider bytes
+        working-directory: provider-source
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
+          EXPECTED_SHA256: ${{ steps.release.outputs.binary_sha256 }}
+        run: |
+          set -eu
+          for output in provider-a provider-b; do
+            CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-buildid= -s -w -X main.version=${VERSION} -X main.commit=${SOURCE_COMMIT}" \
+              -o "${RUNNER_TEMP}/${output}" ./cmd/garm-provider-incus-nddev
+          done
+          cmp "${RUNNER_TEMP}/provider-a" "${RUNNER_TEMP}/provider-b"
+          printf '%s  %s\n' "${EXPECTED_SHA256}" "${RUNNER_TEMP}/provider-a" | sha256sum --check --status
+
   gate:
     name: Gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [test, race, static, derivative]
+    needs: [test, race, static, derivative, provider-derivative]
     steps:
       - env:
           TEST: ${{ needs.test.result }}
           RACE: ${{ needs.race.result }}
           STATIC: ${{ needs.static.result }}
           DERIVATIVE: ${{ needs.derivative.result }}
+          PROVIDER_DERIVATIVE: ${{ needs.provider-derivative.result }}
         run: |
           set -eu
           test "${TEST}" = success
           test "${RACE}" = success
           test "${STATIC}" = success
           test "${DERIVATIVE}" = success
+          test "${PROVIDER_DERIVATIVE}" = success

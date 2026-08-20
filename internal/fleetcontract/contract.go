@@ -55,6 +55,11 @@ type Declaration struct {
 // ValidateConfig proves that one deployment overlay implements this exact
 // public contract without making private topology part of the public source.
 func ValidateConfig(contract Contract, platform platformconfig.Config) error {
+	if platform.ControlPlane.ManagerVersion != contract.Artifacts.GARMVersion ||
+		platform.ControlPlane.ProviderVersion != contract.Artifacts.ProviderVersion ||
+		platform.ControlPlane.ProviderInterface != contract.Artifacts.ProviderInterface {
+		return fmt.Errorf("control-plane artifact versions differ from fleet contract v%d", contract.ContractVersion)
+	}
 	if platform.ControlPlane.WorkerKind != contract.Execution.WorkerKind ||
 		platform.Guardrails.RequireEphemeral != contract.Execution.Ephemeral ||
 		platform.Guardrails.JobsPerWorker != contract.Execution.JobsPerWorker {
@@ -190,13 +195,13 @@ type TenantEntry struct {
 }
 
 type Artifacts struct {
-	GARMVersion      string `json:"garm_version"`
-	GARMBinarySHA256 string `json:"garm_binary_sha256"`
-	// ProviderBinarySHA256 is deliberately absent: the provider is not built
-	// reproducibly to a declared digest, so there is none to state. See #263.
-	ProviderVersion   string `json:"provider_version"`
-	ProviderInterface string `json:"provider_interface"`
-	IncusSDKVersion   string `json:"incus_sdk_version"`
+	GARMVersion          string `json:"garm_version"`
+	GARMBinarySHA256     string `json:"garm_binary_sha256"`
+	ProviderVersion      string `json:"provider_version"`
+	ProviderCommit       string `json:"provider_commit"`
+	ProviderBinarySHA256 string `json:"provider_binary_sha256"`
+	ProviderInterface    string `json:"provider_interface"`
+	IncusSDKVersion      string `json:"incus_sdk_version"`
 }
 
 // Merge is what a commit on the default branch has been proven to satisfy. A
@@ -274,11 +279,13 @@ func Build(sources Sources, commit string) (Contract, error) {
 		RunnerClasses:   classes,
 		Tenants:         tenants,
 		Artifacts: Artifacts{
-			GARMVersion:       garm.DerivativeVersion,
-			GARMBinarySHA256:  garm.Build.BinarySHA256,
-			ProviderVersion:   provider.DerivativeVersion,
-			ProviderInterface: provider.InterfaceVersion,
-			IncusSDKVersion:   provider.Runtime.IncusSDKVersion,
+			GARMVersion:          garm.DerivativeVersion,
+			GARMBinarySHA256:     garm.Build.BinarySHA256,
+			ProviderVersion:      provider.DerivativeVersion,
+			ProviderCommit:       provider.Build.SourceCommit,
+			ProviderBinarySHA256: provider.Build.BinarySHA256,
+			ProviderInterface:    provider.InterfaceVersion,
+			IncusSDKVersion:      provider.Runtime.IncusSDKVersion,
 		},
 		Merge:     merge,
 		Execution: declaration.Execution, ResourceSemantics: declaration.ResourceSemantics,

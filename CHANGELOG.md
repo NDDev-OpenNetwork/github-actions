@@ -17,6 +17,8 @@ Versioning.
 - Cluster admission no longer adds total or free swap to worker memory
   capacity. A deployment overlay can be checked against the exact public
   contract with `gha-fleet fleet-contract --config <path>`.
+- Cut provider derivative `v0.1.5-nddev.41` so the hard-memory admission change
+  cannot deploy under the previous `.40` identity.
 
 ## [0.1.1] - 2026-08-16
 

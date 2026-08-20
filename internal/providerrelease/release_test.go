@@ -40,6 +40,11 @@ func TestValidateRejectsAnIdentityNothingCouldRelyOn(t *testing.T) {
 		{"short commit", func(m *Manifest) { m.Upstream.Commit = "f3ae319" }, "not a full commit id"},
 		{"asset digest is not one", func(m *Manifest) { m.Upstream.ReleaseAssetSHA256 = "none" }, "is not a sha256"},
 		{"sdk is not a version", func(m *Manifest) { m.Runtime.IncusSDKVersion = "latest" }, "incus_sdk_version"},
+		{"source commit is short", func(m *Manifest) { m.Build.SourceCommit = "bb11bfb" }, "build.source_commit"},
+		{"binary digest is absent", func(m *Manifest) { m.Build.BinarySHA256 = "" }, "build.binary_sha256"},
+		{"CGO enabled", func(m *Manifest) { m.Build.CGOEnabled = true }, "CGO disabled"},
+		{"dirty source", func(m *Manifest) { m.Build.VCSState = "dirty" }, "build: release requires"},
+		{"one rebuild", func(m *Manifest) { m.Build.ReproducibleRebuilds = 1 }, "build: release requires"},
 	} {
 		mutated := base
 		testCase.mutate(&mutated)
