@@ -1219,6 +1219,7 @@ func runFleetContract(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	root := flags.String("root", ".", "repository root the contract is assembled from")
 	commit := flags.String("commit", "", "commit this contract describes; read from git when empty")
+	configPath := flags.String("config", "", "optional deployment overlay to verify against the rendered contract")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -1239,6 +1240,17 @@ func runFleetContract(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
+	}
+	if *configPath != "" {
+		platform, loadErr := config.Load(*configPath)
+		if loadErr != nil {
+			fmt.Fprintf(stderr, "gha-fleet: load deployment overlay: %v\n", loadErr)
+			return 1
+		}
+		if validateErr := fleetcontract.ValidateConfig(contract, platform); validateErr != nil {
+			fmt.Fprintf(stderr, "gha-fleet: verify deployment overlay: %v\n", validateErr)
+			return 1
+		}
 	}
 	return writeJSONOrFail(stdout, stderr, contract)
 }

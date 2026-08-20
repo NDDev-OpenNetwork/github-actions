@@ -97,14 +97,16 @@ type ControlPlane struct {
 }
 
 type Guardrails struct {
-	RequireEphemeral            bool `json:"require_ephemeral" yaml:"require_ephemeral"`
-	JobsPerVM                   int  `json:"jobs_per_vm" yaml:"jobs_per_vm"`
-	WarmInstancesUnregistered   bool `json:"warm_instances_unregistered" yaml:"warm_instances_unregistered"`
-	DenyHostDockerSocket        bool `json:"deny_host_docker_socket" yaml:"deny_host_docker_socket"`
-	DenyNestedVirtualization    bool `json:"deny_nested_virtualization" yaml:"deny_nested_virtualization"`
-	DenyPrivateNetworkByDefault bool `json:"deny_private_network_by_default" yaml:"deny_private_network_by_default"`
-	AllowCPUOvercommit          bool `json:"allow_cpu_overcommit" yaml:"allow_cpu_overcommit"`
-	AllowMemoryBallooning       bool `json:"allow_memory_ballooning" yaml:"allow_memory_ballooning"`
+	RequireEphemeral                bool   `json:"require_ephemeral" yaml:"require_ephemeral"`
+	JobsPerWorker                   int    `json:"jobs_per_worker" yaml:"jobs_per_worker"`
+	WarmInstancesUnregistered       bool   `json:"warm_instances_unregistered" yaml:"warm_instances_unregistered"`
+	DenyHostDockerSocket            bool   `json:"deny_host_docker_socket" yaml:"deny_host_docker_socket"`
+	DenyNestedVirtualization        bool   `json:"deny_nested_virtualization" yaml:"deny_nested_virtualization"`
+	DenyPrivateNetworkByDefault     bool   `json:"deny_private_network_by_default" yaml:"deny_private_network_by_default"`
+	CPUSchedulingMode               string `json:"cpu_scheduling_mode" yaml:"cpu_scheduling_mode"`
+	HardMemoryExcludesEmergencySwap bool   `json:"hard_memory_excludes_emergency_swap" yaml:"hard_memory_excludes_emergency_swap"`
+	EmergencySwapSchedulable        bool   `json:"emergency_swap_schedulable" yaml:"emergency_swap_schedulable"`
+	AllowMemoryBallooning           bool   `json:"allow_memory_ballooning" yaml:"allow_memory_ballooning"`
 }
 
 // HostReserve is capacity the fleet must leave for everything that is not the

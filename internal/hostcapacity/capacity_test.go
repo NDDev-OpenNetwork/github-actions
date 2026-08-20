@@ -43,7 +43,7 @@ func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 // The container migration removes the old 8-GiB VM granularity. Two measured
 // 6-GiB heavy workers plus the host reserve fit on every 15991-MiB member;
 // a third does not. The ten-unit logical CPU budget leaves space for one light
-// job when the swap-backed committed-memory envelope and live load admit it.
+// job only when the physical-RAM commitment envelope and live pressure admit it.
 func TestTwoIntegrationContainersFitAndAThirdDoesNot(t *testing.T) {
 	t.Parallel()
 	cfg := load(t, "example-runner-2.yaml")

@@ -3,6 +3,21 @@
 All notable changes are documented here. The project follows Semantic
 Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- Published fleet contract v2 for the current one-job ephemeral Incus-container
+  implementation. The rendered contract now carries each runner class's trust,
+  credentials, network/cache policy, hard resources and cold-only warm support.
+- Replaced the ambiguous `worker_kind: incus-instance`, `jobs_per_vm` and
+  `allow_cpu_overcommit` platform fields with container- and scheduler-native
+  semantics. Deployment overlays must declare weighted CPU overcommit and prove
+  that hard memory excludes non-schedulable emergency swap.
+- Cluster admission no longer adds total or free swap to worker memory
+  capacity. A deployment overlay can be checked against the exact public
+  contract with `gha-fleet fleet-contract --config <path>`.
+
 ## [0.1.1] - 2026-08-16
 
 First release of the NDDev GitHub Actions fleet as an open-source control plane
