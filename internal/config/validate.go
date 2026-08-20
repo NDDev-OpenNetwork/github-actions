@@ -58,7 +58,7 @@ func (c Config) Validate() error {
 	requireEqual(add, "control_plane.provider", c.ControlPlane.Provider, "incus")
 	validateVersion(add, "control_plane.provider_version", c.ControlPlane.ProviderVersion)
 	requireEqual(add, "control_plane.provider_interface", c.ControlPlane.ProviderInterface, "v0.1.0")
-	requireEqual(add, "control_plane.worker_kind", c.ControlPlane.WorkerKind, "incus-instance")
+	requireEqual(add, "control_plane.worker_kind", c.ControlPlane.WorkerKind, "incus-container")
 	requireEqual(add, "control_plane.runner", c.ControlPlane.Runner, "actions/runner")
 	validateVersion(add, "control_plane.runner_version", c.ControlPlane.RunnerVersion)
 	requireEqual(add, "control_plane.runner_update_policy", c.ControlPlane.RunnerUpdatePolicy, "image-canary")
@@ -67,8 +67,8 @@ func (c Config) Validate() error {
 	if !c.Guardrails.RequireEphemeral {
 		add("guardrails.require_ephemeral", "must be true")
 	}
-	if c.Guardrails.JobsPerVM != 1 {
-		add("guardrails.jobs_per_vm", "must be exactly 1")
+	if c.Guardrails.JobsPerWorker != 1 {
+		add("guardrails.jobs_per_worker", "must be exactly 1")
 	}
 	if !c.Guardrails.WarmInstancesUnregistered {
 		add("guardrails.warm_instances_unregistered", "must be true")
@@ -82,8 +82,14 @@ func (c Config) Validate() error {
 	if !c.Guardrails.DenyPrivateNetworkByDefault {
 		add("guardrails.deny_private_network_by_default", "must be true")
 	}
-	if c.Guardrails.AllowCPUOvercommit {
-		add("guardrails.allow_cpu_overcommit", "must remain false until benchmark approval")
+	if c.Guardrails.CPUSchedulingMode != "weighted-overcommit" {
+		add("guardrails.cpu_scheduling_mode", "must be weighted-overcommit because limits.cpu.allowance is a work-conserving share")
+	}
+	if !c.Guardrails.HardMemoryExcludesEmergencySwap {
+		add("guardrails.hard_memory_excludes_emergency_swap", "must be true")
+	}
+	if c.Guardrails.EmergencySwapSchedulable {
+		add("guardrails.emergency_swap_schedulable", "must be false")
 	}
 	if c.Guardrails.AllowMemoryBallooning {
 		add("guardrails.allow_memory_ballooning", "must remain false until benchmark approval")

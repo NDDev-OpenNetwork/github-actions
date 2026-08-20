@@ -22,7 +22,8 @@ func TestProjectCeilingsAdmitTheDedicatedShapeAndRefuseBeyondIt(t *testing.T) {
 	}
 	// The field is a logical admission budget, not an Incus cpuset limit. Ten
 	// weighted units allow one opportunistic two-unit worker while placement
-	// still closes at load 7.84 and the committed RAM+swap envelope.
+	// still closes under the measured pressure policy and the physical-RAM
+	// commitment envelope. Emergency swap is not schedulable capacity.
 
 	for name, mutate := range map[string]func(*Config){
 		"more logical CPU units than the bounded burst": func(c *Config) { c.Incus.ProjectMaxCPUUnits = 11 },

@@ -13,13 +13,65 @@
 # .github/branch-protection.yaml, then stamps the commit it was rendered at.
 # None of that is written down here, because a contract that restates its own
 # sources is a contract that can disagree with them.
-schema_version: 1
+schema_version: 2
 
 # Bumped when a consumer would have to re-read the contract to stay correct:
 # a runner class withdrawn, a tenancy boundary narrowed, an admission rule
 # changed. Adding a class or a tenant does not bump it -- that only widens what
 # is on offer.
-contract_version: 1
+contract_version: 2
+
+execution:
+  worker_kind: incus-container
+  ephemeral: true
+  jobs_per_worker: 1
+  executed_worker_disposition: destroy
+  warm_worker_reuse: forbidden
+
+resource_semantics:
+  memory_commitment: hard
+  hard_memory_excludes_emergency_swap: true
+  emergency_swap_schedulable: false
+  cpu_mode: weighted-overcommit
+  cpu_hard_quota: false
+  pressure_signals:
+    - cpu-utilization
+    - cpu-psi
+    - memory-psi
+    - io-psi
+  admission_hysteresis_required: true
+
+lifecycle:
+  states:
+    - queued
+    - reserved
+    - acquiring
+    - acquired
+    - provisioning
+    - running
+    - stopping
+    - deleting
+    - terminal
+  phase_sources:
+    queued: queue-intent:queued
+    reserved: queue-intent:assigned
+    acquiring: queue-intent:acquiring
+    acquired: queue-intent:acquired
+    provisioning: provider-lease:admitted
+    running: queue-intent:running
+    stopping: provider-lease:deleting
+    deleting: provider-lease:deleting
+    terminal: reconciliation:removed
+  ambiguous_authoritative_state: retain
+  capacity_release: exactly-once
+
+observability:
+  phase_counts: true
+  phase_oldest_age: true
+  transition_histograms: true
+  bounded_correlation_identity: true
+  container_admission_readiness: required
+  vm_pilot_readiness: deprecated
 
 # What a consumer may rely on, and for how long.
 guarantees:
@@ -31,7 +83,7 @@ guarantees:
       rather than failing.
   - subject: job-isolation
     promise: >-
-      One job per virtual machine, always. A worker is created for a job,
+      One job per ephemeral Incus container, always. A worker is created for a job,
       destroyed after it, and never reused or returned to a pool. This is the
       property the whole design exists for and it is not negotiable per tenant.
   - subject: tenant-boundary
@@ -58,18 +110,4 @@ not_contractual:
 # Open work a consumer should know about before depending on this fleet for
 # something it does not yet do. Issue numbers only: their state is in GitHub, and
 # copying it here would make this file wrong the moment one closes.
-open_blockers:
-  - issue: 216
-    subject: Per-host queue capacity is compiled in at one job, in nine places.
-  - issue: 236
-    subject: Cache prefix root is a single-account constant, so tenants share one
-      read-write namespace.
-  - issue: 240
-    subject: A pool's declared tenant is enforced, but the provider boundary is
-      still the union of every tenant rather than the pool's own.
-  - issue: 253
-    subject: Queue admission refuses a message carrying a second assigned job, so
-      a backlog refuses itself.
-  - issue: 263
-    subject: The provider version names a release rather than a build; two hosts
-      ran different binaries under one version.
+open_blockers: []

@@ -63,10 +63,10 @@ func TestFleetHostStateSumsOnlineClusterMembers(t *testing.T) {
 
 	// Two online members at six schedulable CPU units each.
 	require.Equal(t, 12, state.TotalCPUUnits)
-	require.Equal(t, 36*1024, state.TotalMemoryMiB)
-	// Free plus reclaimable cache and bounded free swap: (10+1+2) +
-	// (12+0+2) GiB.
-	require.Equal(t, 27*1024, state.AvailableMemoryMiB)
+	// Emergency swap is recovery headroom, not schedulable hard memory.
+	require.Equal(t, 32*1024, state.TotalMemoryMiB)
+	// Free plus reclaimable cache, excluding swap: (10+1) + (12+0) GiB.
+	require.Equal(t, 23*1024, state.AvailableMemoryMiB)
 	// The worst member, not the average: 50% free beats 90% free hiding it.
 	require.Equal(t, 50, state.FreeDiskPercent)
 

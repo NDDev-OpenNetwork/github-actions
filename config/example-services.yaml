@@ -29,7 +29,7 @@ control_plane:
   provider: incus
   provider_version: v0.1.5-nddev.40
   provider_interface: v0.1.0
-  worker_kind: incus-instance
+  worker_kind: incus-container
   runner: actions/runner
   runner_version: v2.336.0
   runner_update_policy: image-canary
@@ -63,12 +63,14 @@ incus:
 
 guardrails:
   require_ephemeral: true
-  jobs_per_vm: 1
+  jobs_per_worker: 1
   warm_instances_unregistered: true
   deny_host_docker_socket: true
   deny_nested_virtualization: true
   deny_private_network_by_default: true
-  allow_cpu_overcommit: false
+  cpu_scheduling_mode: weighted-overcommit
+  hard_memory_excludes_emergency_swap: true
+  emergency_swap_schedulable: false
   allow_memory_ballooning: false
 
 host_reserve:

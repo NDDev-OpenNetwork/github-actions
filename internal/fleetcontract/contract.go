@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,6 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmbootstrap"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmderivative"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
@@ -39,11 +41,82 @@ const maxDeclarationBytes = 64 * 1024
 
 // Declaration is config/fleet-contract.yaml.
 type Declaration struct {
-	SchemaVersion   int         `json:"schema_version" yaml:"schema_version"`
-	ContractVersion int         `json:"contract_version" yaml:"contract_version"`
-	Guarantees      []Guarantee `json:"guarantees" yaml:"guarantees"`
-	NotContractual  []string    `json:"not_contractual" yaml:"not_contractual"`
-	OpenBlockers    []Blocker   `json:"open_blockers" yaml:"open_blockers"`
+	SchemaVersion     int               `json:"schema_version" yaml:"schema_version"`
+	ContractVersion   int               `json:"contract_version" yaml:"contract_version"`
+	Execution         Execution         `json:"execution" yaml:"execution"`
+	ResourceSemantics ResourceSemantics `json:"resource_semantics" yaml:"resource_semantics"`
+	Lifecycle         Lifecycle         `json:"lifecycle" yaml:"lifecycle"`
+	Observability     Observability     `json:"observability" yaml:"observability"`
+	Guarantees        []Guarantee       `json:"guarantees" yaml:"guarantees"`
+	NotContractual    []string          `json:"not_contractual" yaml:"not_contractual"`
+	OpenBlockers      []Blocker         `json:"open_blockers" yaml:"open_blockers"`
+}
+
+// ValidateConfig proves that one deployment overlay implements this exact
+// public contract without making private topology part of the public source.
+func ValidateConfig(contract Contract, platform platformconfig.Config) error {
+	if platform.ControlPlane.WorkerKind != contract.Execution.WorkerKind ||
+		platform.Guardrails.RequireEphemeral != contract.Execution.Ephemeral ||
+		platform.Guardrails.JobsPerWorker != contract.Execution.JobsPerWorker {
+		return fmt.Errorf("execution semantics differ from fleet contract v%d", contract.ContractVersion)
+	}
+	if platform.Guardrails.CPUSchedulingMode != contract.ResourceSemantics.CPUMode ||
+		platform.Guardrails.HardMemoryExcludesEmergencySwap != contract.ResourceSemantics.HardMemoryExcludesEmergencySwap ||
+		platform.Guardrails.EmergencySwapSchedulable != contract.ResourceSemantics.EmergencySwapSchedulable {
+		return fmt.Errorf("resource semantics differ from fleet contract v%d", contract.ContractVersion)
+	}
+	for _, class := range contract.RunnerClasses {
+		pool, exists := platform.Pool(class.Label)
+		if !exists {
+			return fmt.Errorf("deployment overlay has no pool for published class %q", class.Label)
+		}
+		backend, exists := platform.Backend(pool.Backend)
+		if !exists || backend.Implementation != class.WorkerKind {
+			return fmt.Errorf("pool %q backend does not implement %s", class.Label, class.WorkerKind)
+		}
+		if pool.Trust != class.Trust || pool.Capabilities.Credentials != class.Credentials ||
+			pool.Capabilities.NetworkPolicy != class.NetworkPolicy || pool.Capabilities.CacheWriteScope != class.CacheWriteScope ||
+			pool.Capabilities.Docker != class.Docker || pool.Resources.VCPU != class.Resources.VCPU ||
+			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB ||
+			pool.Warm.TargetReady != class.Warm.TargetReady || pool.Warm.MaxReady != class.Warm.MaxReady {
+			return fmt.Errorf("pool %q capability or resource shape differs from fleet contract v%d", class.Label, contract.ContractVersion)
+		}
+	}
+	return nil
+}
+
+type Execution struct {
+	WorkerKind                string `json:"worker_kind" yaml:"worker_kind"`
+	Ephemeral                 bool   `json:"ephemeral" yaml:"ephemeral"`
+	JobsPerWorker             int    `json:"jobs_per_worker" yaml:"jobs_per_worker"`
+	ExecutedWorkerDisposition string `json:"executed_worker_disposition" yaml:"executed_worker_disposition"`
+	WarmWorkerReuse           string `json:"warm_worker_reuse" yaml:"warm_worker_reuse"`
+}
+
+type ResourceSemantics struct {
+	MemoryCommitment                string   `json:"memory_commitment" yaml:"memory_commitment"`
+	HardMemoryExcludesEmergencySwap bool     `json:"hard_memory_excludes_emergency_swap" yaml:"hard_memory_excludes_emergency_swap"`
+	EmergencySwapSchedulable        bool     `json:"emergency_swap_schedulable" yaml:"emergency_swap_schedulable"`
+	CPUMode                         string   `json:"cpu_mode" yaml:"cpu_mode"`
+	CPUHardQuota                    bool     `json:"cpu_hard_quota" yaml:"cpu_hard_quota"`
+	PressureSignals                 []string `json:"pressure_signals" yaml:"pressure_signals"`
+	AdmissionHysteresisRequired     bool     `json:"admission_hysteresis_required" yaml:"admission_hysteresis_required"`
+}
+
+type Lifecycle struct {
+	States                      []string          `json:"states" yaml:"states"`
+	PhaseSources                map[string]string `json:"phase_sources" yaml:"phase_sources"`
+	AmbiguousAuthoritativeState string            `json:"ambiguous_authoritative_state" yaml:"ambiguous_authoritative_state"`
+	CapacityRelease             string            `json:"capacity_release" yaml:"capacity_release"`
+}
+
+type Observability struct {
+	PhaseCounts                 bool   `json:"phase_counts" yaml:"phase_counts"`
+	PhaseOldestAge              bool   `json:"phase_oldest_age" yaml:"phase_oldest_age"`
+	TransitionHistograms        bool   `json:"transition_histograms" yaml:"transition_histograms"`
+	BoundedCorrelationIdentity  bool   `json:"bounded_correlation_identity" yaml:"bounded_correlation_identity"`
+	ContainerAdmissionReadiness string `json:"container_admission_readiness" yaml:"container_admission_readiness"`
+	VMPilotReadiness            string `json:"vm_pilot_readiness" yaml:"vm_pilot_readiness"`
 }
 
 type Guarantee struct {
@@ -65,10 +138,14 @@ type Contract struct {
 	// anything else would be a contract about a tree nobody named.
 	Commit string `json:"commit"`
 
-	RunnerClasses []RunnerClass `json:"runner_classes"`
-	Tenants       []TenantEntry `json:"tenants"`
-	Artifacts     Artifacts     `json:"artifacts"`
-	Merge         Merge         `json:"merge"`
+	RunnerClasses     []RunnerClass     `json:"runner_classes"`
+	Tenants           []TenantEntry     `json:"tenants"`
+	Artifacts         Artifacts         `json:"artifacts"`
+	Merge             Merge             `json:"merge"`
+	Execution         Execution         `json:"execution"`
+	ResourceSemantics ResourceSemantics `json:"resource_semantics"`
+	Lifecycle         Lifecycle         `json:"lifecycle"`
+	Observability     Observability     `json:"observability"`
 
 	Guarantees     []Guarantee `json:"guarantees"`
 	NotContractual []string    `json:"not_contractual"`
@@ -77,11 +154,31 @@ type Contract struct {
 
 // RunnerClass is one label a consumer may put in `runs-on`.
 type RunnerClass struct {
-	Label string `json:"label"`
-	Image string `json:"image"`
+	Label           string `json:"label"`
+	Image           string `json:"image"`
+	WorkerKind      string `json:"worker_kind"`
+	Ephemeral       bool   `json:"ephemeral"`
+	JobsPerWorker   int    `json:"jobs_per_worker"`
+	Trust           string `json:"trust"`
+	Credentials     string `json:"credentials"`
+	NetworkPolicy   string `json:"network_policy"`
+	CacheWriteScope string `json:"cache_write_scope"`
 	// Docker reports whether a job of this class can run containers and service
 	// containers. It is the one capability difference a consumer chooses on.
-	Docker bool `json:"docker"`
+	Docker    bool      `json:"docker"`
+	Resources Resources `json:"resources"`
+	Warm      Warm      `json:"warm"`
+}
+
+type Resources struct {
+	VCPU      int `json:"vcpu"`
+	MemoryMiB int `json:"memory_mib"`
+	DiskGiB   int `json:"disk_gib"`
+}
+type Warm struct {
+	Supported   bool `json:"supported"`
+	TargetReady int  `json:"target_ready"`
+	MaxReady    int  `json:"max_ready"`
 }
 
 // TenantEntry is one account the fleet admits work from.
@@ -142,12 +239,16 @@ func Build(sources Sources, commit string) (Contract, error) {
 	classes := make([]RunnerClass, 0, len(garmbootstrap.PublishedScaleSets()))
 	for _, class := range garmbootstrap.PublishedScaleSets() {
 		classes = append(classes, RunnerClass{
-			Label: class.Name,
-			Image: class.Image,
-			// A class boots the Docker-capable image exactly when it is the
-			// integration class; deriving it from the image alias rather than
-			// from the name keeps the two from disagreeing.
-			Docker: class.Image == garmbootstrap.IntegrationImage,
+			Label:         class.Name,
+			Image:         class.Image,
+			WorkerKind:    declaration.Execution.WorkerKind,
+			Ephemeral:     declaration.Execution.Ephemeral,
+			JobsPerWorker: declaration.Execution.JobsPerWorker,
+			Trust:         class.Trust, Credentials: class.Credentials,
+			NetworkPolicy: class.NetworkPolicy, CacheWriteScope: class.CacheWriteScope,
+			Docker:    class.Docker,
+			Resources: Resources{VCPU: class.VCPU, MemoryMiB: class.MemoryMiB, DiskGiB: class.DiskGiB},
+			Warm:      Warm{Supported: false, TargetReady: 0, MaxReady: 0},
 		})
 	}
 
@@ -179,7 +280,9 @@ func Build(sources Sources, commit string) (Contract, error) {
 			ProviderInterface: provider.InterfaceVersion,
 			IncusSDKVersion:   provider.Runtime.IncusSDKVersion,
 		},
-		Merge:          merge,
+		Merge:     merge,
+		Execution: declaration.Execution, ResourceSemantics: declaration.ResourceSemantics,
+		Lifecycle: declaration.Lifecycle, Observability: declaration.Observability,
 		Guarantees:     declaration.Guarantees,
 		NotContractual: declaration.NotContractual,
 		OpenBlockers:   declaration.OpenBlockers,
@@ -257,11 +360,35 @@ func LoadDeclaration(path string) (Declaration, error) {
 }
 
 func (d Declaration) Validate() error {
-	if d.SchemaVersion != 1 {
+	if d.SchemaVersion != 2 {
 		return fmt.Errorf("schema_version: %d is not a schema this reader speaks", d.SchemaVersion)
 	}
 	if d.ContractVersion < 1 {
 		return fmt.Errorf("contract_version: %d must be at least 1", d.ContractVersion)
+	}
+	if d.ContractVersion < 2 || d.Execution.WorkerKind != "incus-container" || !d.Execution.Ephemeral || d.Execution.JobsPerWorker != 1 || d.Execution.ExecutedWorkerDisposition != "destroy" || d.Execution.WarmWorkerReuse != "forbidden" {
+		return fmt.Errorf("execution: contract v2 requires one-job ephemeral Incus containers that are destroyed and never reused")
+	}
+	if d.ResourceSemantics.MemoryCommitment != "hard" || !d.ResourceSemantics.HardMemoryExcludesEmergencySwap || d.ResourceSemantics.EmergencySwapSchedulable || d.ResourceSemantics.CPUMode != "weighted-overcommit" || d.ResourceSemantics.CPUHardQuota || !d.ResourceSemantics.AdmissionHysteresisRequired {
+		return fmt.Errorf("resource_semantics: hard memory, non-schedulable swap, weighted CPU shares and hysteresis are required")
+	}
+	wantSignals := []string{"cpu-utilization", "cpu-psi", "memory-psi", "io-psi"}
+	if !slices.Equal(d.ResourceSemantics.PressureSignals, wantSignals) {
+		return fmt.Errorf("resource_semantics.pressure_signals: must be %v", wantSignals)
+	}
+	wantStates := []string{"queued", "reserved", "acquiring", "acquired", "provisioning", "running", "stopping", "deleting", "terminal"}
+	wantSources := map[string]string{
+		"queued": "queue-intent:queued", "reserved": "queue-intent:assigned",
+		"acquiring": "queue-intent:acquiring", "acquired": "queue-intent:acquired",
+		"provisioning": "provider-lease:admitted", "running": "queue-intent:running",
+		"stopping": "provider-lease:deleting", "deleting": "provider-lease:deleting",
+		"terminal": "reconciliation:removed",
+	}
+	if !slices.Equal(d.Lifecycle.States, wantStates) || !maps.Equal(d.Lifecycle.PhaseSources, wantSources) || d.Lifecycle.AmbiguousAuthoritativeState != "retain" || d.Lifecycle.CapacityRelease != "exactly-once" {
+		return fmt.Errorf("lifecycle: states and fail-closed exactly-once semantics are incomplete")
+	}
+	if !d.Observability.PhaseCounts || !d.Observability.PhaseOldestAge || !d.Observability.TransitionHistograms || !d.Observability.BoundedCorrelationIdentity || d.Observability.ContainerAdmissionReadiness != "required" || d.Observability.VMPilotReadiness != "deprecated" {
+		return fmt.Errorf("observability: phase metrics, bounded correlation and container readiness are required")
 	}
 	if len(d.Guarantees) == 0 {
 		return fmt.Errorf("guarantees: a contract that promises nothing is not a contract")
