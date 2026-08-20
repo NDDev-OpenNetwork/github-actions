@@ -43,7 +43,9 @@ Versioning.
 - Added GARM derivative `v0.2.1-nddev.47`: stale workflow-job reconciliation
   takes the oldest rows first, and GitHub job substitution atomically transfers
   an already-admitted same-scale-set capacity token to the job that actually
-  started instead of losing exact lifecycle correlation.
+  started instead of losing exact lifecycle correlation. A uniquely verified
+  still-queued DB job also rehydrates its expired provisional intent, so an
+  acknowledged JobAssigned message cannot strand valid old work forever.
 
 ## [0.1.1] - 2026-08-16
 

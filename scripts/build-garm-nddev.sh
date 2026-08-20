@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="7e2b46e26a52818e39753cc8980494d553f16911597ddde087100f6826664c3f"
+readonly expected_binary_sha256="47de0e484a1e8bdba3399925ac0e08d3fe0fefa429582209777f292bf32f3297"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -52,6 +52,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0016-recheck-terminal-delete-conflict.patch"
   "third_party/garm/patches/0017-authoritative-queue-intent-reconciliation.patch"
   "third_party/garm/patches/0018-oldest-first-stale-job-reconciliation.patch"
+  "third_party/garm/patches/0019-authoritative-live-job-rehydration.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -72,6 +73,7 @@ readonly patch_sha256s=(
   "60254f449fd0175db2636108cc65b8ea761a7b3933b1b185d6417ba48caffecb"
   "fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad"
   "7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2"
+  "e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -80,8 +82,8 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "3456b598d57b970a7681f594d617d8910cf142835d810a3675e3a6acd08e5b28"
-  "0ffa39e4ff239ee830279c3427ab57523e89daf154949e81aa353355ac10e7d9"
+  "c02d779fc421315ef2e614992e7f48bcbe73fcfa3bb0002f61ef8b240f9aa2d5"
+  "be24513fb39a9187c0e37a3cef3e15459c96904e3d3e3d89b35cd1118c2fc48e"
   "2ac19df649b166a1ea987bb491200baae5fcc846446ff9faef402972c2b43b27"
   "73ff35df51cae78dd222cb84457930424a678815e687afd10a8061bfcf17913e"
 )

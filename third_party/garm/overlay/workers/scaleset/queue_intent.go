@@ -158,6 +158,57 @@ func NDDevRemoveQueueIntent(ctx context.Context, jobID string) (bool, error) {
 	return removed, err
 }
 
+// NDDevEnsureQueueIntent rehydrates one GitHub-authoritatively queued DB job
+// after its acknowledged JobAssigned token expired. The DB row and current
+// scale-set identity are supplied by GARM's authoritative reconciler; this
+// function only restores bounded admission and never invents a job.
+func NDDevEnsureQueueIntent(ctx context.Context, scaleSet params.ScaleSet, entity params.ForgeEntity, job params.Job) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return newQueueIntentCoordinatorFromEnvironment().EnsureAuthoritative(scaleSet, entity, job)
+}
+
+func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, entity params.ForgeEntity, job params.Job) (bool, error) {
+	config, err := c.loadConfig()
+	if err != nil {
+		return false, err
+	}
+	if scaleSet.ScaleSetID <= 0 || !validQueueText(scaleSet.Name) || !validQueueText(job.ScaleSetJobID) ||
+		!validQueueText(entity.Owner) || !validQueueText(job.RepositoryOwner) || !validQueueText(job.RepositoryName) ||
+		job.RepositoryOwner != entity.Owner {
+		return false, fmt.Errorf("authoritative queued job has incomplete or cross-entity identity")
+	}
+	repository := job.RepositoryOwner + "/" + job.RepositoryName
+	if !validRepository(repository) {
+		return false, fmt.Errorf("authoritative queued job repository is invalid")
+	}
+	created := false
+	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
+		key := queueIntentKey(int64(scaleSet.ScaleSetID), job.ScaleSetJobID)
+		if _, exists := journal.Intents[key]; exists {
+			return nil
+		}
+		queueTime := job.CreatedAt.UTC()
+		if queueTime.IsZero() || queueTime.After(now) {
+			queueTime = now
+		}
+		journal.Intents[key] = queueIntent{
+			Key: key, ScaleSetID: int64(scaleSet.ScaleSetID), JobID: job.ScaleSetJobID,
+			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
+			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
+			QueueTime: queueTime, State: queueStateQueued,
+			Priority: baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
+			UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
+		}
+		ensureRepositoryState(journal, config, repository)
+		admitQueuedToBudget(journal, config, now)
+		created = true
+		return nil
+	})
+	return created, err
+}
+
 func (c *queueIntentCoordinator) Validate() error {
 	config, err := c.loadConfig()
 	if err != nil {
