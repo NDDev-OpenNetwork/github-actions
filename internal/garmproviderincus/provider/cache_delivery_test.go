@@ -73,6 +73,22 @@ func TestCacheDeliveryFailsOpenWithoutCacheForAnotherRepository(t *testing.T) {
 	require.Zero(t, loads, "a foreign repository must not load the github-actions credential")
 }
 
+func TestOrganizationBootstrapCreatesWithoutAmbiguousCacheCredential(t *testing.T) {
+	provider := newTestProvider(new(MockIncusServer))
+	loads := 0
+	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
+		loads++
+		return testCacheDelivery(), nil
+	}
+	bootstrap := validBootstrap()
+	bootstrap.RepoURL = "https://github.com/example-org"
+	raw, enabled, err := provider.renderCacheAssignment(bootstrap)
+	require.NoError(t, err)
+	require.False(t, enabled)
+	require.Nil(t, raw)
+	require.Zero(t, loads, "account-only organization create must not open a repository credential")
+}
+
 func TestRenderedAssignmentBindsOneJobAndContainsNoSecretInCloudConfig(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
 	delivery := testCacheDelivery()

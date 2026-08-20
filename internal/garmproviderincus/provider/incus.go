@@ -1205,6 +1205,14 @@ func (l *Incus) narrowBootstrapRepository(ctx context.Context, bootstrap commonP
 	}
 	repository, err := resolver.ResolveRepository(ctx, bootstrap)
 	if err != nil {
+		if l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
+			// GitHub's organization JobAssigned message has no repository and
+			// JobAvailable is emitted only after a runner exists. The first worker
+			// may therefore carry the reviewed account identity, but cache delivery
+			// separately refuses this ambiguous shape. A later repository-bound
+			// event remains the authoritative enrichment path.
+			return bootstrap, nil
+		}
 		return bootstrap, runnerErrors.NewBadRequestError(
 			"repository %q cannot be narrowed through queue intent: %s", bootstrap.RepoURL, err)
 	}

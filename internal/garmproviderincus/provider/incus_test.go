@@ -992,15 +992,17 @@ func TestCanonicalRepositoryIdentity(t *testing.T) {
 func TestOrganizationBootstrapIsNarrowedThroughQueueIntent(t *testing.T) {
 	bootstrap := validBootstrap()
 	bootstrap.RepoURL = "https://github.com/example-org/"
-	provider := &Incus{admission: repositoryResolvingAdmission{repository: "example-org/example-actions"}}
+	provider := newTestProvider(new(MockIncusServer))
+	provider.admission = repositoryResolvingAdmission{repository: "example-org/example-actions"}
 
 	resolved, err := provider.narrowBootstrapRepository(context.Background(), bootstrap)
 	require.NoError(t, err)
 	require.Equal(t, "https://github.com/example-org/example-actions", resolved.RepoURL)
 
 	provider.admission = repositoryResolvingAdmission{err: errors.New("no concrete repository")}
-	_, err = provider.narrowBootstrapRepository(context.Background(), bootstrap)
-	require.ErrorContains(t, err, "cannot be narrowed through queue intent")
+	resolved, err = provider.narrowBootstrapRepository(context.Background(), bootstrap)
+	require.NoError(t, err)
+	require.Equal(t, bootstrap.RepoURL, resolved.RepoURL)
 }
 
 func TestWholeAccountBootstrapWithoutTrailingSlashIsNarrowed(t *testing.T) {
