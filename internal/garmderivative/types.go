@@ -85,8 +85,11 @@ type RuntimeContract struct {
 	ProviderRetryBackoffCapSeconds           int  `json:"provider_retry_backoff_cap_seconds" yaml:"provider_retry_backoff_cap_seconds"`
 	CapacityRetryBackoffCapSeconds           int  `json:"capacity_retry_backoff_cap_seconds" yaml:"capacity_retry_backoff_cap_seconds"`
 	CapacityRetryWakeAfterDelete             bool `json:"capacity_retry_wake_after_delete" yaml:"capacity_retry_wake_after_delete"`
+	BoundedScaleUpCapacityProbe              bool `json:"bounded_scale_up_capacity_probe" yaml:"bounded_scale_up_capacity_probe"`
 	AuthoritativeJobReconciliation           bool `json:"authoritative_job_reconciliation" yaml:"authoritative_job_reconciliation"`
 	AuthoritativeQueueIntentReconciliation   bool `json:"authoritative_queue_intent_reconciliation" yaml:"authoritative_queue_intent_reconciliation"`
+	AuthoritativeIdleOfflineRunnerReaping    bool `json:"authoritative_idle_offline_runner_reaping" yaml:"authoritative_idle_offline_runner_reaping"`
+	AuthoritativeAccessRefusalBackoffSeconds int  `json:"authoritative_access_refusal_backoff_seconds" yaml:"authoritative_access_refusal_backoff_seconds"`
 	JobReconciliationIntervalSeconds         int  `json:"job_reconciliation_interval_seconds" yaml:"job_reconciliation_interval_seconds"`
 	JobReconciliationBatchSize               int  `json:"job_reconciliation_batch_size" yaml:"job_reconciliation_batch_size"`
 	OfficialActionsRunnerUnchanged           bool `json:"official_actions_runner_unchanged" yaml:"official_actions_runner_unchanged"`

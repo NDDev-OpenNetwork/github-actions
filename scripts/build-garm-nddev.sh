@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.48"
+readonly derivative_version="v0.2.1-nddev.49"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="d0b7f57714756fe1283d815dc0ec9b624993c92aae1537a4b4638ae2e2c83ed3"
+readonly expected_binary_sha256="808f77bf5f85a38b2ef4e48e69ff200cd289218ab518e3562dbbd957db485fd2"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -54,6 +54,9 @@ readonly patch_paths=(
   "third_party/garm/patches/0018-oldest-first-stale-job-reconciliation.patch"
   "third_party/garm/patches/0019-authoritative-live-job-rehydration.patch"
   "third_party/garm/patches/0020-reachable-scale-set-job-reconciliation.patch"
+  "third_party/garm/patches/0021-reap-idle-offline-jit-runner.patch"
+  "third_party/garm/patches/0022-bound-capacity-probe-burst.patch"
+  "third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -76,6 +79,9 @@ readonly patch_sha256s=(
   "7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2"
   "e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b"
   "24661113a5fa3db00fc12f57da9764b1c5dc2c112e0a14b50eb39ffa9f6079ae"
+  "cb072aeacbbfa2761dc9fb9ec0799e9e2116135bdaf70372ed388205f89868f2"
+  "d4a4f73c5a45708149edc9782c2772cede3c1bc9fcb523be07d4f9c98f51fc4b"
+  "45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"

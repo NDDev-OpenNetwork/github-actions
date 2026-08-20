@@ -26,7 +26,7 @@ func TestAFreshlyWrittenBundleDecodesHere(t *testing.T) {
 		OwnerType:           OwnerTypeOrganization,
 		Repository:          selected.Repository,
 		RepositorySelection: "all",
-		Permissions:         map[string]string{"administration": "write", "metadata": "read", OrganizationRunnersPermission: "write"},
+		Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read", OrganizationRunnersPermission: "write"},
 		PrivateKeyPath:      filepath.Join("/tmp", "github-app-private-key.pem"),
 		VerifiedAt:          time.Now().UTC(),
 	}
@@ -46,7 +46,7 @@ func TestAnUnknownOwnerTypeIsRefused(t *testing.T) {
 		OwnerType:           "enterprise",
 		Repository:          selected.Repository,
 		RepositorySelection: "all",
-		Permissions:         map[string]string{"administration": "write", "metadata": "read", OrganizationRunnersPermission: "write"},
+		Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read", OrganizationRunnersPermission: "write"},
 		PrivateKeyPath:      filepath.Join("/tmp", "github-app-private-key.pem"),
 		VerifiedAt:          time.Now().UTC(),
 	}

@@ -1,0 +1,62 @@
+diff --git a/workers/scaleset/bounded_scale_up_test.go b/workers/scaleset/bounded_scale_up_test.go
+new file mode 100644
+index 00000000..da090809
+--- /dev/null
++++ b/workers/scaleset/bounded_scale_up_test.go
+@@ -0,0 +1,23 @@
++package scaleset
++
++import "testing"
++
++func TestScaleUpBurstTarget(t *testing.T) {
++	t.Parallel()
++
++	tests := []struct {
++		current int
++		target  int
++		want    int
++	}{
++		{current: 0, target: 12, want: 1},
++		{current: 7, target: 12, want: 8},
++		{current: 7, target: 7, want: 7},
++		{current: 8, target: 7, want: 8},
++	}
++	for _, test := range tests {
++		if got := scaleUpBurstTarget(test.current, test.target); got != test.want {
++			t.Fatalf("scaleUpBurstTarget(%d, %d) = %d, want %d", test.current, test.target, got, test.want)
++		}
++	}
++}
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 39ccb7e8..f46fda94 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -864,6 +864,14 @@ func (w *Worker) handleScaleUp() {
+ 		slog.DebugContext(w.ctx, "target is less than or equal to current; not scaling up")
+ 		return
+ 	}
++	// A single scale-set message can request its whole maximum at once. Creating
++	// every JIT registration and DB row in one loop races ahead of provider
++	// admission: under saturation all of those asynchronous creates fail for the
++	// same reason before the first failure can establish the durable capacity
++	// backoff. Probe one new worker per reconciliation edge. The five-second
++	// safety ticker still ramps a healthy pool quickly, while a closed fleet pays
++	// for one failed probe rather than a target-sized create/delete herd.
++	target = scaleUpBurstTarget(current, target)
+ 	if err := providerWorker.NDDevScaleSetCreateAllowed(w.ctx, w.scaleSet, w.entity); err != nil {
+ 		slog.DebugContext(w.ctx, "provider retry preflight deferred scale up", "error", err)
+ 		return
+@@ -919,6 +927,13 @@ func (w *Worker) handleScaleUp() {
+ 	}
+ }
+ 
++func scaleUpBurstTarget(current, target int) int {
++	if target <= current {
++		return current
++	}
++	return current + 1
++}
++
+ func (w *Worker) githubToolsAvailable() bool {
+ 	entity, err := w.scaleSet.GetEntity()
+ 	if err != nil {

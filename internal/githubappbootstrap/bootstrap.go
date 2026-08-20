@@ -27,6 +27,12 @@ import (
 // form at all, so picking the wrong one is the difference between a bootstrap
 // that can recreate the deployed credential and one that cannot.
 const (
+	// ActionsReadPermission is required by authoritative lifecycle
+	// reconciliation. The scale-set message stream identifies a run and job,
+	// but deciding whether an old row is still queued requires the workflow-run
+	// jobs endpoint. Read is sufficient; the fleet never dispatches, cancels or
+	// modifies a workflow run through this credential.
+	ActionsReadPermission = "actions"
 	// OrganizationRunnersPermission is what POST /orgs/{org}/actions/runners/
 	// registration-token requires. Repository `administration` does not cover
 	// it: an organization entity without this permission creates its GARM
@@ -216,7 +222,10 @@ func (r Runner) Run(ctx context.Context, options Options, stdout io.Writer) (Ver
 // and an App that only ever backs a repository entity has no business holding
 // it, so it is requested on demand rather than always.
 func manifestPermissions(organizationRunners bool) map[string]string {
-	permissions := map[string]string{"administration": "write"}
+	permissions := map[string]string{
+		"administration":      "write",
+		ActionsReadPermission: "read",
+	}
 	if organizationRunners {
 		permissions[OrganizationRunnersPermission] = "write"
 	}

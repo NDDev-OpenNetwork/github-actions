@@ -160,18 +160,22 @@ func validateInstallationMetadata(installation verifiedInstallation, selected te
 	// The App is installed account-wide so one fleet can serve every repository
 	// the owner holds; `selected` stays valid for a narrower install. Account
 	// and exact managed repository are still pinned above, and the permission
-	// set below is still exactly administration=write plus metadata=read.
+	// set below is still exactly administration=write, actions=read and
+	// metadata=read.
 	if installation.RepositorySelection != "selected" && installation.RepositorySelection != "all" {
 		return fmt.Errorf("GitHub App repository selection is %q, want selected or all", installation.RepositorySelection)
 	}
-	// administration=write and metadata=read are the repository set. An App
+	// administration=write, actions=read and metadata=read are the repository
+	// set. An App
 	// that also backs an organization entity carries one more, and nothing
 	// beyond these three is accepted.
-	if installation.Permissions["administration"] != "write" || installation.Permissions["metadata"] != "read" {
-		return fmt.Errorf("GitHub App permissions differ from administration=write and metadata=read")
+	if installation.Permissions["administration"] != "write" ||
+		installation.Permissions[ActionsReadPermission] != "read" ||
+		installation.Permissions["metadata"] != "read" {
+		return fmt.Errorf("GitHub App permissions differ from administration=write, actions=read and metadata=read")
 	}
 	for name := range installation.Permissions {
-		if name != "administration" && name != "metadata" && name != OrganizationRunnersPermission {
+		if name != "administration" && name != ActionsReadPermission && name != "metadata" && name != OrganizationRunnersPermission {
 			return fmt.Errorf("GitHub App permissions include unexpected %q", name)
 		}
 	}

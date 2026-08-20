@@ -60,6 +60,7 @@ const (
 	// Mirrors githubappbootstrap. Duplicated rather than imported because the
 	// reconciler must not depend on the one-time bootstrap path to read a
 	// bundle that bootstrap already wrote and left behind.
+	ActionsReadPermission = "actions"
 	// Mirrors githubappbootstrap. An organization entity needs this permission
 	// on its App; a repository entity does not and should not hold it.
 	OrganizationRunnersPermission = "organization_self_hosted_runners"

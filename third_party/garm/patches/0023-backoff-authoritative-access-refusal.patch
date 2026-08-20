@@ -1,0 +1,140 @@
+diff --git a/runner/pool/authoritative_reconcile_backoff_test.go b/runner/pool/authoritative_reconcile_backoff_test.go
+new file mode 100644
+index 00000000..e2bea05f
+--- /dev/null
++++ b/runner/pool/authoritative_reconcile_backoff_test.go
+@@ -0,0 +1,36 @@
++package pool
++
++import (
++	"net/http"
++	"testing"
++	"time"
++)
++
++func TestAuthoritativeReconcileBackoff(t *testing.T) {
++	t.Parallel()
++
++	if got := authoritativeReconcileBackoff(http.StatusForbidden); got != 15*time.Minute {
++		t.Fatalf("403 backoff = %s, want 15m", got)
++	}
++	if got := authoritativeReconcileBackoff(http.StatusTooManyRequests); got != 15*time.Minute {
++		t.Fatalf("429 backoff = %s, want 15m", got)
++	}
++	if got := authoritativeReconcileBackoff(http.StatusInternalServerError); got != 0 {
++		t.Fatalf("500 backoff = %s, want ordinary per-job retry", got)
++	}
++
++	now := time.Unix(1_800_000_000, 0).UTC()
++	manager := &basePoolManager{}
++	if manager.authoritativeReconcileDeferred(now) {
++		t.Fatal("zero-value manager started deferred")
++	}
++	if !manager.deferAuthoritativeReconcile(now, http.StatusForbidden) {
++		t.Fatal("403 did not establish manager-wide backoff")
++	}
++	if !manager.authoritativeReconcileDeferred(now.Add(14 * time.Minute)) {
++		t.Fatal("manager-wide backoff expired early")
++	}
++	if manager.authoritativeReconcileDeferred(now.Add(15 * time.Minute)) {
++		t.Fatal("manager-wide backoff did not expire at its boundary")
++	}
++}
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 49d405b9..53dbb347 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -161,6 +161,11 @@ type basePoolManager struct {
+ 	tools       []commonParams.RunnerApplicationDownload
+ 	quit        chan struct{}
+ 	checkedJobs map[int64]time.Time
++	// authoritativeReconcileBlockedUntil is a manager-wide fail-closed
++	// permission/rate-limit backoff. Without it, one missing Actions permission
++	// causes the bounded row loop to issue another denied request for every old
++	// job every minute, consuming the same API budget runner operations need.
++	authoritativeReconcileBlockedUntil time.Time
+ 
+ 	managerIsRunning   bool
+ 	managerErrorReason string
+@@ -170,6 +175,37 @@ type basePoolManager struct {
+ 	backoff locking.InstanceDeleteBackoff
+ }
+ 
++const authoritativeReconcileAccessBackoff = 15 * time.Minute
++
++func authoritativeReconcileBackoff(status int) time.Duration {
++	switch status {
++	case http.StatusForbidden, http.StatusTooManyRequests:
++		return authoritativeReconcileAccessBackoff
++	default:
++		return 0
++	}
++}
++
++func (r *basePoolManager) deferAuthoritativeReconcile(now time.Time, status int) bool {
++	delay := authoritativeReconcileBackoff(status)
++	if delay == 0 {
++		return false
++	}
++	r.mux.Lock()
++	defer r.mux.Unlock()
++	until := now.Add(delay)
++	if until.After(r.authoritativeReconcileBlockedUntil) {
++		r.authoritativeReconcileBlockedUntil = until
++	}
++	return true
++}
++
++func (r *basePoolManager) authoritativeReconcileDeferred(now time.Time) bool {
++	r.mux.Lock()
++	defer r.mux.Unlock()
++	return now.Before(r.authoritativeReconcileBlockedUntil)
++}
++
+ func (r *basePoolManager) getProviderBaseParams(pool params.Pool) common.ProviderBaseParams {
+ 	r.mux.Lock()
+ 	defer r.mux.Unlock()
+@@ -1984,6 +2020,9 @@ func oldestQueuedJobs(jobs []params.Job) []params.Job {
+ // To avoid excessive API usage, only up to 10 jobs are checked per cycle and recently checked
+ // jobs are skipped for one minute.
+ func (r *basePoolManager) reconcileStaleJobs() error {
++	if r.authoritativeReconcileDeferred(time.Now()) {
++		return nil
++	}
+ 	queued, err := r.store.ListEntityJobsByStatus(r.ctx, r.entity.EntityType, r.entity.ID, params.JobStatusQueued)
+ 	if err != nil {
+ 		if errors.Is(err, runnerErrors.ErrNotFound) {
+@@ -2004,6 +2043,9 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 	queued = oldestQueuedJobs(queued)
+ 	checked := 0
+ 	for _, job := range queued {
++		if r.authoritativeReconcileDeferred(time.Now()) {
++			break
++		}
+ 		if checked >= 10 {
+ 			break
+ 		}
+@@ -2058,6 +2100,11 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 				checked++
+ 				continue
+ 			}
++			if ghResp != nil && r.deferAuthoritativeReconcile(time.Now(), ghResp.StatusCode) {
++				slog.WarnContext(r.ctx, "authoritative job reconciliation deferred after GitHub access refusal",
++					"status_code", ghResp.StatusCode,
++					"backoff", authoritativeReconcileAccessBackoff)
++			}
+ 			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to check job status on GitHub",
+ 				"job_id", job.WorkflowJobID)
+ 			locking.Unlock(lockKey, true)
+@@ -2109,6 +2156,11 @@ func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
+ 			if resp != nil && resp.StatusCode == http.StatusNotFound {
+ 				return r.deleteStaleScaleSetJob(job, "workflow run no longer exists")
+ 			}
++			if resp != nil && r.deferAuthoritativeReconcile(time.Now(), resp.StatusCode) {
++				slog.WarnContext(r.ctx, "authoritative job reconciliation deferred after GitHub access refusal",
++					"status_code", resp.StatusCode,
++					"backoff", authoritativeReconcileAccessBackoff)
++			}
+ 			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to list workflow run jobs", "run_id", job.RunID)
+ 			return false
+ 		}

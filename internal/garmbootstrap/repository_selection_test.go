@@ -68,7 +68,7 @@ func TestBundleRejectsExtraPermissionWhenAccountWide(t *testing.T) {
 		OwnerType:           OwnerTypeOrganization,
 		Repository:          testTenant().Repository,
 		RepositorySelection: "all",
-		Permissions:         map[string]string{"administration": "write", "metadata": "read", "contents": "write"},
+		Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read", "contents": "write"},
 		PrivateKeyPath:      "/staging/github-app-private-key.pem",
 		VerifiedAt:          now,
 	})
@@ -105,7 +105,7 @@ func bundleWithSelection(t *testing.T, now time.Time, selection string) string {
 		OwnerType:           OwnerTypeOrganization,
 		Repository:          testTenant().Repository,
 		RepositorySelection: selection,
-		Permissions:         map[string]string{"administration": "write", "metadata": "read"},
+		Permissions:         map[string]string{"administration": "write", ActionsReadPermission: "read", "metadata": "read"},
 		PrivateKeyPath:      "/staging/github-app-private-key.pem",
 		VerifiedAt:          now,
 	})
