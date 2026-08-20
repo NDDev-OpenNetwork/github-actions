@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.47
+derivative_version: v0.2.1-nddev.48
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -64,6 +64,9 @@ patches:
   - path: third_party/garm/patches/0019-authoritative-live-job-rehydration.patch
     sha256: e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b
     purpose: Rehydrate one bounded queue intent when GitHub authoritatively confirms an acknowledged JobAssigned DB row is still queued, preventing valid old work from deadlocking after its provisional TTL.
+  - path: third_party/garm/patches/0020-reachable-scale-set-job-reconciliation.patch
+    sha256: 24661113a5fa3db00fc12f57da9764b1c5dc2c112e0a14b50eb39ffa9f6079ae
+    purpose: Query scale-set protocol rows through a dedicated bounded SQL path so authoritative cleanup and live-job rehydration are reachable without leaking those rows into ordinary webhook pool consumption.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 889086c63a7d3244efb37cbd5bfbd72db1b5b1ce2078397b69f29cc5f6333792
@@ -91,7 +94,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 47de0e484a1e8bdba3399925ac0e08d3fe0fefa429582209777f292bf32f3297
+  binary_sha256: d0b7f57714756fe1283d815dc0ec9b624993c92aae1537a4b4638ae2e2c83ed3
 runtime_contract:
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
