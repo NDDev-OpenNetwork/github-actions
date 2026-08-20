@@ -58,6 +58,7 @@ type Build struct {
 	TargetArch           string `json:"target_arch" yaml:"target_arch"`
 	Trimpath             bool   `json:"trimpath" yaml:"trimpath"`
 	EmptyBuildID         bool   `json:"empty_build_id" yaml:"empty_build_id"`
+	VCSState             string `json:"vcs_state" yaml:"vcs_state"`
 	ReproducibleRebuilds int    `json:"reproducible_rebuilds" yaml:"reproducible_rebuilds"`
 }
 
@@ -151,8 +152,8 @@ func (m Manifest) Validate() error {
 	}
 	if m.Build.GoVersion != "go1.26.6" || m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
 		m.Build.TargetArch != "amd64" || !m.Build.Trimpath || !m.Build.EmptyBuildID ||
-		m.Build.ReproducibleRebuilds < 2 {
-		return fmt.Errorf("build: release requires go1.26.6, CGO disabled, linux/amd64, trimpath, empty build ID and two rebuilds")
+		m.Build.VCSState != "clean" || m.Build.ReproducibleRebuilds < 2 {
+		return fmt.Errorf("build: release requires go1.26.6, CGO disabled, linux/amd64, trimpath, empty build ID, clean VCS and two rebuilds")
 	}
 	return nil
 }

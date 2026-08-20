@@ -43,6 +43,7 @@ func TestValidateRejectsAnIdentityNothingCouldRelyOn(t *testing.T) {
 		{"source commit is short", func(m *Manifest) { m.Build.SourceCommit = "bb11bfb" }, "build.source_commit"},
 		{"binary digest is absent", func(m *Manifest) { m.Build.BinarySHA256 = "" }, "build.binary_sha256"},
 		{"CGO enabled", func(m *Manifest) { m.Build.CGOEnabled = true }, "CGO disabled"},
+		{"dirty source", func(m *Manifest) { m.Build.VCSState = "dirty" }, "build: release requires"},
 		{"one rebuild", func(m *Manifest) { m.Build.ReproducibleRebuilds = 1 }, "build: release requires"},
 	} {
 		mutated := base

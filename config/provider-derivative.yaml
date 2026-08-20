@@ -37,11 +37,12 @@ runtime:
 
 build:
   source_commit: bb11bfbfb107e63f623d29dd417555e4a44bbfde
-  binary_sha256: e7bec44711cd8a87b7409d864b25f9d247fac42fb550280439b3814a5cd63feb
+  binary_sha256: 69180b40d2b573854958cf10b10aceecd82d90be14360bb700d44d5443d1871f
   go_version: go1.26.6
   cgo_enabled: false
   target_os: linux
   target_arch: amd64
   trimpath: true
   empty_build_id: true
+  vcs_state: clean
   reproducible_rebuilds: 2
