@@ -344,6 +344,27 @@ func loadConfig(t *testing.T) config.Config {
 	return cfg
 }
 
+func TestDiagnosticRustFSFirewallUsesDeclaredServicesHost(t *testing.T) {
+	t.Parallel()
+	cfg := loadConfig(t)
+	cfg.Incus.ServicesHostAddress = "10.201.0.7"
+	plan, err := Build(cfg, []string{"nddev-linux-standard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range plan.HostFirewall.Rules {
+		if rule.Name != "services-rustfs-diagnostics" {
+			continue
+		}
+		command := strings.Join(rule.Args, " ")
+		if !strings.Contains(command, "from 10.201.0.7") || strings.Contains(command, "10.200.0.7") {
+			t.Fatalf("diagnostic route ignored declared services host: %s", command)
+		}
+		return
+	}
+	t.Fatal("diagnostic services-host firewall rule is absent")
+}
+
 // A pool that declares warm capacity is a pool somebody expects to run. If the
 // planner cannot build it, that expectation is silently false: the fast pool
 // asked for github-cache-only, no bridge implements it, and the pool sat at
