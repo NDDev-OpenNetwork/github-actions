@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.46"
+readonly derivative_version="v0.2.1-nddev.47"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="cc3af5b871cecb26615c3b1ea016809c4596d502f0c1185957da076c44cc2e6d"
+readonly expected_binary_sha256="47de0e484a1e8bdba3399925ac0e08d3fe0fefa429582209777f292bf32f3297"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -51,6 +51,8 @@ readonly patch_paths=(
   "third_party/garm/patches/0015-authoritative-terminal-delete.patch"
   "third_party/garm/patches/0016-recheck-terminal-delete-conflict.patch"
   "third_party/garm/patches/0017-authoritative-queue-intent-reconciliation.patch"
+  "third_party/garm/patches/0018-oldest-first-stale-job-reconciliation.patch"
+  "third_party/garm/patches/0019-authoritative-live-job-rehydration.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -70,6 +72,8 @@ readonly patch_sha256s=(
   "50123c3502e060566b4a78f55f850ae36b37f25988d200b10c6cec414a6655ac"
   "60254f449fd0175db2636108cc65b8ea761a7b3933b1b185d6417ba48caffecb"
   "fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad"
+  "7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2"
+  "e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -78,8 +82,8 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "7d8e5e06331cb9e3b93c5947d0eff6409eedd6072f20deeb997133fbb5ae9cdd"
-  "a668ae793b7605a2097949605732117e918c3fab034e9582ec4d5dc69e8a4083"
+  "889086c63a7d3244efb37cbd5bfbd72db1b5b1ce2078397b69f29cc5f6333792"
+  "9f78810612b237e6afd3495298dc11c573da1ef1c403a264772c2e2646733318"
   "2ac19df649b166a1ea987bb491200baae5fcc846446ff9faef402972c2b43b27"
   "73ff35df51cae78dd222cb84457930424a678815e687afd10a8061bfcf17913e"
 )

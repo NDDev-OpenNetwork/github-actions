@@ -1,0 +1,108 @@
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 331a206..55c84d0 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -51,6 +51,7 @@ import (
+ )
+ 
+ var nddevRemoveAuthoritativeQueueIntent = scaleSetWorker.NDDevRemoveQueueIntent
++var nddevEnsureAuthoritativeQueueIntent = scaleSetWorker.NDDevEnsureQueueIntent
+ 
+ var (
+ 	poolIDLabelprefix     = "runner-pool-id"
+@@ -2119,9 +2120,50 @@ func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
+ 	if matched[0].GetStatus() != "queued" {
+ 		return r.deleteStaleScaleSetJob(job, "job is no longer queued")
+ 	}
++	if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
++		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to rehydrate authoritative queued job", "scale_set_job_id", job.ScaleSetJobID)
++	}
+ 	return false
+ }
+ 
++func exactScaleSetForJob(scaleSets []params.ScaleSet, job params.Job) (params.ScaleSet, error) {
++	matches := make([]params.ScaleSet, 0, 1)
++	for _, scaleSet := range scaleSets {
++		if !scaleSet.Enabled {
++			continue
++		}
++		for _, label := range job.Labels {
++			if label == scaleSet.Name {
++				matches = append(matches, scaleSet)
++				break
++			}
++		}
++	}
++	if len(matches) != 1 {
++		return params.ScaleSet{}, fmt.Errorf("queued job matches %d enabled scale sets", len(matches))
++	}
++	return matches[0], nil
++}
++
++func (r *basePoolManager) ensureAuthoritativeQueueIntent(job params.Job) error {
++	scaleSets, err := r.store.ListEntityScaleSets(r.ctx, r.entity)
++	if err != nil {
++		return fmt.Errorf("list entity scale sets: %w", err)
++	}
++	scaleSet, err := exactScaleSetForJob(scaleSets, job)
++	if err != nil {
++		return err
++	}
++	created, err := nddevEnsureAuthoritativeQueueIntent(r.ctx, scaleSet, r.entity, job)
++	if err != nil {
++		return err
++	}
++	if created {
++		slog.InfoContext(r.ctx, "rehydrated authoritative queued job intent", "scale_set_job_id", job.ScaleSetJobID, "scale_set", scaleSet.Name)
++	}
++	return nil
++}
++
+ func (r *basePoolManager) deleteStaleScaleSetJob(job params.Job, reason string) bool {
+ 	if _, err := nddevRemoveAuthoritativeQueueIntent(r.ctx, job.ScaleSetJobID); err != nil {
+ 		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to release authoritative stale queue intent", "scale_set_job_id", job.ScaleSetJobID)
+diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
+index da687f6..d03fabd 100644
+--- a/runner/pool/pool_test.go
++++ b/runner/pool/pool_test.go
+@@ -59,8 +59,13 @@ type PoolStressTestSuite struct {
+ 
+ func (s *PoolStressTestSuite) SetupTest() {
+ 	originalQueueReconciler := nddevRemoveAuthoritativeQueueIntent
++	originalQueueHydrator := nddevEnsureAuthoritativeQueueIntent
+ 	nddevRemoveAuthoritativeQueueIntent = func(context.Context, string) (bool, error) { return false, nil }
+-	s.T().Cleanup(func() { nddevRemoveAuthoritativeQueueIntent = originalQueueReconciler })
++	nddevEnsureAuthoritativeQueueIntent = func(context.Context, params.ScaleSet, params.ForgeEntity, params.Job) (bool, error) { return false, nil }
++	s.T().Cleanup(func() {
++		nddevRemoveAuthoritativeQueueIntent = originalQueueReconciler
++		nddevEnsureAuthoritativeQueueIntent = originalQueueHydrator
++	})
+ 	dbCfg := garmTesting.GetTestSqliteDBConfig(s.T())
+ 	db, err := database.NewDatabase(context.Background(), dbCfg)
+ 	s.Require().NoError(err)
+@@ -810,6 +815,24 @@ func (s *PoolStressTestSuite) TestOldestQueuedJobsMakesTheBoundedBatchFair() {
+ 	s.Equal(int64(30), jobs[0].ID)
+ }
+ 
++func (s *PoolStressTestSuite) TestExactScaleSetForJobFailsClosedOnMissingOrAmbiguousLabels() {
++	sets := []params.ScaleSet{
++		{Name: "nddev-linux-standard", Enabled: true},
++		{Name: "nddev-linux-integration", Enabled: true},
++		{Name: "retired", Enabled: false},
++	}
++	job := params.Job{Labels: []string{"nddev-linux-standard"}}
++	matched, err := exactScaleSetForJob(sets, job)
++	s.Require().NoError(err)
++	s.Equal("nddev-linux-standard", matched.Name)
++	job.Labels = []string{"retired"}
++	_, err = exactScaleSetForJob(sets, job)
++	s.Error(err)
++	job.Labels = []string{"nddev-linux-standard", "nddev-linux-integration"}
++	_, err = exactScaleSetForJob(sets, job)
++	s.Error(err)
++}
++
+ func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
+ 	reconciledJobID := ""
+ 	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
+

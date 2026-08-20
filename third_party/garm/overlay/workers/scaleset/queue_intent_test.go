@@ -544,6 +544,79 @@ func TestQueueCoordinatorAcknowledgesAStartedJobWithNoIntent(t *testing.T) {
 	}
 }
 
+func TestQueueCoordinatorTransfersAssignedCapacityToTheJobGitHubActuallyStarted(t *testing.T) {
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	reserved := testQueueJob(101, "example-org", "reserved", now.Add(-time.Minute))
+	reserved.MessageType = params.MessageTypeJobAssigned
+	reserved.RunnerRequestID = 0
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(reserved), []params.ScaleSetJobMessage{reserved}, nil, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := before.Intents[queueIntentKey(11, reserved.JobID)]
+
+	started := testQueueJob(202, "example-org", "actual", now)
+	started.MessageType = params.MessageTypeJobStarted
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(started), nil, []params.ScaleSetJobMessage{started}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(11, reserved.JobID)]; exists {
+		t.Fatal("the substituted job kept a second capacity token")
+	}
+	actual, exists := journal.Intents[queueIntentKey(11, started.JobID)]
+	if !exists || actual.State != queueStateRunning || actual.QueueTime != reservation.QueueTime {
+		t.Fatalf("capacity reservation was not transferred: %#v", actual)
+	}
+	if total, _ := queueInFlight(&journal); total != 1 {
+		t.Fatalf("reservation transfer changed in-flight width: %d", total)
+	}
+}
+
+func TestQueueCoordinatorRehydratesOnlyAnAuthoritativeCurrentScaleSetJob(t *testing.T) {
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-untrusted")
+	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
+	job := params.Job{
+		ScaleSetJobID:   "00000000-0000-4000-8000-000000000303",
+		RepositoryOwner: "example-org", RepositoryName: "example-repo", Action: "pull_request",
+	}
+	job.CreatedAt = now.Add(-time.Hour)
+	created, err := coordinator.EnsureAuthoritative(scaleSet, entity, job)
+	if err != nil || !created {
+		t.Fatalf("rehydrate created=%t err=%v", created, err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := journal.Intents[queueIntentKey(11, job.ScaleSetJobID)]
+	if intent.Repository != "example-org/example-repo" || intent.State != queueStateAssigned ||
+		intent.WorkflowRef != "authoritative-rehydration" || intent.QueueTime != job.CreatedAt {
+		t.Fatalf("rehydrated intent = %#v", intent)
+	}
+	if _, err := coordinator.EnsureAuthoritative(scaleSet, entity, job); err != nil {
+		t.Fatalf("idempotent rehydrate: %v", err)
+	}
+	job.RepositoryOwner = "other-org"
+	if _, err := coordinator.EnsureAuthoritative(scaleSet, entity, job); err == nil {
+		t.Fatal("cross-entity authoritative job was accepted")
+	}
+}
+
 func TestQueueCoordinatorDoesNotRecreateAnOrphanStartedIntentFromSameBatch(t *testing.T) {
 	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
