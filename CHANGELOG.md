@@ -34,6 +34,9 @@ Versioning.
   pressure/capacity refusal stays in the retry backpressure class.
 - Cut GARM derivative `v0.2.1-nddev.46` so I/O pressure and host-unhealthy
   refusals cannot consume terminal provider circuit attempts.
+- Cut provider derivative `v0.1.5-nddev.52` from the exact pressure-aware
+  source commit with reproducible binary identity, while retaining `.51` as
+  the bounded rollout fallback for already executing workers.
 
 ## [0.1.1] - 2026-08-16
 
