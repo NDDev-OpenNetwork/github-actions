@@ -104,6 +104,38 @@ func TestEvaluateColdPilotReady(t *testing.T) {
 	}
 }
 
+func TestEvaluateContainerImageBuildIgnoresVMOnlyPrerequisites(t *testing.T) {
+	t.Parallel()
+	snapshot := readySnapshot()
+	snapshot.KVM.Present = false
+	snapshot.KVM.Accessible = false
+	snapshot.KVM.Nested = false
+	snapshot.Maintenance.RebootRequired = true
+
+	decision := EvaluateContainerImageBuild(snapshot, reserve(), pool())
+	if !decision.PilotReady {
+		t.Fatalf("container build rejected VM-only prerequisites: %#v", decision.Findings)
+	}
+	for _, finding := range decision.Findings {
+		if finding.Code == "kvm-missing" || finding.Code == "kvm-inaccessible" || finding.Code == "nested-kvm-disabled" {
+			t.Fatalf("container build retained VM-only finding: %#v", finding)
+		}
+		if finding.Code == "reboot-required" && finding.Severity != SeverityWarning {
+			t.Fatalf("container reboot finding = %#v, want warning", finding)
+		}
+	}
+}
+
+func TestEvaluateContainerImageBuildStillFailsClosedOnHostDependency(t *testing.T) {
+	t.Parallel()
+	snapshot := readySnapshot()
+	snapshot.Software.Incus.Present = false
+	decision := EvaluateContainerImageBuild(snapshot, reserve(), pool())
+	if decision.PilotReady {
+		t.Fatal("container build ignored missing Incus")
+	}
+}
+
 func TestEvaluateColdPilotReportsAllBlockersAndCoexistence(t *testing.T) {
 	t.Parallel()
 	snapshot := readySnapshot()
