@@ -11,6 +11,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -36,6 +38,8 @@ type journal struct {
 type RecoveryResult struct {
 	Applied            bool      `json:"applied"`
 	Key                string    `json:"key"`
+	EntityID           string    `json:"entity_id"`
+	ScaleSetID         uint      `json:"scale_set_id"`
 	ErrorClass         string    `json:"error_class"`
 	ExpectedUpdatedAt  time.Time `json:"expected_updated_at"`
 	PreviousGeneration uint64    `json:"previous_generation"`
@@ -43,15 +47,17 @@ type RecoveryResult struct {
 	RecoveredAt        time.Time `json:"recovered_at"`
 }
 
-func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, errorClass string, expectedUpdatedAt time.Time, apply bool) (RecoveryResult, error) {
+func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID string, scaleSetID uint, errorClass string, expectedUpdatedAt time.Time, apply bool) (RecoveryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return RecoveryResult{}, err
 	}
 	if !filepath.IsAbs(journalPath) || !filepath.IsAbs(lockPath) || filepath.Dir(journalPath) != filepath.Dir(lockPath) || journalPath == lockPath {
 		return RecoveryResult{}, errors.New("retry journal and lock must be distinct absolute siblings")
 	}
-	if key == "" || len(key) > 256 || (errorClass != "provider" && errorClass != "intent" && errorClass != "identity" && errorClass != "timeout") || expectedUpdatedAt.IsZero() {
-		return RecoveryResult{}, errors.New("exact retry key, recoverable error class and updated_at are required")
+	parsedEntityID, parsedScaleSetID, err := parseScaleSetDomainKey(key)
+	if err != nil || parsedEntityID != entityID || parsedScaleSetID != scaleSetID ||
+		(errorClass != "provider" && errorClass != "intent" && errorClass != "identity" && errorClass != "timeout") || expectedUpdatedAt.IsZero() {
+		return RecoveryResult{}, errors.New("exact scale-set retry key, entity_id, scale_set_id, recoverable error class and updated_at are required")
 	}
 	parent := filepath.Dir(journalPath)
 	resolved, err := filepath.EvalSymlinks(parent)
@@ -90,7 +96,7 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, errorClass
 	if now.Sub(retry.UpdatedAt) < minimumTerminalRecoveryAge {
 		return RecoveryResult{}, errors.New("retry circuit is inside the recovery grace period")
 	}
-	result := RecoveryResult{Key: key, ErrorClass: errorClass, ExpectedUpdatedAt: retry.UpdatedAt, PreviousGeneration: state.Generation, Generation: state.Generation, RecoveredAt: now}
+	result := RecoveryResult{Key: key, EntityID: entityID, ScaleSetID: scaleSetID, ErrorClass: errorClass, ExpectedUpdatedAt: retry.UpdatedAt, PreviousGeneration: state.Generation, Generation: state.Generation, RecoveredAt: now}
 	if !apply {
 		return result, nil
 	}
@@ -138,6 +144,26 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, errorClass
 	result.Applied = true
 	result.Generation = state.Generation
 	return result, nil
+}
+
+// parseScaleSetDomainKey accepts only the terminal failure domain written by
+// GARM: scale-set:<forge entity UUID>:<scale-set database ID>. Concrete
+// :job/:instance: retry keys are deliberately not recoverable through the
+// operator command. The immutable forge entity identity is what separates
+// same-named pools belonging to different accounts and repositories.
+func parseScaleSetDomainKey(key string) (string, uint, error) {
+	if key == "" || len(key) > 256 {
+		return "", 0, errors.New("scale-set retry key is invalid")
+	}
+	parts := strings.Split(key, ":")
+	if len(parts) != 3 || parts[0] != "scale-set" || strings.TrimSpace(parts[1]) == "" {
+		return "", 0, errors.New("retry key is not an exact scale-set failure domain")
+	}
+	parsed, err := strconv.ParseUint(parts[2], 10, 32)
+	if err != nil || parsed == 0 {
+		return "", 0, errors.New("retry key has invalid scale-set identity")
+	}
+	return parts[1], uint(parsed), nil
 }
 
 func readJournal(path string) (journal, error) {
