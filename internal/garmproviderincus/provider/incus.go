@@ -550,7 +550,7 @@ func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapPa
 	if err != nil {
 		return err
 	}
-	repository, err := canonicalRepositoryIdentity(bootstrapParams.RepoURL)
+	repository, err := l.runtimeRepositoryIdentity(bootstrapParams.RepoURL)
 	if err != nil {
 		return runnerErrors.NewBadRequestError("invalid repository identity: %s", err)
 	}
@@ -903,7 +903,7 @@ func (l *Incus) jobMetadata(bootstrapParams commonParams.BootstrapInstance) (map
 	if err != nil {
 		return nil, err
 	}
-	repository, err := canonicalRepositoryIdentity(bootstrapParams.RepoURL)
+	repository, err := l.runtimeRepositoryIdentity(bootstrapParams.RepoURL)
 	if err != nil {
 		return nil, runnerErrors.NewBadRequestError("invalid repository identity: %s", err)
 	}
@@ -1184,6 +1184,25 @@ func canonicalRepositoryIdentity(value string) (string, error) {
 		return "", fmt.Errorf("repository URL must contain owner and repository")
 	}
 	return parts[0] + "/" + parts[1], nil
+}
+
+func (l *Incus) runtimeRepositoryIdentity(value string) (string, error) {
+	identity, err := canonicalRepositoryIdentity(value)
+	if err == nil {
+		return identity, nil
+	}
+	if !l.isRegisteredRepositoryURL(value) {
+		return "", err
+	}
+	parsed, parseErr := url.ParseRequestURI(value)
+	if parseErr != nil {
+		return "", err
+	}
+	account := strings.Trim(parsed.Path, "/")
+	if account == "" || strings.Contains(account, "/") {
+		return "", err
+	}
+	return account, nil
 }
 
 func (l *Incus) narrowBootstrapRepository(ctx context.Context, bootstrap commonParams.BootstrapInstance) (commonParams.BootstrapInstance, error) {
