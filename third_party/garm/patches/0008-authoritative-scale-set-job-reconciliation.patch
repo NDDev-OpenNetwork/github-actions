@@ -1,0 +1,377 @@
+diff --git a/runner/common/util.go b/runner/common/util.go
+index f609e6b..983be28 100644
+--- a/runner/common/util.go
++++ b/runner/common/util.go
+@@ -56,4 +56,5 @@ type GithubClient interface {
+ 
+ 	// GetWorkflowJobByID gets details about a single workflow job.
+ 	GetWorkflowJobByID(ctx context.Context, owner, repo string, jobID int64) (*github.WorkflowJob, *github.Response, error)
++	ListWorkflowJobs(ctx context.Context, owner, repo string, runID int64, opts *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error)
+ }
+diff --git a/runner/common/mocks/GithubClient.go b/runner/common/mocks/GithubClient.go
+index e9cd965..ba73477 100644
+--- a/runner/common/mocks/GithubClient.go
++++ b/runner/common/mocks/GithubClient.go
+@@ -762,6 +762,77 @@ func (_c *GithubClient_ListEntityRunners_Call) RunAndReturn(run func(context.Con
+ 	return _c
+ }
+ 
++// ListWorkflowJobs provides a mock function with given fields: ctx, owner, repo, runID, opts
++func (_m *GithubClient) ListWorkflowJobs(ctx context.Context, owner string, repo string, runID int64, opts *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error) {
++	ret := _m.Called(ctx, owner, repo, runID, opts)
++
++	if len(ret) == 0 {
++		panic("no return value specified for ListWorkflowJobs")
++	}
++
++	var r0 *github.Jobs
++	var r1 *github.Response
++	var r2 error
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error)); ok {
++		return rf(ctx, owner, repo, runID, opts)
++	}
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *github.ListWorkflowJobsOptions) *github.Jobs); ok {
++		r0 = rf(ctx, owner, repo, runID, opts)
++	} else {
++		if ret.Get(0) != nil {
++			r0 = ret.Get(0).(*github.Jobs)
++		}
++	}
++
++	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, *github.ListWorkflowJobsOptions) *github.Response); ok {
++		r1 = rf(ctx, owner, repo, runID, opts)
++	} else {
++		if ret.Get(1) != nil {
++			r1 = ret.Get(1).(*github.Response)
++		}
++	}
++
++	if rf, ok := ret.Get(2).(func(context.Context, string, string, int64, *github.ListWorkflowJobsOptions) error); ok {
++		r2 = rf(ctx, owner, repo, runID, opts)
++	} else {
++		r2 = ret.Error(2)
++	}
++
++	return r0, r1, r2
++}
++
++// GithubClient_ListWorkflowJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListWorkflowJobs'
++type GithubClient_ListWorkflowJobs_Call struct {
++	*mock.Call
++}
++
++// ListWorkflowJobs is a helper method to define mock.On call
++//   - ctx context.Context
++//   - owner string
++//   - repo string
++//   - runID int64
++//   - opts *github.ListWorkflowJobsOptions
++func (_e *GithubClient_Expecter) ListWorkflowJobs(ctx interface{}, owner interface{}, repo interface{}, runID interface{}, opts interface{}) *GithubClient_ListWorkflowJobs_Call {
++	return &GithubClient_ListWorkflowJobs_Call{Call: _e.mock.On("ListWorkflowJobs", ctx, owner, repo, runID, opts)}
++}
++
++func (_c *GithubClient_ListWorkflowJobs_Call) Run(run func(ctx context.Context, owner string, repo string, runID int64, opts *github.ListWorkflowJobsOptions)) *GithubClient_ListWorkflowJobs_Call {
++	_c.Call.Run(func(args mock.Arguments) {
++		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int64), args[4].(*github.ListWorkflowJobsOptions))
++	})
++	return _c
++}
++
++func (_c *GithubClient_ListWorkflowJobs_Call) Return(_a0 *github.Jobs, _a1 *github.Response, _a2 error) *GithubClient_ListWorkflowJobs_Call {
++	_c.Call.Return(_a0, _a1, _a2)
++	return _c
++}
++
++func (_c *GithubClient_ListWorkflowJobs_Call) RunAndReturn(run func(context.Context, string, string, int64, *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error)) *GithubClient_ListWorkflowJobs_Call {
++	_c.Call.Return(run)
++	return _c
++}
++
+ // PingEntityHook provides a mock function with given fields: ctx, id
+ func (_m *GithubClient) PingEntityHook(ctx context.Context, id int64) (*github.Response, error) {
+ 	ret := _m.Called(ctx, id)
+diff --git a/runner/pool/stub_client.go b/runner/pool/stub_client.go
+index b72b7ee..ff7c342 100644
+--- a/runner/pool/stub_client.go
++++ b/runner/pool/stub_client.go
+@@ -71,6 +71,10 @@ func (s *stubGithubClient) GetWorkflowJobByID(_ context.Context, _, _ string, _
+ 	return nil, nil, s.err
+ }
+ 
++func (s *stubGithubClient) ListWorkflowJobs(_ context.Context, _, _ string, _ int64, _ *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error) {
++	return nil, nil, s.err
++}
++
+ func (s *stubGithubClient) GetEntity() params.ForgeEntity {
+ 	return params.ForgeEntity{}
+ }
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 7f6c9f3..37adb4d 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -1982,7 +1982,11 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 			continue
+ 		}
+ 
+-		if lastChecked, ok := r.checkedJobs[job.WorkflowJobID]; ok {
++		checkID := job.WorkflowJobID
++		if checkID == 0 {
++			checkID = job.ID
++		}
++		if lastChecked, ok := r.checkedJobs[checkID]; ok {
+ 			if time.Since(lastChecked) < time.Minute {
+ 				continue
+ 			}
+@@ -1994,11 +1998,22 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 			continue
+ 		}
+ 
+-		lockKey := fmt.Sprintf("%s-%d", staleJobLockPrefix, job.WorkflowJobID)
++		lockKey := fmt.Sprintf("%s-%d", staleJobLockPrefix, checkID)
+ 		if !locking.TryLock(lockKey, r.consumerID) {
+ 			continue
+ 		}
+ 
++		if job.WorkflowJobID == 0 {
++			if r.reconcileStaleScaleSetJob(job) {
++				delete(r.checkedJobs, checkID)
++			} else {
++				r.checkedJobs[checkID] = time.Now()
++			}
++			locking.Unlock(lockKey, true)
++			checked++
++			continue
++		}
++
+ 		ghJob, ghResp, err := r.ghcli.GetWorkflowJobByID(r.ctx, job.RepositoryOwner, job.RepositoryName, job.WorkflowJobID)
+ 		if err != nil {
+ 			if ghResp != nil && ghResp.StatusCode == http.StatusNotFound {
+@@ -2047,6 +2062,59 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 	return nil
+ }
+ 
++// reconcileStaleScaleSetJob returns true only when GitHub authoritatively proves
++// that a queued scale-set job is absent or no longer queued. Ambiguous matrix
++// jobs are retained so reconciliation cannot delete live work.
++func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
++	if job.ScaleSetJobID == "" || job.RunID == 0 || job.Name == "" {
++		slog.WarnContext(r.ctx, "scale set job is missing reconciliation identity", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++
++	matched := make([]*github.WorkflowJob, 0, 1)
++	opts := &github.ListWorkflowJobsOptions{Filter: "latest", ListOptions: github.ListOptions{PerPage: 100}}
++	for {
++		jobs, resp, err := r.ghcli.ListWorkflowJobs(r.ctx, job.RepositoryOwner, job.RepositoryName, job.RunID, opts)
++		if err != nil {
++			if resp != nil && resp.StatusCode == http.StatusNotFound {
++				return r.deleteStaleScaleSetJob(job, "workflow run no longer exists")
++			}
++			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to list workflow run jobs", "run_id", job.RunID)
++			return false
++		}
++		for _, candidate := range jobs.Jobs {
++			if candidate.GetName() == job.Name {
++				matched = append(matched, candidate)
++			}
++		}
++		if resp == nil || resp.NextPage == 0 {
++			break
++		}
++		opts.Page = resp.NextPage
++	}
++
++	if len(matched) == 0 {
++		return r.deleteStaleScaleSetJob(job, "job is absent from workflow run")
++	}
++	if len(matched) > 1 {
++		slog.WarnContext(r.ctx, "ambiguous scale set job retained", "scale_set_job_id", job.ScaleSetJobID, "matches", len(matched))
++		return false
++	}
++	if matched[0].GetStatus() != "queued" {
++		return r.deleteStaleScaleSetJob(job, "job is no longer queued")
++	}
++	return false
++}
++
++func (r *basePoolManager) deleteStaleScaleSetJob(job params.Job, reason string) bool {
++	if err := r.store.DeleteScaleSetJob(r.ctx, job.ScaleSetJobID); err != nil && !errors.Is(err, runnerErrors.ErrNotFound) {
++		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to delete stale scale set job", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	slog.InfoContext(r.ctx, "removed stale scale set job", "scale_set_job_id", job.ScaleSetJobID, "reason", reason)
++	return true
++}
++
+ // consumeQueuedJobs will pull all the known jobs from the database and attempt to create a new
+ // runner in one of the pools it manages, if it matches the requested labels.
+ // This is a best effort attempt to consume queued jobs. We do not have any real way to know which
+diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
+index 08a1365..68220e4 100644
+--- a/runner/pool/pool_test.go
++++ b/runner/pool/pool_test.go
+@@ -23,6 +23,7 @@ import (
+ 	"testing"
+ 	"time"
+ 
++	"github.com/google/go-github/v84/github"
+ 	"github.com/google/uuid"
+ 	"github.com/stretchr/testify/mock"
+ 	"github.com/stretchr/testify/suite"
+@@ -790,6 +791,41 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
+ 	}
+ }
+ 
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
++	job := params.Job{
++		ScaleSetJobID: "scale-job-1", RunID: 4242, Name: "wanted",
++		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++	}
++	_, err := s.store.CreateOrUpdateJob(s.adminCtx, job)
++	s.Require().NoError(err)
++
++	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4242), mock.MatchedBy(func(opts *github.ListWorkflowJobsOptions) bool {
++		return opts.Page == 0 && opts.PerPage == 100 && opts.Filter == "latest"
++	})).Return(&github.Jobs{Jobs: []*github.WorkflowJob{{Name: github.Ptr("other")}}}, &github.Response{NextPage: 2}, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4242), mock.MatchedBy(func(opts *github.ListWorkflowJobsOptions) bool {
++		return opts.Page == 2
++	})).Return(&github.Jobs{}, &github.Response{}, nil).Once()
++
++	s.True(s.mgr.reconcileStaleScaleSetJob(job))
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Empty(jobs)
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsAmbiguousMatrixJob() {
++	job := params.Job{
++		ScaleSetJobID: "scale-job-2", RunID: 4343, Name: "matrix",
++		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++	}
++	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4343), mock.Anything).
++		Return(&github.Jobs{Jobs: []*github.WorkflowJob{
++			{Name: github.Ptr("matrix"), Status: github.Ptr("completed")},
++			{Name: github.Ptr("matrix"), Status: github.Ptr("queued")},
++		}}, &github.Response{}, nil).Once()
++
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
+ func mustParseUUID(s string) uuid.UUID {
+ 	u, err := uuid.Parse(s)
+ 	if err != nil {
+diff --git a/database/common/store.go b/database/common/store.go
+index 3314b0a..37b9ea6 100644
+--- a/database/common/store.go
++++ b/database/common/store.go
+@@ -124,6 +124,7 @@ type JobsStore interface {
+ 
+ 	GetJobByID(ctx context.Context, jobID int64) (params.Job, error)
+ 	DeleteJob(ctx context.Context, jobID int64) error
++	DeleteScaleSetJob(ctx context.Context, scaleSetJobID string) error
+ 	UnlockJob(ctx context.Context, jobID int64, entityID string) error
+ 	LockJob(ctx context.Context, jobID int64, entityID string) error
+ 	BreakLockJobIsQueued(ctx context.Context, jobID int64) error
+diff --git a/database/common/mocks/Store.go b/database/common/mocks/Store.go
+index 1456b39..6f2c427 100644
+--- a/database/common/mocks/Store.go
++++ b/database/common/mocks/Store.go
+@@ -1868,6 +1868,53 @@ func (_c *Store_DeleteScaleSetByID_Call) RunAndReturn(run func(context.Context,
+ 	return _c
+ }
+ 
++// DeleteScaleSetJob provides a mock function with given fields: ctx, scaleSetJobID
++func (_m *Store) DeleteScaleSetJob(ctx context.Context, scaleSetJobID string) error {
++	ret := _m.Called(ctx, scaleSetJobID)
++
++	if len(ret) == 0 {
++		panic("no return value specified for DeleteScaleSetJob")
++	}
++
++	var r0 error
++	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
++		r0 = rf(ctx, scaleSetJobID)
++	} else {
++		r0 = ret.Error(0)
++	}
++
++	return r0
++}
++
++// Store_DeleteScaleSetJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteScaleSetJob'
++type Store_DeleteScaleSetJob_Call struct {
++	*mock.Call
++}
++
++// DeleteScaleSetJob is a helper method to define mock.On call
++//   - ctx context.Context
++//   - scaleSetJobID string
++func (_e *Store_Expecter) DeleteScaleSetJob(ctx interface{}, scaleSetJobID interface{}) *Store_DeleteScaleSetJob_Call {
++	return &Store_DeleteScaleSetJob_Call{Call: _e.mock.On("DeleteScaleSetJob", ctx, scaleSetJobID)}
++}
++
++func (_c *Store_DeleteScaleSetJob_Call) Run(run func(ctx context.Context, scaleSetJobID string)) *Store_DeleteScaleSetJob_Call {
++	_c.Call.Run(func(args mock.Arguments) {
++		run(args[0].(context.Context), args[1].(string))
++	})
++	return _c
++}
++
++func (_c *Store_DeleteScaleSetJob_Call) Return(_a0 error) *Store_DeleteScaleSetJob_Call {
++	_c.Call.Return(_a0)
++	return _c
++}
++
++func (_c *Store_DeleteScaleSetJob_Call) RunAndReturn(run func(context.Context, string) error) *Store_DeleteScaleSetJob_Call {
++	_c.Call.Return(run)
++	return _c
++}
++
+ // DeleteTemplate provides a mock function with given fields: ctx, id
+ func (_m *Store) DeleteTemplate(ctx context.Context, id uint) error {
+ 	ret := _m.Called(ctx, id)
+diff --git a/database/sql/jobs.go b/database/sql/jobs.go
+index 232d25b..bb8b93b 100644
+--- a/database/sql/jobs.go
++++ b/database/sql/jobs.go
+@@ -155,6 +155,38 @@ func (s *sqlDatabase) DeleteJob(_ context.Context, jobID int64) error {
+ 	return nil
+ }
+ 
++func (s *sqlDatabase) DeleteScaleSetJob(_ context.Context, scaleSetJobID string) error {
++	var removedJob params.Job
++	err := s.conn.Transaction(func(tx *gorm.DB) error {
++		var workflowJob WorkflowJob
++		q := tx.Where("scale_set_job_id = ?", scaleSetJobID).Preload("Instance").First(&workflowJob)
++		if q.Error != nil {
++			if errors.Is(q.Error, gorm.ErrRecordNotFound) {
++				return nil
++			}
++			return fmt.Errorf("error fetching scale set job: %w", q.Error)
++		}
++		var err error
++		removedJob, err = sqlWorkflowJobToParamsJob(workflowJob)
++		if err != nil {
++			return fmt.Errorf("error converting scale set job: %w", err)
++		}
++		if q = tx.Delete(&workflowJob); q.Error != nil {
++			return fmt.Errorf("error deleting scale set job: %w", q.Error)
++		}
++		return nil
++	})
++	if err != nil {
++		return err
++	}
++	if removedJob.ID != 0 {
++		if notifyErr := s.sendNotify(common.JobEntityType, common.DeleteOperation, removedJob); notifyErr != nil {
++			slog.With(slog.Any("error", notifyErr)).Error("failed to send notify")
++		}
++	}
++	return nil
++}
++
+ func (s *sqlDatabase) LockJob(_ context.Context, jobID int64, entityID string) error {
+ 	entityUUID, err := uuid.Parse(entityID)
+ 	if err != nil {
+
+

@@ -121,6 +121,19 @@ func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance
 	if err != nil || !enabled || l.cacheDelivery == nil {
 		return role, enabled && l.cacheDelivery != nil, err
 	}
+	repository, err := canonicalRepositoryIdentity(bootstrap.RepoURL)
+	if err != nil {
+		return role, false, fmt.Errorf("derive cache repository identity: %w", err)
+	}
+	// The current RustFS credentials are scoped to one exact repository. Do not
+	// hand that namespace to another repository and hope its workflow notices:
+	// a cache mismatch is an optional optimization miss, not authorization to
+	// cross the repository boundary. Estate-generated per-repository identities
+	// can widen this safely without changing the one-job delivery protocol.
+	cacheRepository := cachenamespace.Organization + "/" + cachenamespace.Repository
+	if repository != cacheRepository {
+		return role, false, nil
+	}
 	return role, true, nil
 }
 
@@ -211,7 +224,7 @@ func validateCacheDelivery(role string, delivery rustfscache.Delivery) error {
 	}
 	expected, exists := wanted[role]
 	if !exists || delivery.Role != role || delivery.Mode != expected.Mode || delivery.Prefix != expected.Prefix ||
-		delivery.Endpoint != "https://192.0.2.1:9002" || delivery.Region != "us-east-1" ||
+		delivery.Endpoint != "https://198.51.100.1:9002" || delivery.Region != "us-east-1" ||
 		delivery.Bucket != "github-actions-cache" || !cacheAccessKeyPattern.MatchString(delivery.AccessKey) ||
 		!cacheSecretPattern.Match(delivery.SecretKey) || len(delivery.CAPEM) == 0 {
 		return fmt.Errorf("loaded %s cache delivery does not match the worker trust contract", role)
@@ -257,7 +270,7 @@ jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
-  .endpoint == "https://192.0.2.1:9002" and
+  .endpoint == "https://198.51.100.1:9002" and
   .region == "us-east-1" and
   .bucket == "github-actions-cache" and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and
@@ -328,7 +341,7 @@ jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
-  .endpoint == "https://192.0.2.1:9002" and
+  .endpoint == "https://198.51.100.1:9002" and
   .region == "us-east-1" and
   .bucket == "github-actions-cache" and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and
@@ -388,6 +401,10 @@ func (l *Incus) injectColdCacheAssignment(ctx context.Context, instanceName stri
 		})
 		if err == nil {
 			break
+		}
+		instance, _, inspectErr := cli.GetInstanceFull(instanceName)
+		if inspectErr == nil && instance.State != nil && instance.State.Status != "Running" {
+			return fmt.Errorf("inject one-job cache assignment: instance stopped during canceled create")
 		}
 		if time.Now().After(deadline) {
 			// Carry the last rejection. Without it every cause — agent not up

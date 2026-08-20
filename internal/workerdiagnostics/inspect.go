@@ -13,6 +13,14 @@ type SpoolStats struct {
 	NewestAgeSeconds int64 `json:"newest_age_seconds"`
 }
 
+const DurableWALHighWatermarkPercent = 80
+
+// AtDurableWALHighWatermark closes new admission before the hard byte ceiling
+// makes the next teardown unable to persist evidence. Equality is degraded.
+func AtDurableWALHighWatermark(stats SpoolStats, maximumBytes int64) bool {
+	return maximumBytes <= 0 || stats.Bytes >= maximumBytes*DurableWALHighWatermarkPercent/100
+}
+
 // Inspect returns aggregate metadata for provider-owned diagnostic bundles.
 // It uses the same private-directory and filename boundary as retention GC and
 // never opens bundle contents or follows symlinks.

@@ -3,11 +3,14 @@ package diagnosticexport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
 
 type fakeObjectStore struct {
@@ -15,6 +18,7 @@ type fakeObjectStore struct {
 	headCalls int
 	putCalls  int
 	putError  error
+	putHook   func(Bundle)
 }
 
 func (f *fakeObjectStore) Head(_ context.Context, bucket, key string) (RemoteObject, error) {
@@ -30,6 +34,9 @@ func (f *fakeObjectStore) Put(_ context.Context, bucket string, bundle Bundle) e
 	f.objects[bucket+"/"+bundle.ObjectKey] = RemoteObject{
 		Exists: true, Bytes: int64(len(bundle.Content)), SHA256: bundle.SHA256,
 		SchemaVersion: "1",
+	}
+	if f.putHook != nil {
+		f.putHook(bundle)
 	}
 	return nil
 }
@@ -57,7 +64,7 @@ func TestExporterUploadsConfirmsAndUsesFreshJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.SourceBundles != 1 || summary.ExportedBundles != 1 || summary.PendingBundles != 0 ||
+	if summary.SourceBundles != 0 || summary.ExportedBundles != 1 || summary.PendingBundles != 0 ||
 		remote.putCalls != 1 || remote.headCalls != 2 {
 		t.Fatalf("first export = %#v, head=%d put=%d", summary, remote.headCalls, remote.putCalls)
 	}
@@ -66,8 +73,12 @@ func TestExporterUploadsConfirmsAndUsesFreshJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status.LastSuccessAt != now.Format(time.RFC3339Nano) || status.LastErrorCode != "" ||
-		status.ConsecutiveFailures != 0 {
+		status.ConsecutiveFailures != 0 || status.LastProgressAt != now.Format(time.RFC3339Nano) ||
+		status.LastFullSyncAt != now.Format(time.RFC3339Nano) || status.ScannedBundles != 1 || status.DeletedBundles != 1 {
 		t.Fatalf("status = %#v", status)
+	}
+	if names, err := ListBundles(exporter.Config); err != nil || len(names) != 0 {
+		t.Fatalf("confirmed source was not drained: names=%v err=%v", names, err)
 	}
 
 	exporter.Now = func() time.Time { return now.Add(10 * time.Minute) }
@@ -82,7 +93,7 @@ func TestExporterUploadsConfirmsAndUsesFreshJournal(t *testing.T) {
 	if _, err := exporter.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if remote.headCalls != 3 {
+	if remote.headCalls != 2 {
 		t.Fatalf("remote revalidation head calls = %d", remote.headCalls)
 	}
 }
@@ -109,13 +120,55 @@ func TestExporterUploadsUnassignedWarmBundleInSeparateScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.SourceBundles != 1 || summary.ExportedBundles != 1 || summary.PendingBundles != 0 || remote.putCalls != 1 {
+	if summary.SourceBundles != 0 || summary.ExportedBundles != 1 || summary.PendingBundles != 0 || remote.putCalls != 1 {
 		t.Fatalf("unassigned warm export = %#v, put=%d", summary, remote.putCalls)
 	}
 	for key := range remote.objects {
 		if !strings.Contains(key, "/diagnostics/v1/unassigned-warm/") || strings.Contains(key, "/repository/") {
 			t.Fatalf("unassigned warm remote key = %q", key)
 		}
+	}
+}
+
+func TestExporterCatchesAContinuousBacklogInBoundedBatches(t *testing.T) {
+	exporter, remote, now := exporterFixture(t)
+	config := exporter.Config
+	capturedAt := now.Add(-time.Hour)
+	store := workerdiagnostics.Store{
+		Directory: config.SourceDirectory, Retention: 7 * 24 * time.Hour,
+		MaxBundleBytes: config.MaxBundleBytes, MaxTotalBytes: 1024 * 1024 * 1024,
+		MaxArtifacts: workerdiagnostics.DefaultMaxArtifacts,
+		Now:          func() time.Time { return capturedAt },
+		Random:       strings.NewReader(strings.Repeat("abcdef", 600)),
+	}
+	write := func(index int) {
+		capturedAt = capturedAt.Add(time.Nanosecond)
+		_, err := store.Write(context.Background(), workerdiagnostics.Instance{
+			Name: fmt.Sprintf("runner-backlog-%03d", index), ControllerID: "controller-test",
+			PoolID: "pool-test", PoolName: "nddev-linux-standard", ScaleSet: "nddev-linux-standard",
+			Repository: validConfig().Repositories[1], ImageFingerprint: strings.Repeat("a", 64),
+			RunnerVersion: "v2.336.0", ProviderVersion: "v0.1.5-nddev.3",
+			ProviderCommit: strings.Repeat("b", 40), State: "Stopped",
+		}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < 512; index++ {
+		write(index)
+	}
+	first, err := exporter.Run(context.Background())
+	if err != nil || first.ScannedBundles != maxBundlesPerRun || first.DeletedBundles != maxBundlesPerRun || first.PendingBundles != 257 {
+		t.Fatalf("first bounded drain = %#v err=%v", first, err)
+	}
+	write(512) // producer continues while the bounded drain catches up
+	second, err := exporter.Run(context.Background())
+	if err != nil || second.ScannedBundles != maxBundlesPerRun || second.PendingBundles != 2 {
+		t.Fatalf("second bounded drain = %#v err=%v", second, err)
+	}
+	third, err := exporter.Run(context.Background())
+	if err != nil || third.ScannedBundles != 2 || third.PendingBundles != 0 || len(remote.objects) != 514 {
+		t.Fatalf("final bounded drain = %#v objects=%d err=%v", third, len(remote.objects), err)
 	}
 }
 
@@ -156,6 +209,32 @@ func TestExporterNeverDeletesSourceAfterRemoteFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(exporter.Config.SourceDirectory, name)); err != nil {
 		t.Fatalf("source bundle was removed: %v", err)
+	}
+}
+
+func TestExporterRefusesToDeleteAReplacedConfirmedSource(t *testing.T) {
+	exporter, remote, _ := exporterFixture(t)
+	remote.putHook = func(bundle Bundle) {
+		path := filepath.Join(exporter.Config.SourceDirectory, bundle.Name)
+		replacement := path + ".replacement"
+		if err := os.WriteFile(replacement, bundle.Content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(replacement, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := exporter.Run(context.Background())
+	var exportError ExportError
+	if !errors.As(err, &exportError) || exportError.Code != "source-remove" {
+		t.Fatalf("replaced source error = %v", err)
+	}
+	status, statusErr := ReadStatus(exporter.Config.StateDirectory)
+	if statusErr != nil {
+		t.Fatal(statusErr)
+	}
+	if status.DeletedBundles != 0 || status.ScannedBundles != 1 {
+		t.Fatalf("replaced source progress = %#v", status)
 	}
 }
 

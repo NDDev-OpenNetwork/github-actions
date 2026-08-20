@@ -45,7 +45,7 @@ type Config struct {
 	Repositories          []string `yaml:"repositories" json:"repositories"`
 	AccountScopes         []string `yaml:"account_scopes" json:"account_scopes"`
 	Pools                 []string `yaml:"pools" json:"pools"`
-	Trust                 string   `yaml:"trust" json:"trust"`
+	Trusts                []string `yaml:"trusts" json:"trusts"`
 	Platform              string   `yaml:"platform" json:"platform"`
 	Architecture          string   `yaml:"architecture" json:"architecture"`
 	PathStyle             bool     `yaml:"path_style" json:"path_style"`
@@ -118,8 +118,8 @@ func LoadConfig(filename string) (Config, error) {
 func (c Config) Validate() error {
 	var problems []string
 	add := func(field, message string) { problems = append(problems, field+": "+message) }
-	if c.SchemaVersion != 3 {
-		add("schema_version", "must be 3 for exact multi-tenant scopes")
+	if c.SchemaVersion != 4 {
+		add("schema_version", "must be 4 for exact multi-tenant trust scopes")
 	}
 	if !StageAccepted(c.DeploymentStage) {
 		add("deployment_stage", "must remain "+strings.Join(AcceptedStages(), " or ")+" until RustFS production gates pass")
@@ -172,8 +172,9 @@ func (c Config) Validate() error {
 	}
 	validateSortedIdentities("repositories", c.Repositories, true)
 	validateSortedIdentities("account_scopes", c.AccountScopes, false)
+	validateSortedIdentities("trusts", c.Trusts, false)
 	for field, value := range map[string]string{
-		"trust": c.Trust, "platform": c.Platform, "architecture": c.Architecture,
+		"platform": c.Platform, "architecture": c.Architecture,
 	} {
 		if !validIdentity(value) {
 			add(field, "must be a bounded identity")
@@ -227,6 +228,12 @@ func (c Config) AllowsRepository(repository string) bool {
 
 func (c Config) AllowsAccount(account string) bool {
 	return sortedContains(c.AccountScopes, account)
+}
+
+// AllowsTrust reports whether a diagnostic manifest belongs to a reviewed
+// trust domain. Invalid or unvalidated lists fail closed.
+func (c Config) AllowsTrust(trust string) bool {
+	return validIdentity(trust) && sortedContains(c.Trusts, trust)
 }
 
 func sortedContains(values []string, value string) bool {

@@ -42,7 +42,7 @@ store:
     url: https://downloads.openobserve.ai/releases/openobserve/v0.92.0/openobserve-v0.92.0-linux-amd64.tar.gz
     sha256: b8f95d3cea4ebca650b24df52a8232bf1da3d5293005c7942148a8d58f3c2879
   binary_path: openobserve
-  host: server-gha-services
+  host: example-services
   # The instance itself is the isolation boundary, so its single organization
   # stays `default`. OpenObserve assigns a generated opaque identifier to any
   # additional organization and that identifier, not the name, is what appears
@@ -53,6 +53,7 @@ store:
   streams:
     - fleet_logs
     - fleet_metrics
+    - fleet_traces
   retention_days: 90
   # fleet_logs is the operational stream: nine million records and the bulk of
   # the volume, useful while someone is still debugging the week it came from.
@@ -69,7 +70,7 @@ store:
 # outage into a delay instead of a hole in the record.
 transport:
   protocol: otlp-http
-  source_address: 172.16.0.5
-  target_address: 172.16.0.7
+  source_address: 10.200.0.5
+  target_address: 10.200.0.7
   target_port: 5090
   queue_directory: /var/lib/otelcol-fleet/queue

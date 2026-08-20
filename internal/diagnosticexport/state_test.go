@@ -61,6 +61,44 @@ func TestStatusTimestampsRequireCanonicalUTC(t *testing.T) {
 	}
 }
 
+func TestProgressIsSeparateAndLegacyStateRemainsReadable(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := StateStore{Directory: directory}
+	observed := "2026-08-20T05:00:00Z"
+	if err := store.Save(State{Status: Status{
+		SchemaVersion: 1, DeploymentStage: StageCanary, ObservedAt: observed,
+	}, Exports: map[string]ExportRecord{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProgress(Progress{
+		SchemaVersion: 1, ObservedAt: observed, LastProgressAt: observed, LastFullSyncAt: observed,
+		ScannedBundles: 3, ExportedBundles: 3, DeletedBundles: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyState, err := os.ReadFile(filepath.Join(directory, stateFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacyState), "last_progress_at") || strings.Contains(string(legacyState), "last_full_sync_at") {
+		t.Fatalf("progress fields broke the rollback-readable state: %s", legacyState)
+	}
+	status, err := ReadStatus(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.LastProgressAt != observed || status.LastFullSyncAt != observed || status.DeletedBundles != 3 {
+		t.Fatalf("merged status = %#v", status)
+	}
+	info, err := os.Stat(filepath.Join(directory, progressFilename))
+	if err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("progress file mode=%v err=%v", info, err)
+	}
+}
+
 func TestStateStoreRejectsUnknownStateField(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "state")
 	if err := os.Mkdir(directory, 0o700); err != nil {

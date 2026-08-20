@@ -18,10 +18,16 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
+	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 )
@@ -139,4 +145,48 @@ func TestGetClientFromConfig(t *testing.T) {
 		})
 	}
 
+}
+
+func TestGetClientFromConfigFailsOverToTheNextClusterMember(t *testing.T) {
+	directory := t.TempDir()
+	paths := []string{
+		filepath.Join(directory, "server.crt"),
+		filepath.Join(directory, "client.crt"),
+		filepath.Join(directory, "client.key"),
+	}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("test\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalDial, originalConnect := dialIncusEndpoint, connectIncusEndpoint
+	t.Cleanup(func() {
+		dialIncusEndpoint, connectIncusEndpoint = originalDial, originalConnect
+	})
+	var dialed, connected []string
+	dialIncusEndpoint = func(_, address string, _ time.Duration) (net.Conn, error) {
+		dialed = append(dialed, address)
+		if address == "10.200.0.5:8443" {
+			return nil, fmt.Errorf("member unavailable")
+		}
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+	connectIncusEndpoint = func(_ context.Context, endpoint string, _ *incus.ConnectionArgs) (incus.InstanceServer, error) {
+		connected = append(connected, endpoint)
+		return nil, nil
+	}
+	got, err := getClientFromConfig(context.Background(), &config.Incus{
+		ClusterURLs:       []string{"https://10.200.0.5:8443", "https://10.200.0.6:8443"},
+		TLSServerCert:     paths[0],
+		ClientCertificate: paths[1],
+		ClientKey:         paths[2],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Nil(t, got)
+	assert.Equal(t, []string{"10.200.0.5:8443", "10.200.0.6:8443"}, dialed)
+	assert.Equal(t, []string{"https://10.200.0.6:8443"}, connected)
 }

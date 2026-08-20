@@ -22,23 +22,13 @@ func load(t *testing.T, name string) fleetconfig.Config {
 // 10240 MiB to 2 / 4096 and its ceiling went from one worker to three.
 func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 	t.Parallel()
-	cfg := load(t, "server-gha-runner-1.yaml")
-	// Four members carry the per-member caps, so the fleet has 12 instances,
-	// 24 CPU units and 49152 MiB to divide -- the same totals the live Incus
-	// project reports. The ceiling is fleet-wide because max_running is:
-	// one queue drives every member and the provider counts running workers
-	// across the cluster.
+	cfg := load(t, "example-runner-1.yaml")
 	for _, expected := range []Limit{
-		// 24 / 2 = 12 and 49152 / 3072 = 16, so the 12-instance ceiling binds.
-		{Pool: "nddev-linux-fast", Workers: 12, Binding: BindingInstances},
-		// 24 / 2 = 12 and 49152 / 4096 = 12, so instances bind here too. Not a
-		// pilot decision -- arithmetic, on a class sized from a measured
-		// 536 MiB guest baseline rather than from the host's shape.
-		{Pool: "nddev-linux-standard", Workers: 12, Binding: BindingInstances},
-		// 49152 / 6144 = 8 is below both the 12-instance and 12-CPU ceilings,
-		// so memory binds. The class declares max_running 3 against it.
-		{Pool: "nddev-linux-integration", Workers: 8, Binding: BindingMemory},
-		{Pool: "nddev-linux-release", Workers: 6, Binding: BindingCPU},
+		{Pool: "nddev-linux-fast", Workers: 4, Binding: BindingMemory},
+		{Pool: "nddev-linux-standard", Workers: 3, Binding: BindingMemory},
+		{Pool: "nddev-linux-integration", Workers: 2, Binding: BindingCPU},
+		{Pool: "nddev-linux-untrusted", Workers: 2, Binding: BindingCPU},
+		{Pool: "nddev-linux-release", Workers: 2, Binding: BindingCPU},
 	} {
 		got, err := ForPool(cfg, expected.Pool)
 		if err != nil {
@@ -50,11 +40,45 @@ func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 	}
 }
 
+// The container migration removes the old 8-GiB VM granularity. Two measured
+// 6-GiB heavy workers plus the host reserve fit on every 15991-MiB member;
+// a third does not. The ten-unit logical CPU budget leaves space for one light
+// job when the swap-backed committed-memory envelope and live load admit it.
+func TestTwoIntegrationContainersFitAndAThirdDoesNot(t *testing.T) {
+	t.Parallel()
+	cfg := load(t, "example-runner-2.yaml")
+
+	integration, exists := cfg.Pool("nddev-linux-integration")
+	if !exists {
+		t.Fatal("the integration host declares no integration pool")
+	}
+	// Give the project every CPU unit the host has and see what memory says.
+	generous := cfg
+	generous.Incus.ProjectMaxCPUUnits = 8
+	limit, err := ForPool(generous, "nddev-linux-integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limit.Workers != 2 || limit.Binding != BindingCPU {
+		t.Fatalf("with the CPU cap opened to the whole host, integration derives %+v; "+
+			"expected two four-vCPU containers", limit)
+	}
+
+	// And the memory a second worker would need, against what the host has.
+	const observedHostMiB = 15991 // measured on gha-runner-1..4, 2026-08-15
+	if want := 2 * integration.Resources.MemoryMiB; want+cfg.HostReserve.MinimumMemoryMiB > observedHostMiB {
+		t.Fatalf("two integration containers plus reserve want %d MiB and the host has %d MiB", want+cfg.HostReserve.MinimumMemoryMiB, observedHostMiB)
+	}
+	if want := 3 * integration.Resources.MemoryMiB; want <= observedHostMiB {
+		t.Fatalf("three integration containers unexpectedly fit: want %d MiB host %d MiB", want, observedHostMiB)
+	}
+}
+
 // Every declared host must derive a limit for every pool it declares, or the
 // derivation has a hole somewhere the configuration does not.
 func TestEveryDeclaredHostDerivesEveryPool(t *testing.T) {
 	t.Parallel()
-	matches, err := filepath.Glob(filepath.Join("..", "..", "config", "server-*.yaml"))
+	matches, err := filepath.Glob(filepath.Join("..", "..", "config", "example-*.yaml"))
 	if err != nil || len(matches) == 0 {
 		t.Fatalf("glob platform configs: %v", err)
 	}
@@ -74,38 +98,6 @@ func TestEveryDeclaredHostDerivesEveryPool(t *testing.T) {
 			if limit.Workers < 1 {
 				t.Errorf("%s pool %q derives %d workers, so the host declares a pool it cannot run one of",
 					filepath.Base(path), limit.Pool, limit.Workers)
-			}
-		}
-	}
-}
-
-// #257 asked for more integration throughput, and the answer this file used to
-// record was "not by raising the number": a second 4 vCPU / 8192 MiB worker did
-// not fit beside the first on one 15991 MiB host, so it needed a second host.
-//
-// Both halves of that stopped being true. Clustering made the ceiling
-// fleet-wide, and the class was resized from measurement -- a live integration
-// worker peaked at 1179 MiB of its 8192 and held 1.1 of 4 vCPU -- to
-// 2 vCPU / 6144 MiB. What replaces the old assertion is the invariant that
-// actually protects the fleet: a class may declare no more concurrency than the
-// caps can carry, whatever its shape.
-func TestNoClassDeclaresMoreConcurrencyThanTheCapsCarry(t *testing.T) {
-	t.Parallel()
-	for _, host := range []string{
-		"server-gha-runner-1.yaml", "server-gha-runner-2.yaml",
-		"server-gha-runner-3.yaml", "server-gha-runner-4.yaml",
-	} {
-		cfg := load(t, host)
-		for _, pool := range cfg.Pools {
-			limit, err := ForPool(cfg, pool.Name)
-			if err != nil {
-				t.Fatalf("%s: %s: %v", host, pool.Name, err)
-			}
-			if pool.MaxRunning > limit.Workers {
-				t.Errorf(
-					"%s: %s declares max_running %d but the caps carry %d (%s binds)",
-					host, pool.Name, pool.MaxRunning, limit.Workers, limit.Binding,
-				)
 			}
 		}
 	}

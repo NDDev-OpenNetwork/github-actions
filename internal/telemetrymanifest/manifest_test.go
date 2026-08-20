@@ -65,7 +65,7 @@ func TestValidationRejectsMutableUnsafeOrSharedInputs(t *testing.T) {
 		}, "store.archive.url"},
 		{"store version drift", func(m *Manifest) { m.Store.Version = "v0.91.5" }, "store.archive.name"},
 		{"unpinned store archive", func(m *Manifest) { m.Store.Archive.SHA256 = "" }, "store.archive.sha256"},
-		{"shared telemetry bucket", func(m *Manifest) { m.Store.Bucket = "example-media-telemetry" }, "store.bucket"},
+		{"shared telemetry bucket", func(m *Manifest) { m.Store.Bucket = "myattention-telemetry" }, "store.bucket"},
 		{"undeclared stream", func(m *Manifest) { m.Store.Streams = append(m.Store.Streams, "fleet_extra") }, "store.streams"},
 		{"unbounded retention", func(m *Manifest) { m.Store.RetentionDays = 4000 }, "store.retention_days"},
 		{"public transport target", func(m *Manifest) { m.Transport.TargetAddress = "8.8.8.8" }, "transport.target_address"},

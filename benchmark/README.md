@@ -30,10 +30,10 @@ therefore installed by the in-repository toolchain installer from exact HTTPS
 release URLs with hard-coded SHA-256 verification; no third-party setup action
 receives the workflow token.
 
-The `github-hosted` environment resolves to `ubuntu-24.04`. The `nddev`
-environment resolves Go/Rust/Python/Bun jobs to `nddev-linux-standard` and the
-Docker job to `nddev-linux-integration`. This keeps the OS generation aligned
-while preserving the integration worker's VM-local Docker boundary.
+New benchmark runs are fleet-only: Go/Rust/Python/Bun jobs resolve to
+`nddev-linux-standard` and the Docker job to `nddev-linux-integration`. The
+committed `github-hosted` samples remain immutable historical comparison
+evidence; this private repository no longer dispatches paid hosted Linux jobs.
 
 `cache_mode=cold` disables dependency-cache restore/save. `cache_mode=warm`
 uses an environment- and lock-specific GitHub Actions cache key. Prime one warm
@@ -106,7 +106,7 @@ Example pilot dispatch:
 
 ```bash
 gh workflow run representative-benchmark.yml --ref main \
-  -f environment=github-hosted -f cache_mode=cold -f iteration=pilot-01
+  -f environment=nddev -f cache_mode=cold -f iteration=pilot-01
 ```
 
 The harness is complete when local frozen fixture builds and its contract tests

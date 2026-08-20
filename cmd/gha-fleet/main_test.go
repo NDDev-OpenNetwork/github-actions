@@ -16,12 +16,12 @@ func TestValidateCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
 		"validate",
-		"--config", filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"),
+		"--config", filepath.Join("..", "..", "config", "example-runner-1.yaml"),
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code %d, stderr: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), `"valid": true`) || !strings.Contains(stdout.String(), `"backends": 1`) || !strings.Contains(stdout.String(), `"pools": 4`) {
+	if !strings.Contains(stdout.String(), `"valid": true`) || !strings.Contains(stdout.String(), `"backends": 1`) || !strings.Contains(stdout.String(), `"pools": 10`) {
 		t.Fatalf("unexpected stdout: %s", stdout.String())
 	}
 }
@@ -138,12 +138,12 @@ func TestReconcileIncusDefaultsToReadOnlyPlan(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
 		"reconcile-incus",
-		"--config", filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"),
+		"--config", filepath.Join("..", "..", "config", "example-runner-1.yaml"),
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code %d, stderr: %s", code, stderr.String())
 	}
-	for _, wanted := range []string{`"applied": false`, `"version": "v6.0.0"`, `"name": "nddev-linux-standard"`} {
+	for _, wanted := range []string{`"applied": false`, `"version": "v6.0.6"`, `"name": "nddev-linux-standard"`} {
 		if !strings.Contains(stdout.String(), wanted) {
 			t.Fatalf("plan output does not contain %s: %s", wanted, stdout.String())
 		}
@@ -159,7 +159,7 @@ func TestReconcileIncusDefaultsToReadOnlyPlan(t *testing.T) {
 func TestReconcileIncusRejectsUnsafePoolPolicy(t *testing.T) {
 	t.Parallel()
 
-	source, err := os.ReadFile(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	source, err := os.ReadFile(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,8 +191,8 @@ func TestReconcileImageDefaultsToReadOnlyPlan(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
 		"reconcile-image",
-		"--config", filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"),
-		"--manifest", filepath.Join("..", "..", "config", "golden-image.yaml"),
+		"--config", filepath.Join("..", "..", "config", "example-runner-1.yaml"),
+		"--manifest", filepath.Join("..", "..", "config", "golden-image-container.yaml"),
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code %d, stderr: %s", code, stderr.String())

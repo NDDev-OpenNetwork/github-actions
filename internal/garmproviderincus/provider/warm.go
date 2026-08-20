@@ -328,7 +328,7 @@ func (l *Incus) getWarmCreateArgs(ctx context.Context, flavor, name string) (api
 	if err != nil {
 		return api.InstancesPost{}, err
 	}
-	image, err := l.imageManager.getLocalImageByAlias(imagePolicy.Alias, l.cfg.GetInstanceType(), "x86_64", l.cli)
+	image, err := l.imageManager.getLocalImageByAlias(imagePolicy.Alias, imagePolicy.InstanceType, "x86_64", l.cli)
 	if err != nil {
 		return api.InstancesPost{}, errors.Wrap(err, "resolving warm image")
 	}

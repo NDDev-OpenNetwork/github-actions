@@ -201,13 +201,13 @@ func uncalledUpstream(t *testing.T) string {
 
 func TestValidateListenAddressRequiresALiteralAddress(t *testing.T) {
 	for _, address := range []string{
-		"gateway.internal:9443", "192.0.2.1", "192.0.2.1:", ":9443", "",
+		"gateway.internal:9443", "198.51.100.1", "198.51.100.1:", ":9443", "",
 	} {
 		if err := ValidateListenAddress(address); err == nil {
 			t.Fatalf("listen address %q was accepted", address)
 		}
 	}
-	for _, address := range []string{"192.0.2.1:9443", "172.16.0.7:9443"} {
+	for _, address := range []string{"198.51.100.1:9443", "10.200.0.7:9443"} {
 		if err := ValidateListenAddress(address); err != nil {
 			t.Fatalf("listen address %q was refused: %v", address, err)
 		}

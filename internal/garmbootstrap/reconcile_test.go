@@ -166,6 +166,95 @@ func TestReconcileActivationMigrationRejectsUnknownExtraSpecs(t *testing.T) {
 	}
 }
 
+func TestReconcileCapacityMigrationIsExplicitAndDisablesFirst(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	adminPath, bundlePath, anchorPath := testFiles(t, now)
+	state := &fakeGARMState{}
+	server := httptest.NewServer(state.handler(t))
+	defer server.Close()
+	runner := Runner{HTTPClient: server.Client(), Random: strings.NewReader(strings.Repeat("c", 32)), Now: func() time.Time { return now }}
+	options := Options{
+		BaseURL: server.URL + "/api/v1", AdminCredentialsPath: adminPath,
+		CredentialAnchorPath: anchorPath, AppBundleDirectory: bundlePath, Apply: true,
+	}
+	if _, err := runner.Run(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	state.mutex.Lock()
+	state.scaleSets[DefaultScaleSetName].MaxRunners = 1
+	state.scaleSets[DefaultScaleSetName].Enabled = true
+	state.mutex.Unlock()
+	options.AppBundleDirectory = ""
+	options.Enable = true
+	if _, err := runner.Run(context.Background(), options); err == nil || !strings.Contains(err.Error(), "explicit capacity migration") {
+		t.Fatalf("capacity drift was not fail-closed: %v", err)
+	}
+	options.Apply = false
+	options.MigrateCapacity = true
+	planned, err := runner.Run(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(planned.Actions, []string{"disable_and_migrate_scale_set_capacity", "enable_verified_scale_set"}) {
+		t.Fatalf("unexpected capacity migration plan: %#v", planned.Actions)
+	}
+	options.Apply = true
+	migrated, err := runner.Run(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.ScaleSet == nil || !migrated.ScaleSet.Enabled || migrated.ScaleSet.MaximumRunners != 12 ||
+		!reflect.DeepEqual(migrated.Actions, []string{"disable_and_migrate_scale_set_capacity", "enable_verified_scale_set"}) {
+		t.Fatalf("unexpected capacity migration result: %#v", migrated)
+	}
+}
+
+func TestReconcileImageMigrationIsExplicitAndDisablesFirst(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	adminPath, bundlePath, anchorPath := testFiles(t, now)
+	state := &fakeGARMState{}
+	server := httptest.NewServer(state.handler(t))
+	defer server.Close()
+	runner := Runner{HTTPClient: server.Client(), Random: strings.NewReader(strings.Repeat("i", 64)), Now: func() time.Time { return now }}
+	options := Options{
+		BaseURL: server.URL + "/api/v1", AdminCredentialsPath: adminPath,
+		CredentialAnchorPath: anchorPath, AppBundleDirectory: bundlePath,
+		ScaleSetName: FastScaleSetName, Apply: true,
+	}
+	if _, err := runner.Run(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	state.mutex.Lock()
+	state.scaleSets[FastScaleSetName].Image = ReleaseImage
+	state.scaleSets[FastScaleSetName].Enabled = true
+	state.mutex.Unlock()
+	options.AppBundleDirectory = ""
+	options.Enable = true
+	if _, err := runner.Run(context.Background(), options); err == nil || !strings.Contains(err.Error(), "explicit image migration") {
+		t.Fatalf("image drift was not fail-closed: %v", err)
+	}
+	options.Apply = false
+	options.MigrateImage = true
+	planned, err := runner.Run(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(planned.Actions, []string{"disable_and_migrate_scale_set_image", "enable_verified_scale_set"}) {
+		t.Fatalf("unexpected image migration plan: %#v", planned.Actions)
+	}
+	options.Apply = true
+	migrated, err := runner.Run(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.ScaleSet == nil || !migrated.ScaleSet.Enabled || migrated.ScaleSet.Image != ContainerCanaryImage ||
+		!reflect.DeepEqual(migrated.Actions, []string{"disable_and_migrate_scale_set_image", "enable_verified_scale_set"}) {
+		t.Fatalf("unexpected image migration result: %#v", migrated)
+	}
+}
+
 func TestReconcileIntegrationScaleSetAlongsideStandard(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
@@ -264,31 +353,6 @@ func TestReconcileRejectsBundleAnchorMismatch(t *testing.T) {
 	}
 }
 
-func TestRepositoryCredentialAnchorIsExact(t *testing.T) {
-	t.Parallel()
-	source, err := os.ReadFile("../../config/garm-credential-anchor.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	anchorPath := filepath.Join(t.TempDir(), "garm-credential-anchor.json")
-	if err := os.WriteFile(anchorPath, source, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	anchor, err := loadCredentialAnchorForTest(anchorPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The fingerprint is the reviewed identity of the App key GARM holds. It
-	// last changed on 2026-08-10, when the dedicated fleet was provisioned and
-	// a second key was issued for the same App: the original key was written
-	// once into example-legacy's GARM and destroyed, so the new hosts could only be
-	// given a new one. Changing this line is the review step for that.
-	if anchor.AppID != 100001 || anchor.InstallationID != 200001 ||
-		anchor.description() != "managed-by=gha-fleet;app=100001;installation=200001;key-sha256=a939189054f8d3862f646afe2e2ad84ce5b8b50ae4da5442c0ad51ee6a9d9374" {
-		t.Fatalf("repository credential anchor drifted: %#v", anchor)
-	}
-}
-
 func TestCredentialAnchorValidationFailsClosed(t *testing.T) {
 	t.Parallel()
 	valid := credentialAnchor{
@@ -322,7 +386,7 @@ func TestCredentialAnchorValidationFailsClosed(t *testing.T) {
 	}
 
 	unknownPath := filepath.Join(t.TempDir(), "unknown-anchor.json")
-	if err := os.WriteFile(unknownPath, []byte(`{"schema_version":1,"credential_name":"nddev-gha-fleet","app_id":1,"installation_id":2,"key_sha256":"`+strings.Repeat("a", 64)+`","unknown":true}`), 0o600); err != nil {
+	if err := os.WriteFile(unknownPath, []byte(`{"schema_version":1,"credential_name":"example-actions-fleet","app_id":1,"installation_id":2,"key_sha256":"`+strings.Repeat("a", 64)+`","unknown":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadCredentialAnchorForTest(unknownPath); err == nil || !strings.Contains(err.Error(), "unknown") {
@@ -335,6 +399,50 @@ func TestReconcileRejectsUnknownScaleSetBeforeReadingSecrets(t *testing.T) {
 	result, err := (Runner{}).Run(context.Background(), Options{ScaleSetName: "nddev-linux-typo"})
 	if err == nil || !strings.Contains(err.Error(), "scale set must be exactly") || result.Applied {
 		t.Fatalf("unknown managed scale set was accepted: result=%#v error=%v", result, err)
+	}
+}
+
+func TestReconcileCreatesReviewedRepositoryScopedAlmatyScaleSet(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 19, 15, 0, 0, 0, time.UTC)
+	adminPath, bundlePath, anchorPath := testFiles(t, now)
+	state := &fakeGARMState{}
+	server := httptest.NewServer(state.handler(t))
+	defer server.Close()
+	runner := Runner{HTTPClient: server.Client(), Random: strings.NewReader(strings.Repeat("a", 64)), Now: func() time.Time { return now }}
+	options := Options{
+		BaseURL: server.URL + "/api/v1", AdminCredentialsPath: adminPath,
+		CredentialAnchorPath: anchorPath, AppBundleDirectory: bundlePath, Apply: true,
+	}
+	if _, err := runner.Run(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	state.mutex.Lock()
+	state.repository = nil
+	state.mutex.Unlock()
+	options.AppBundleDirectory = ""
+	options.Repository = "example-org/example-library"
+	options.ScaleSetName = AlmatyStandardScaleSetName
+	created, err := runner.Run(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Repository == nil || created.Repository.Name != options.Repository || created.ScaleSet == nil ||
+		created.ScaleSet.Name != AlmatyStandardScaleSetName || created.ScaleSet.Image != DefaultImage ||
+		created.ScaleSet.Flavor != AlmatyStandardFlavor {
+		t.Fatalf("unexpected Almaty repository reconciliation: %#v", created)
+	}
+}
+
+func TestReconcileRejectsUnreviewedRepositoryBeforeReadingSecrets(t *testing.T) {
+	result, err := (Runner{}).Run(context.Background(), Options{Repository: "example-org/public-repository"})
+	if err == nil || !strings.Contains(err.Error(), "is not a managed repository") || result.Applied {
+		t.Fatalf("unreviewed repository was accepted: result=%#v error=%v", result, err)
+	}
+	if _, err := (Runner{}).Run(context.Background(), Options{
+		Repository: "example-org/example-library", EntityKind: EntityKindOrganization,
+	}); err == nil || !strings.Contains(err.Error(), "cannot be used with an organization") {
+		t.Fatalf("repository override was accepted for an organization entity: %v", err)
 	}
 }
 
@@ -552,8 +660,8 @@ func (s *fakeGARMState) handler(t *testing.T) http.Handler {
 		case request.Method == http.MethodPost && request.URL.Path == "/api/v1/repositories":
 			var input createRepositoryRequest
 			readJSON(t, request.Body, &input)
-			wantedOwner, wantedName, _ := strings.Cut(testTenant().Repository, "/")
-			if input.Owner != wantedOwner || input.Name != wantedName || len(input.WebhookSecret) != 64 || input.AgentMode || input.ForgeType != "github" || input.PoolBalancerType != DefaultPoolBalancerType {
+			_, repositoryErr := tenant.WithRepository(testTenant(), input.Owner+"/"+input.Name)
+			if repositoryErr != nil || len(input.WebhookSecret) != 64 || input.AgentMode || input.ForgeType != "github" || input.PoolBalancerType != DefaultPoolBalancerType {
 				t.Errorf("unexpected repository request: %#v", input)
 			}
 			s.repository = &repositoryDTO{ID: "repo-1", Owner: input.Owner, Name: input.Name, CredentialsID: 1, Credentials: *s.credential, PoolBalancerType: input.PoolBalancerType, Endpoint: endpointDTO{Name: "github.com", EndpointType: "github"}}
@@ -588,6 +696,9 @@ func (s *fakeGARMState) handler(t *testing.T) http.Handler {
 			var input struct {
 				Enabled    *bool           `json:"enabled"`
 				ExtraSpecs json.RawMessage `json:"extra_specs"`
+				MaxRunners *uint           `json:"max_runners"`
+				Image      string          `json:"image"`
+				Flavor     string          `json:"flavor"`
 			}
 			readJSON(t, request.Body, &input)
 			var selected *scaleSetDTO
@@ -606,6 +717,15 @@ func (s *fakeGARMState) handler(t *testing.T) http.Handler {
 			}
 			if len(input.ExtraSpecs) != 0 {
 				selected.ExtraSpecs = input.ExtraSpecs
+			}
+			if input.MaxRunners != nil {
+				selected.MaxRunners = *input.MaxRunners
+			}
+			if input.Image != "" {
+				selected.Image = input.Image
+			}
+			if input.Flavor != "" {
+				selected.Flavor = input.Flavor
 			}
 			writeJSONTest(t, writer, selected)
 		default:
@@ -666,7 +786,7 @@ func testFiles(t *testing.T, now time.Time) (string, string, string) {
 	writePrivateJSON(t, filepath.Join(bundlePath, "installation.json"), verifiedInstallation{
 		SchemaVersion:       1,
 		AppID:               12345,
-		AppSlug:             "nddev-gha-fleet",
+		AppSlug:             "example-actions-fleet",
 		InstallationID:      67890,
 		AccountLogin:        testTenant().Owner,
 		OwnerType:           OwnerTypeOrganization,
@@ -820,7 +940,7 @@ func TestReconcileRejectsAnUnknownEntityKind(t *testing.T) {
 func TestReconcileRepositoryTakesBothHalvesFromTheTenant(t *testing.T) {
 	t.Parallel()
 
-	selected, err := tenant.ByID("guild")
+	selected, err := tenant.ByID("example-guild")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.16
+derivative_version: v0.2.1-nddev.43
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -11,8 +11,8 @@ patches:
     sha256: 2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34
     purpose: Wake reconciliation from durable watcher events and keep starting runners out of generic scale-down while retaining periodic and timeout convergence.
   - path: third_party/garm/patches/0002-central-queue-admission.patch
-    sha256: 2727ad8b3e92f7800af1251c032cd3b0a6d5b50babcbdab65bffe59a69d76131
-    purpose: Admit sparse JobAssigned UUID identities from canonical repository entities before desired capacity, retain deferred GitHub messages, and reconcile later AcquireJobs metadata and request IDs.
+    sha256: 7a4cd4efa8b2c8b072c5de78cd58f2b3367d91938425fdcd58402c77e8a8b1c6
+    purpose: Persist sparse JobAssigned UUID identities as observation-only state, acknowledge lifecycle messages after durable transfer so completion cannot be head-of-line blocked, and reserve capacity only after JobAvailable binds AcquireJobs metadata and request IDs.
   - path: third_party/garm/patches/0003-failed-scale-set-runner-cleanup.patch
     sha256: 0cd77616af4160eae7be51f91340841b30e13d4b20ea5873e004c1b81d7879e1
     purpose: Retain failed scale-set instance identity until its pre-created GitHub JIT runner registration is removed, retrying transient cleanup failures before provider and database teardown.
@@ -22,16 +22,58 @@ patches:
   - path: third_party/garm/patches/0005-direct-jit-phase-telemetry.patch
     sha256: 49de677a1c483e58cc009ef8f23d301ef4647ea01aec4100a3e6c49376f7889f
     purpose: Emit secret-free structured phase boundaries and monotonic durations around GitHub AcquireJobs and external-provider creation without changing admission, execution or reconciliation semantics.
+  - path: third_party/garm/patches/0006-durable-provider-create-retry.patch
+    sha256: 2c5ebf1cc435345cb6cc9646cacbe27206c0c17d0b30f08b5aaeb856d731974c
+    purpose: Reserve provider attempts by job identity when bound and otherwise by stable forge-entity plus Scale Set identity, apply bounded exponential backoff and open a durable circuit after eight failures across instance-manager recreation and GARM restart.
+  - path: third_party/garm/patches/0007-fast-authoritative-job-reconciliation.patch
+    sha256: 3c9631ee2c73eedee90fc2f26a7f87361021236b6a1bc7b7ffffa2f0d1c3c3a3
+    purpose: Reconcile queued database jobs against the authoritative GitHub Jobs API after thirty seconds, checking ten per cycle with a one-minute repeat interval instead of leaving cancelled work active for an hour.
+  - path: third_party/garm/patches/0008-authoritative-scale-set-job-reconciliation.patch
+    sha256: b38bc35afa7a93d703e8e141495ac9e930462feb74e941ee983e98b02d1ee565
+    purpose: Reconcile scale-set jobs by paginating their authoritative workflow run, delete only uniquely proven stale records by scale-set identity, and retain ambiguous matrix jobs fail-closed.
+  - path: third_party/garm/patches/0009-precreate-provider-admission.patch
+    sha256: 6bd28c42a3da9de1b9839d500c2a68d8507bc6f638caf935ccb81fa0fbef5f29
+    purpose: Stop scale-up before JIT registration and database instance creation while the shared durable provider circuit blocks the scale-set failure domain, while allowing admitted instances to reserve independent attempt leases.
+  - path: third_party/garm/patches/0010-synchronize-instance-manager-state.patch
+    sha256: be418618739cc44d0bb2481ad3d6b33f8e7e2ef6b696f70987e8d20aa4df743f
+    purpose: Synchronize the instance manager's in-memory lifecycle state immediately after every durable status mutation so a queued wake or ticker cannot replay an invalid transition against newer database state.
+  - path: third_party/garm/patches/0011-protect-incomplete-provider-lifecycle.patch
+    sha256: 7c77950cabfd74ddd5d3d0bb65b823aa61ebc1605c3ad97e88a195a7e242f29f
+    purpose: Keep pending and creating scale-set instances out of timeout and missing-registration teardown until provider creation reaches a terminal lifecycle state.
+  - path: third_party/garm/patches/0012-require-admitted-intent-before-scale-up.patch
+    sha256: 5bc07422308b630f0a005ce6ae7212428ea386d235e3ac75cb71046c18713f2e
+    purpose: Refuse stale desired-capacity scale-up before JIT registration or database instance creation unless a durable admitted queue intent still needs capacity.
+  - path: third_party/garm/patches/0013-wake-capacity-after-delete.patch
+    sha256: 953e671d0d14dd64cdb9930ac5fa4ef6e62ba08438277e7bd385f138345c6e2e
+    purpose: Back off saturated scale sets without provider-call churn and clear only capacity deferrals after deletion of a worker with a proven provider identity actually releases resources.
+  - path: third_party/garm/patches/0014-refresh-terminal-instance-state.patch
+    sha256: 43d3a7cf1986c1e00250053c82a0996bbf40263ab410c679258bff72cf6d1b00
+    purpose: Re-read authoritative instance rows in both instance-manager and scale-set removal paths so a concurrent terminal delete or newer lifecycle state cannot be rewritten to pending-delete.
+  - path: third_party/garm/patches/0015-authoritative-terminal-delete.patch
+    sha256: 50123c3502e060566b4a78f55f850ae36b37f25988d200b10c6cec414a6655ac
+    purpose: Force the terminal database commit only after provider deletion succeeds so a concurrent stale intermediate state cannot strand an already absent VM.
+  - path: third_party/garm/patches/0016-recheck-terminal-delete-conflict.patch
+    sha256: 60254f449fd0175db2636108cc65b8ea761a7b3933b1b185d6417ba48caffecb
+    purpose: Re-read authoritative state after a pending-delete update conflict so a concurrent terminal owner wins without an invalid deleted-to-pending-delete retry loop.
+  - path: third_party/garm/patches/0017-authoritative-queue-intent-reconciliation.patch
+    sha256: fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad
+    purpose: Release one exact queue intent before deleting a GitHub-authoritatively stale scale-set DB job, retaining both state surfaces when identity is ambiguous or journal reconciliation fails.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 3b8cca7c0288aeee8fd8e05697414c0a43264c5b660d2f265226f05f32af15e1
-    purpose: Fsync-backed central queue admission of configurable width, priority aging, repository quotas and weighted stride scheduling.
+    sha256: 3106a3671effb1e99f4331cf918486ff9e02b8706cafed039a73a2d26ca6d59a
+    purpose: Fsync-backed central queue admission where sparse JobAssigned is observation-only, complete JobAvailable identities reserve configurable capacity, pre-execution states have phase TTLs, and priority aging, repository quotas, weighted stride scheduling and completion-driven promotion remain durable without message redelivery.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 597e04c32036d7bd71fd31b2341da54b9fbc01c910bf810f943961619f010fe8
-    purpose: Deterministic priority, fairness, width, idempotency, message retention, crash expiry and concurrent-selection tests.
+    sha256: 0bc57d53c52686d7449ab8d9498be8356abd709f3b2cf6d75757c796e1b72d17
+    purpose: Deterministic observation-versus-reservation, phase expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
+  - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
+    sha256: 18709cebc5f909b762bf10bdf6cc5c8c65d651edc4cbb26132c739a19b2f2c7f
+    purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, bounded provider-failure circuits, one-grant-per-deletion capacity wake and one-hour garbage collection of expired non-terminal records.
+  - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
+    sha256: 607b37300281cb85ec2b04378ed1dff1d57db278811e3d09d29867aee7ea7cad
+    purpose: Prove attempts survive process recreation, concurrent failures saturate without corrupting the journal, every admission/storage pressure reason remains capacity, one resource release wakes exactly one oldest capacity domain, stale non-terminal state is collected and success clears durable state.
 build:
-  container_image: docker.io/library/golang@sha256:6c5605ab3a9a9fb3c4eafe5b3d63cdbf3881caf113262b67862547b54a9db599
-  go_version: go1.26.5
+  container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+  go_version: go1.26.6
   cgo_enabled: true
   target_os: linux
   target_arch: amd64
@@ -43,20 +85,30 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: caa54233f4252f223f8f7b2461c25a10f6f1108e7815483d31331b85b7865165
+  binary_sha256: 132182395c9b28e2ad8898630656c9b09ecde22b1bf721ddb0983fa4915c67c4
 runtime_contract:
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
   startup_states_protected_from_scale_down: true
   periodic_reconciliation_seconds: 5
   durable_queue_intent_before_acquire: true
-  assigned_job_admission_before_capacity: true
+  job_assigned_observation_only: true
+  job_available_reservation_before_capacity: true
   deferred_available_message_retained: true
-  global_max_in_flight: 1
+  global_max_in_flight: 16
   weighted_repository_fairness: true
-  per_repository_limit: 1
+  per_repository_limit: 6
   priority_aging_seconds: 300
   failed_scale_set_registration_cleanup: true
   direct_jit_provider_handoff: true
   direct_jit_phase_telemetry: true
+  durable_provider_retry: true
+  provider_retry_maximum_attempts: 8
+  provider_retry_backoff_cap_seconds: 300
+  capacity_retry_backoff_cap_seconds: 60
+  capacity_retry_wake_after_delete: true
+  authoritative_job_reconciliation: true
+  authoritative_queue_intent_reconciliation: true
+  job_reconciliation_interval_seconds: 30
+  job_reconciliation_batch_size: 10
   official_actions_runner_unchanged: true

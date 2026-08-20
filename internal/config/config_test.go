@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,15 +11,27 @@ import (
 func TestRepositoryConfigurationIsValid(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
-	if len(cfg.Pools) != 4 {
-		t.Fatalf("pool count = %d, want 4", len(cfg.Pools))
+	if len(cfg.Pools) != 10 {
+		t.Fatalf("pool count = %d, want 10", len(cfg.Pools))
+	}
+	var untrusted *Pool
+	for index := range cfg.Pools {
+		if cfg.Pools[index].Name == "nddev-linux-untrusted" {
+			untrusted = &cfg.Pools[index]
+		}
+	}
+	if untrusted == nil || untrusted.Trust != "untrusted" || !untrusted.Capabilities.Docker ||
+		untrusted.Capabilities.Credentials != "none" || untrusted.Capabilities.CacheWriteScope != "none" ||
+		untrusted.Warm.TargetReady != 0 || untrusted.Warm.MaxReady != 0 {
+		t.Fatalf("untrusted Docker class is not fail-closed: %#v", untrusted)
 	}
 	if len(cfg.Backends) != 1 || cfg.Backends[0].Platform != "linux" ||
-		cfg.Backends[0].Architecture != "amd64" || cfg.Backends[0].Implementation != "incus-vm" {
+		cfg.Backends[0].Architecture != "amd64" || cfg.Backends[0].Implementation != "incus-container" ||
+		!cfg.Backends[0].Capabilities.Docker {
 		t.Fatalf("unexpected execution backends: %#v", cfg.Backends)
 	}
 	if cfg.Cache.ObjectStore.Implementation != "rustfs" {
@@ -30,6 +43,23 @@ func TestRepositoryConfigurationIsValid(t *testing.T) {
 	}
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
+	}
+}
+
+func TestClusterConfigsShareTheCompletePublicHostDenySet(t *testing.T) {
+	t.Parallel()
+	want := []string{"203.0.113.10", "203.0.113.11", "203.0.113.12", "203.0.113.13", "203.0.113.14"}
+	for _, filename := range []string{
+		"example-runner-1.yaml", "example-runner-2.yaml", "example-runner-3.yaml",
+		"example-runner-4.yaml", "example-services.yaml",
+	} {
+		cfg, err := Load(filepath.Join("..", "..", "config", filename))
+		if err != nil {
+			t.Fatalf("load %s: %v", filename, err)
+		}
+		if !slices.Equal(cfg.Incus.EstatePublicHostAddresses, want) {
+			t.Errorf("%s estate public hosts = %v, want %v", filename, cfg.Incus.EstatePublicHostAddresses, want)
+		}
 	}
 }
 
@@ -68,7 +98,7 @@ func TestValidateAggregatesSecurityViolations(t *testing.T) {
 func TestReleasePoolCannotWriteCache(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
@@ -86,7 +116,7 @@ func TestReleasePoolCannotWriteCache(t *testing.T) {
 func TestFloatingControlPlaneVersionIsRejected(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
@@ -100,7 +130,7 @@ func TestFloatingControlPlaneVersionIsRejected(t *testing.T) {
 func TestUnsupportedProviderInterfaceIsRejected(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
@@ -111,27 +141,24 @@ func TestUnsupportedProviderInterfaceIsRejected(t *testing.T) {
 	}
 }
 
-func TestUnregisteredWarmTargetWithinPoolLimitIsAccepted(t *testing.T) {
+func TestEveryContainerPoolKeepsWarmCapacityDisabled(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
-	// The first pool holds no warm capacity on this host, so raising the target
-	// alone would exceed its ceiling. Raise both: the property under test is
-	// that an unregistered warm target inside the pool limit is accepted.
-	cfg.Pools[0].Warm.MaxReady = 1
-	cfg.Pools[0].Warm.TargetReady = 1
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("unregistered warm target was rejected: %v", err)
+	for _, pool := range cfg.Pools {
+		if pool.Warm.TargetReady != 0 || pool.Warm.MaxReady != 0 {
+			t.Fatalf("container pool %q requests warm capacity: %#v", pool.Name, pool.Warm)
+		}
 	}
 }
 
 func TestNestedVirtualizationGuardrailIsRequired(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatalf("load repository config: %v", err)
 	}
@@ -153,14 +180,14 @@ func TestUnsafeIncusSettingsAreRejected(t *testing.T) {
 		{"non-loopback API", func(cfg *Config) { cfg.Incus.APIAddress = "0.0.0.0:8443" }, "incus.api_address"},
 		{"wrong version", func(cfg *Config) { cfg.Incus.Version = "v6.1.0" }, "incus.version"},
 		{"unbounded driver", func(cfg *Config) { cfg.Incus.StorageDriver = "dir" }, "incus.storage_driver"},
-		{"overlapping bridge", func(cfg *Config) { cfg.Incus.NetworkCIDR = "10.10.10.1/24" }, "incus.network_cidr"},
+		{"overlapping bridge", func(cfg *Config) { cfg.Incus.NetworkCIDR = "10.10.10.2/24" }, "incus.network_cidr"},
 		{"undersized project disk", func(cfg *Config) { cfg.Incus.ProjectDiskLimitGiB = 40 }, "must fit the largest pool disk request"},
 	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+			cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 			if err != nil {
 				t.Fatalf("load repository config: %v", err)
 			}

@@ -100,8 +100,8 @@ func TestUnknownFieldRejectsTheWholeJournalRatherThanOneIntent(t *testing.T) {
 				"job_id":            "job-1",
 				"runner_request_id": 3,
 				"scale_set_name":    "nddev-linux-standard",
-				"repository":        "NDDev-OpenNetwork/github-actions",
-				"workflow_ref":      "NDDev-OpenNetwork/github-actions/.github/workflows/ci.yml@refs/heads/main",
+				"repository":        "example-org/example-actions",
+				"workflow_ref":      "example-org/example-actions/.github/workflows/ci.yml@refs/heads/main",
 				"event_name":        "push",
 				"queue_time":        now,
 				"state":             string(StateRunning),
@@ -114,8 +114,8 @@ func TestUnknownFieldRejectsTheWholeJournalRatherThanOneIntent(t *testing.T) {
 			},
 		},
 		"repositories": map[string]any{
-			"NDDev-OpenNetwork/github-actions": map[string]any{
-				"repository": "NDDev-OpenNetwork/github-actions", "weight": 1, "pass": 0,
+			"example-org/example-actions": map[string]any{
+				"repository": "example-org/example-actions", "weight": 1, "pass": 0,
 			},
 		},
 	}

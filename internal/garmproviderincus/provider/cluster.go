@@ -10,6 +10,8 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 )
 
+const maxSchedulableEmergencySwapBytes = 2 * 1024 * 1024 * 1024
+
 // fleetHostState answers "does this fleet have room", which is a different
 // question from "does this machine have room" the moment more than one machine
 // is behind the queue.
@@ -75,10 +77,12 @@ func clusterHostState(cli InstanceServerInterface, platform platformconfig.Confi
 		}
 		online++
 		snapshot.TotalCPUUnits += platform.Incus.ProjectMaxCPUUnits
-		snapshot.TotalMemoryMiB += int(state.SysInfo.TotalRAM / (1024 * 1024))
+		swapBytes := min(state.SysInfo.TotalSwap, uint64(maxSchedulableEmergencySwapBytes))
+		snapshot.TotalMemoryMiB += int((state.SysInfo.TotalRAM + swapBytes) / (1024 * 1024))
 		// Reclaimable page cache is available to a new worker; free_ram alone
 		// reads a member that has merely been reading images as full.
-		snapshot.AvailableMemoryMiB += int((state.SysInfo.FreeRAM + state.SysInfo.BufferRAM) / (1024 * 1024))
+		freeSwapBytes := min(state.SysInfo.FreeSwap, swapBytes)
+		snapshot.AvailableMemoryMiB += int((state.SysInfo.FreeRAM + state.SysInfo.BufferRAM + freeSwapBytes) / (1024 * 1024))
 		if percent := memberFreeDiskPercent(state, platform.Incus.StoragePool); percent < snapshot.FreeDiskPercent {
 			snapshot.FreeDiskPercent = percent
 		}

@@ -46,6 +46,17 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 	if !ok {
 		return Plan{}, fmt.Errorf("image profile %q is not a configured pool", profile)
 	}
+	backend, ok := cfg.Backend(pool.Backend)
+	if !ok {
+		return Plan{}, fmt.Errorf("image profile %q references unknown backend %q", profile, pool.Backend)
+	}
+	wantedType := "virtual-machine"
+	if backend.Implementation == "incus-container" {
+		wantedType = "container"
+	}
+	if manifest.Image.EffectiveType() != wantedType {
+		return Plan{}, fmt.Errorf("image type %q does not match backend %q", manifest.Image.EffectiveType(), backend.Implementation)
+	}
 	if pool.Capabilities.Docker != manifest.Guest.DockerCapable() {
 		return Plan{}, fmt.Errorf(
 			"image variant %q Docker capability does not match profile %q",
@@ -81,6 +92,16 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		}
 		installSpecs = append(installSpecs, spec)
 	}
+	instanceConfig := incuspolicy.VMInstanceConfig()
+	if manifest.Image.EffectiveType() == "container" {
+		instanceConfig = map[string]string{
+			"security.privileged":                  "false",
+			"security.idmap.isolated":              "true",
+			"security.nesting":                     fmt.Sprintf("%t", pool.Capabilities.Docker),
+			"security.syscalls.intercept.mknod":    "false",
+			"security.syscalls.intercept.setxattr": "false",
+		}
+	}
 	return Plan{
 		ManifestFingerprint: fingerprint,
 		IncusVersion:        cfg.Incus.Version,
@@ -89,7 +110,7 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		PublicHostAddress:   cfg.Incus.PublicHostAddress,
 		BuilderName:         "gha-image-builder-" + short,
 		SmokeName:           "gha-image-smoke-" + short,
-		InstanceConfig:      incuspolicy.VMInstanceConfig(),
+		InstanceConfig:      instanceConfig,
 		BuilderDiskGiB:      manifest.Guest.BuilderDiskGiB,
 		SmokeRootDiskGiB:    pool.Resources.DiskGiB,
 		Image:               manifest.Image,

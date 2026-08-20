@@ -34,7 +34,10 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetrymanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/zotcredentials"
@@ -92,6 +95,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runFleetContract(args[1:], stdout, stderr)
 	case "capacity":
 		return runCapacity(args[1:], stdout, stderr)
+	case "recover-queue-intent":
+		return runRecoverQueueIntent(args[1:], stdout, stderr, false)
+	case "recover-canceled-queue-intent":
+		return runRecoverQueueIntent(args[1:], stdout, stderr, true)
+	case "recover-provider-retry":
+		return runRecoverProviderRetry(args[1:], stdout, stderr)
 	case "version":
 		if err := writeJSON(stdout, map[string]string{"version": version, "commit": commit}); err != nil {
 			fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
@@ -106,6 +115,143 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stderr)
 		return 2
 	}
+}
+
+func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("recover-provider-retry", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	journalPath := flags.String("journal", "/var/lib/gha-fleet/create-retries.json", "exact GARM provider retry journal")
+	lockPath := flags.String("lock", "/var/lib/gha-fleet/create-retries.lock", "exact GARM provider retry lock")
+	providerPath := flags.String("provider-journal", "/var/lib/gha-fleet/provider-journal.json", "provider execution journal")
+	poolName := flags.String("pool-name", "", "exact provider pool protected by this circuit")
+	key := flags.String("key", "", "exact terminal retry key")
+	errorClass := flags.String("error-class", "", "exact recoverable error class")
+	updatedAtText := flags.String("updated-at", "", "exact RFC3339Nano updated_at precondition")
+	apply := flags.Bool("apply", false, "remove the exact proven terminal circuit")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *key == "" || *poolName == "" || *errorClass == "" || *updatedAtText == "" {
+		fmt.Fprintln(stderr, "gha-fleet: recover-provider-retry requires --key, --pool-name, --error-class and --updated-at")
+		return 2
+	}
+	if os.Geteuid() == 0 {
+		fmt.Fprintln(stderr, "gha-fleet: recover-provider-retry must run as the garm service account")
+		return 1
+	}
+	active, err := garmServiceActive()
+	if err != nil || active {
+		if err == nil {
+			err = errors.New("garm.service must be stopped")
+		}
+		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
+		return 1
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, *updatedAtText)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: invalid updated_at: %v\n", err)
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	providerState, err := (providerjournal.Store{Path: *providerPath}).ReadOnly(ctx)
+	targetOwned := false
+	for _, lease := range providerState.Leases {
+		targetOwned = targetOwned || lease.PoolName == *poolName
+	}
+	for _, claim := range providerState.Claims {
+		targetOwned = targetOwned || claim.PoolName == *poolName
+	}
+	if err != nil || targetOwned {
+		if err == nil {
+			err = fmt.Errorf("provider journal still owns execution state for pool %q", *poolName)
+		}
+		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
+		return 1
+	}
+	result, err := providerretry.RecoverTerminal(ctx, *journalPath, *lockPath, *key, *errorClass, updatedAt, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, result); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+var garmServiceActive = func() (bool, error) {
+	err := exec.Command("systemctl", "is-active", "--quiet", "garm.service").Run()
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 3 {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect garm.service: %w", err)
+}
+
+func runRecoverQueueIntent(args []string, stdout, stderr io.Writer, canceled bool) int {
+	flags := flag.NewFlagSet("recover-queue-intent", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	journalPath := flags.String("journal", "/var/lib/gha-fleet/queue-intents.json", "exact GARM queue journal")
+	lockPath := flags.String("lock", "/var/lib/gha-fleet/queue-intents.lock", "exact GARM queue lock")
+	providerPath := flags.String("provider-journal", "/var/lib/gha-fleet/provider-journal.json", "provider execution journal")
+	key := flags.String("key", "", "exact stale queue-intent key")
+	updatedAtText := flags.String("updated-at", "", "exact RFC3339Nano updated_at precondition")
+	apply := flags.Bool("apply", false, "remove the exact proven orphan")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *key == "" || *updatedAtText == "" {
+		fmt.Fprintln(stderr, "gha-fleet: recover-queue-intent requires --key and --updated-at")
+		return 2
+	}
+	if os.Geteuid() == 0 {
+		fmt.Fprintln(stderr, "gha-fleet: recover-queue-intent must run as the garm service account")
+		return 1
+	}
+	active, err := garmServiceActive()
+	if err != nil || active {
+		if err == nil {
+			err = errors.New("garm.service must be stopped")
+		}
+		fmt.Fprintf(stderr, "gha-fleet: recover queue intent: %v\n", err)
+		return 1
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, *updatedAtText)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover queue intent: invalid updated_at: %v\n", err)
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	providerState, err := (providerjournal.Store{Path: *providerPath}).ReadOnly(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover queue intent: %v\n", err)
+		return 1
+	}
+	if len(providerState.Leases) != 0 || len(providerState.Claims) != 0 {
+		fmt.Fprintln(stderr, "gha-fleet: recover queue intent: provider journal still owns execution state")
+		return 1
+	}
+	var result queueintent.RecoveryResult
+	if canceled {
+		result, err = queueintent.RecoverCanceledUnbound(ctx, *journalPath, *lockPath, *key, updatedAt, *apply)
+	} else {
+		result, err = queueintent.RecoverUnboundRunning(ctx, *journalPath, *lockPath, *key, updatedAt, *apply)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover queue intent: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, result); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runReconcileRustFSCache(args []string, stdout, stderr io.Writer) int {
@@ -195,6 +341,7 @@ func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("reconcile-garm", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	tenantID := flags.String("tenant", tenant.DefaultID, "registered account to reconcile: "+strings.Join(tenant.IDs(), ", "))
+	repository := flags.String("repository", "", "exact reviewed repository entity; empty selects the tenant primary repository")
 	baseURL := flags.String("garm-url", garmbootstrap.DefaultBaseURL, "loopback GARM API base URL")
 	adminCredentials := flags.String("admin-credentials", "/etc/garm/admin-credentials.json", "private GARM administrator credential file")
 	credentialAnchor := flags.String("credential-anchor", "/etc/gha-fleet/garm-credential-anchor.json", "reviewed non-secret GARM credential anchor")
@@ -205,6 +352,8 @@ func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 	enable := flags.Bool("enable", false, "enable an already-created and exactly verified disabled scale set")
 	activationMode := flags.String("activation-mode", garmbootstrap.ActivationModeDirectJIT, "warm activation mode: direct-jit or metadata")
 	migrateActivation := flags.Bool("migrate-activation", false, "explicitly disable and migrate between the two exact activation modes")
+	migrateCapacity := flags.Bool("migrate-capacity", false, "explicitly disable and migrate to the class concurrency contract")
+	migrateImage := flags.Bool("migrate-image", false, "explicitly disable and migrate to the class image/backend contract")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -216,6 +365,7 @@ func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 	result, err := (garmbootstrap.Runner{}).Run(ctx, garmbootstrap.Options{
 		Tenant:               *tenantID,
+		Repository:           *repository,
 		BaseURL:              *baseURL,
 		AdminCredentialsPath: *adminCredentials,
 		CredentialAnchorPath: *credentialAnchor,
@@ -226,6 +376,8 @@ func runReconcileGARM(args []string, stdout, stderr io.Writer) int {
 		Enable:               *enable,
 		ActivationMode:       *activationMode,
 		MigrateActivation:    *migrateActivation,
+		MigrateCapacity:      *migrateCapacity,
+		MigrateImage:         *migrateImage,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: reconcile GARM: %v\n", err)
@@ -485,7 +637,7 @@ func runReconcileZotCredentials(args []string, stdout, stderr io.Writer) int {
 func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("reconcile-image", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	configPath := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	configPath := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	manifestPath := flags.String("manifest", "config/golden-image.yaml", "pinned golden-image manifest path")
 	profile := flags.String("profile", "nddev-linux-standard", "existing Incus profile whose Docker capability matches the manifest")
 	apply := flags.Bool("apply", false, "download, verify, build, smoke, and promote the image")
@@ -543,7 +695,18 @@ func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
 	}
-	if _, err := hostdeps.VerifyIncusVM(context.Background()); err != nil {
+	if manifest.Image.EffectiveType() == "container" {
+		if _, err := hostdeps.VerifyIncusContainer(context.Background()); err != nil {
+			fmt.Fprintf(stderr, "gha-fleet: verify Incus container host dependencies: %v\n", err)
+			return 1
+		}
+		if plan.Variant == "integration" {
+			if err := hostdeps.VerifyNestedDocker(context.Background()); err != nil {
+				fmt.Fprintf(stderr, "gha-fleet: verify nested Docker host dependencies: %v\n", err)
+				return 1
+			}
+		}
+	} else if _, err := hostdeps.VerifyIncusVM(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: verify Incus VM host dependencies: %v\n", err)
 		return 1
 	}
@@ -638,7 +801,7 @@ func writeImagePreflightRejection(stderr io.Writer, phase string, decision hostp
 func runReconcileIncus(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("reconcile-incus", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	path := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	poolNames := flags.String("pool", "nddev-linux-standard", "comma-separated pilot pool names")
 	apply := flags.Bool("apply", false, "apply the plan through the local Incus Unix socket")
 	if err := flags.Parse(args); err != nil {
@@ -728,7 +891,7 @@ func parsePools(value string) ([]string, error) {
 func runPreflight(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("preflight", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	path := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	poolName := flags.String("pool", "nddev-linux-fast", "cold-pilot pool name")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -771,7 +934,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	path := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -809,7 +972,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 func runRender(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	path := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -838,7 +1001,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 func runAdmit(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("admit", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	path := flags.String("config", "config/server-gha-runner-1.yaml", "platform configuration path")
+	path := flags.String("config", "config/example-runner-1.yaml", "platform configuration path")
 	poolName := flags.String("pool", "", "pool name")
 	snapshotPath := flags.String("snapshot", "", "JSON host snapshot path, or - for stdin")
 	if err := flags.Parse(args); err != nil {
@@ -871,10 +1034,9 @@ func runAdmit(args []string, stdout, stderr io.Writer) int {
 		MinimumPercent:         cfg.HostReserve.MinimumPercent,
 		MinimumFreeDiskPercent: cfg.HostReserve.MinimumFreeDiskPercent,
 	}, admission.Request{
-		PoolName:   pool.Name,
-		VCPU:       pool.Resources.VCPU,
-		MemoryMiB:  pool.Resources.MemoryMiB,
-		MaxRunning: pool.MaxRunning,
+		PoolName:  pool.Name,
+		VCPU:      pool.Resources.VCPU,
+		MemoryMiB: pool.Resources.MemoryMiB,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: evaluate admission: %v\n", err)

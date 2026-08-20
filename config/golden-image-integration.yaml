@@ -1,7 +1,7 @@
 schema_version: 1
 
 image:
-  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b6
+  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b10
   current_alias: nddev-ubuntu-24.04-amd64-docker-current
   previous_alias: nddev-ubuntu-24.04-amd64-docker-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-r20260801
@@ -44,15 +44,30 @@ toolchains:
     download_url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip
     archive_sha256: 951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
   - name: go
-    version: 1.26.5
-    archive: go1.26.5.linux-amd64.tar.gz
-    download_url: https://go.dev/dl/go1.26.5.linux-amd64.tar.gz
-    archive_sha256: 5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
-  - name: node
+    version: 1.26.6
+    archive: go1.26.6.linux-amd64.tar.gz
+    download_url: https://go.dev/dl/go1.26.6.linux-amd64.tar.gz
+    archive_sha256: 708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+  - name: gh
+    version: 2.97.0
+    archive: gh_2.97.0_linux_amd64.tar.gz
+    download_url: https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_linux_amd64.tar.gz
+    archive_sha256: a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112
+  - name: node22
+    version: 22.23.2
+    archive: node-v22.23.2-linux-x64.tar.xz
+    download_url: https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz
+    archive_sha256: d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
+  - name: node24
     version: 24.19.0
     archive: node-v24.19.0-linux-x64.tar.xz
     download_url: https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz
     archive_sha256: 14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
+  - name: node25
+    version: 25.9.0
+    archive: node-v25.9.0-linux-x64.tar.xz
+    download_url: https://nodejs.org/dist/v25.9.0/node-v25.9.0-linux-x64.tar.xz
+    archive_sha256: 1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e
   - name: rust
     version: 1.97.1
     archive: rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz

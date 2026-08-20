@@ -13,6 +13,7 @@ type Manifest struct {
 }
 
 type Image struct {
+	Type          string `json:"type,omitempty" yaml:"type,omitempty"`
 	Alias         string `json:"alias" yaml:"alias"`
 	CurrentAlias  string `json:"current_alias" yaml:"current_alias"`
 	PreviousAlias string `json:"previous_alias" yaml:"previous_alias"`
@@ -20,6 +21,13 @@ type Image struct {
 	OS            string `json:"os" yaml:"os"`
 	Release       string `json:"release" yaml:"release"`
 	Architecture  string `json:"architecture" yaml:"architecture"`
+}
+
+func (i Image) EffectiveType() string {
+	if i.Type == "" {
+		return "virtual-machine"
+	}
+	return i.Type
 }
 
 type Source struct {
@@ -31,6 +39,8 @@ type Source struct {
 	MetadataSHA256    string `json:"metadata_sha256" yaml:"metadata_sha256"`
 	DiskFile          string `json:"disk_file" yaml:"disk_file"`
 	DiskSHA256        string `json:"disk_sha256" yaml:"disk_sha256"`
+	RootfsFile        string `json:"rootfs_file,omitempty" yaml:"rootfs_file,omitempty"`
+	RootfsSHA256      string `json:"rootfs_sha256,omitempty" yaml:"rootfs_sha256,omitempty"`
 	KeyringPath       string `json:"keyring_path" yaml:"keyring_path"`
 	SignerFingerprint string `json:"signer_fingerprint" yaml:"signer_fingerprint"`
 }
@@ -73,12 +83,9 @@ type Toolchain struct {
 // representative benchmark installers short-circuit when the pinned version is
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
 // so a complete set turns per-job toolchain installation into a no-op.
-// node is baked rather than installed per job because CodeQL's TypeScript
-// extractor spawns `node` by name and checks its version before parsing. There
-// is no build-mode that avoids it -- the requirement is in the parser, not in a
-// build step -- and Bun does not satisfy it, so every TypeScript consumer on
-// every class needed it before it could leave the legacy runners.
-func BakedToolchains() []string { return []string{"bun", "go", "node", "rust", "uv"} }
+func BakedToolchains() []string {
+	return []string{"bun", "gh", "go", "node22", "node24", "node25", "rust", "uv"}
+}
 
 type Guest struct {
 	BuilderDiskGiB      int               `json:"builder_disk_gib" yaml:"builder_disk_gib"`

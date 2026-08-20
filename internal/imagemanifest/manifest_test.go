@@ -36,8 +36,25 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:e7bb8664645c080d26be6741caad4661c94a9f84fc49e24acd3d150aa0d9652d" {
+	if fingerprint != "sha256:503bd38c0a03ca96922edbbdb4550890e37ffcce9c046625da6f6df7f6f5e93d" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
+	}
+}
+
+func TestContainerManifestPinsCanonicalSignedRootfs(t *testing.T) {
+	t.Parallel()
+	manifest, err := Load(filepath.Join("..", "..", "config", "golden-image-container.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Image.EffectiveType() != "container" || manifest.Source.DiskFile != "" || manifest.Source.DiskSHA256 != "" ||
+		manifest.Source.RootfsFile != "ubuntu-24.04-server-cloudimg-amd64-root.tar.xz" ||
+		manifest.Source.RootfsSHA256 != "915b4be62933475c3fb5f5031aa2e159294db95fb32aaa9e8b317aadcb6c065d" {
+		t.Fatalf("container source is not exactly pinned: %#v", manifest)
+	}
+	fingerprint, err := manifest.Fingerprint()
+	if err != nil || !strings.HasPrefix(fingerprint, "sha256:") {
+		t.Fatalf("container fingerprint=%q err=%v", fingerprint, err)
 	}
 }
 
@@ -47,11 +64,14 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 func assertBakedToolchains(t *testing.T, manifest Manifest) {
 	t.Helper()
 	wanted := map[string]struct{ version, archiveSHA256 string }{
-		"bun":  {"1.3.14", "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"},
-		"go":   {"1.26.5", "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"},
-		"node": {"24.19.0", "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"},
-		"rust": {"1.97.1", "88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f"},
-		"uv":   {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
+		"bun":    {"1.3.14", "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"},
+		"gh":     {"2.97.0", "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112"},
+		"go":     {"1.26.6", "708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"},
+		"node22": {"22.23.2", "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"},
+		"node24": {"24.19.0", "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"},
+		"node25": {"25.9.0", "1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e"},
+		"rust":   {"1.97.1", "88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f"},
+		"uv":     {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
 	}
 	if len(manifest.Toolchains) != len(wanted) {
 		t.Fatalf("toolchains = %d, want %d", len(manifest.Toolchains), len(wanted))
@@ -104,9 +124,9 @@ func TestValidationRequiresEveryBakedToolchain(t *testing.T) {
 		{"none", func(m *Manifest) { m.Toolchains = nil }, "must pin go"},
 		{"unknown vendor", func(m *Manifest) { m.Toolchains[0].Name = "zig" }, "toolchains[0].name"},
 		{"duplicate", func(m *Manifest) { m.Toolchains[1] = m.Toolchains[0] }, "must be unique"},
-		{"v-prefixed version", func(m *Manifest) { m.Toolchains[1].Version = "v1.26.5" }, "MAJOR.MINOR.PATCH"},
+		{"v-prefixed version", func(m *Manifest) { m.Toolchains[1].Version = "v1.26.6" }, "MAJOR.MINOR.PATCH"},
 		{"foreign host", func(m *Manifest) {
-			m.Toolchains[1].DownloadURL = "https://example.com/dl/go1.26.5.linux-amd64.tar.gz"
+			m.Toolchains[1].DownloadURL = "https://example.com/dl/go1.26.6.linux-amd64.tar.gz"
 		}, "toolchains[1].download_url"},
 		{"version drift in URL", func(m *Manifest) {
 			m.Toolchains[1].DownloadURL = "https://go.dev/dl/go1.26.4.linux-amd64.tar.gz"
@@ -153,6 +173,7 @@ func TestValidationRejectsMutableOrUntrustedInputs(t *testing.T) {
 		{"runner redirect", func(m *Manifest) { m.Runner.DownloadURL = "https://example.com/runner.tar.gz" }, "runner.download_url"},
 		{"compiler cache redirect", func(m *Manifest) { m.CompilerCache.DownloadURL = "https://example.com/sccache.tar.gz" }, "compiler_cache.download_url"},
 		{"compiler cache binary traversal", func(m *Manifest) { m.CompilerCache.BinaryPath = "../sccache" }, "compiler_cache.binary_path"},
+		{"Incus alias over 64 bytes", func(m *Manifest) { m.Image.Alias = "a" + strings.Repeat("b", 64) }, "image.alias"},
 		{"unsafe archive", func(m *Manifest) { m.Runner.Archive = "../runner.tar.gz" }, "runner.archive"},
 		{"docker daemon", func(m *Manifest) { m.Guest.Packages = append(m.Guest.Packages, "docker.io") }, "forbidden"},
 		{"SSH server", func(m *Manifest) { m.Guest.Packages = append(m.Guest.Packages, "openssh-server") }, "forbidden"},

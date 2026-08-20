@@ -16,14 +16,14 @@ func TestExecutionBackendRejectsUnsupportedPlatformTuple(t *testing.T) {
 	}{
 		{"macOS before backend approval", func(b *Backend) { b.Platform = "macos" }, "must be linux"},
 		{"arm before backend approval", func(b *Backend) { b.Architecture = "arm64" }, "must be amd64"},
-		{"unknown implementation", func(b *Backend) { b.Implementation = "virtualization-framework" }, "must be incus-vm"},
-		{"foreign failure domain", func(b *Backend) { b.FailureDomain = "server-gha-runner-2" }, "must match platform.host"},
+		{"unknown implementation", func(b *Backend) { b.Implementation = "virtualization-framework" }, "must be incus-vm or incus-container"},
+		{"foreign failure domain", func(b *Backend) { b.FailureDomain = "example-runner-2" }, "must match platform.host"},
 	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+			cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,9 +35,30 @@ func TestExecutionBackendRejectsUnsupportedPlatformTuple(t *testing.T) {
 	}
 }
 
+func TestContainerBackendAllowsProvenDockerButNoWarmCapacity(t *testing.T) {
+	cfg, err := Load("../../config/example-runner-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := &cfg.Backends[0]
+	canary := &cfg.Pools[0]
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("cold non-Docker container backend was refused: %v", err)
+	}
+	canary.Warm.MaxReady = 1
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "container backend warm capacity") {
+		t.Fatalf("container warm capacity was accepted before soak: %v", err)
+	}
+	canary.Warm.MaxReady = 0
+	container.Capabilities.Docker = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Docker-capable container backend was refused after isolation proof: %v", err)
+	}
+}
+
 func TestPoolMustReferenceDeclaredExecutionBackend(t *testing.T) {
 	t.Parallel()
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +70,7 @@ func TestPoolMustReferenceDeclaredExecutionBackend(t *testing.T) {
 
 func TestPoolCapabilitiesMustFitExecutionBackend(t *testing.T) {
 	t.Parallel()
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +82,7 @@ func TestPoolCapabilitiesMustFitExecutionBackend(t *testing.T) {
 
 func TestExecutionBackendIdentityMustBeUnique(t *testing.T) {
 	t.Parallel()
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +96,7 @@ func TestExecutionBackendIdentityMustBeUnique(t *testing.T) {
 
 func TestLegacyPlatformSchemaFailsClosed(t *testing.T) {
 	t.Parallel()
-	cfg, err := Load(filepath.Join("..", "..", "config", "server-gha-runner-1.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "config", "example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

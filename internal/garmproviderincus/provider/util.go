@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,6 +39,11 @@ import (
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/pkg/errors"
+)
+
+var (
+	dialIncusEndpoint    = net.DialTimeout
+	connectIncusEndpoint = incus.ConnectIncusWithContext
 )
 
 var (
@@ -132,7 +138,7 @@ func getClientFromConfig(ctx context.Context, cfg *config.Incus) (cli incus.Inst
 		return incus.ConnectIncusUnixWithContext(ctx, cfg.UnixSocket, &incus.ConnectionArgs{SkipGetServer: true})
 	}
 
-	if cfg.URL == "" {
+	if cfg.URL == "" && len(cfg.ClusterURLs) == 0 {
 		return nil, fmt.Errorf("no URL or UnixSocket specified")
 	}
 
@@ -171,15 +177,34 @@ func getClientFromConfig(ctx context.Context, cfg *config.Incus) (cli incus.Inst
 		TLSCA:         string(tlsCAContents),
 		TLSClientCert: string(clientCertContents),
 		TLSClientKey:  string(clientKeyContents),
-		SkipGetServer: true,
+		SkipGetServer: false,
 	}
 
-	incusCLI, err := incus.ConnectIncusWithContext(ctx, cfg.URL, &connectArgs)
-	if err != nil {
-		return nil, errors.Wrap(err, "connecting to Incus")
+	endpoints := cfg.ClusterURLs
+	if len(endpoints) == 0 {
+		endpoints = []string{cfg.URL}
 	}
-
-	return incusCLI, nil
+	var endpointErrors []error
+	for _, endpoint := range endpoints {
+		parsed, parseErr := url.Parse(endpoint)
+		if parseErr != nil {
+			endpointErrors = append(endpointErrors, fmt.Errorf("%s: parse endpoint: %w", endpoint, parseErr))
+			continue
+		}
+		connection, dialErr := dialIncusEndpoint("tcp", parsed.Host, 2*time.Second)
+		if dialErr != nil {
+			endpointErrors = append(endpointErrors, fmt.Errorf("%s: reach endpoint: %w", endpoint, dialErr))
+			continue
+		}
+		_ = connection.Close()
+		incusCLI, connectErr := connectIncusEndpoint(ctx, endpoint, &connectArgs)
+		if connectErr != nil {
+			endpointErrors = append(endpointErrors, fmt.Errorf("%s: connect: %w", endpoint, connectErr))
+			continue
+		}
+		return incusCLI, nil
+	}
+	return nil, fmt.Errorf("connecting to every Incus cluster endpoint: %v", endpointErrors)
 }
 
 func projectName(cfg *config.Incus) string {

@@ -23,10 +23,12 @@ type Runner struct {
 }
 
 type scaleSetSpec struct {
-	Name      string
-	Image     string
-	Flavor    string
-	DirectJIT bool
+	Name       string
+	Image      string
+	Flavor     string
+	MaxRunners uint
+	DirectJIT  bool
+	Repository string
 }
 
 func (r Runner) Run(ctx context.Context, options Options) (Result, error) {
@@ -39,9 +41,22 @@ func (r Runner) Run(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return result, err
 	}
+	if options.Repository != "" && options.EntityKind == EntityKindOrganization {
+		return result, fmt.Errorf("a repository override cannot be used with an organization entity")
+	}
+	selected, err = tenant.WithRepository(selected, options.Repository)
+	if err != nil {
+		return result, err
+	}
 	desiredSpec, err := resolveScaleSetSpec(options.ScaleSetName)
 	if err != nil {
 		return result, err
+	}
+	if desiredSpec.Repository != "" && selected.Repository != desiredSpec.Repository {
+		return result, fmt.Errorf("scale set %q is restricted to repository %q", desiredSpec.Name, desiredSpec.Repository)
+	}
+	if options.Repository != "" && desiredSpec.Repository == "" {
+		return result, fmt.Errorf("repository override %q requires a repository-scoped scale set", options.Repository)
 	}
 	activationMode := options.ActivationMode
 	if activationMode == "" {
@@ -368,26 +383,53 @@ func reconcileScaleSet(ctx context.Context, client apiClient, token string, enti
 		return &created, nil
 	}
 	scaleSet := matches[0]
-	if !activationSpecsMatch(scaleSet.ExtraSpecs, spec.DirectJIT) {
-		if !knownActivationSpecs(scaleSet.ExtraSpecs) {
+	activationDrift := !activationSpecsMatch(scaleSet.ExtraSpecs, spec.DirectJIT)
+	capacityDrift := scaleSet.MaxRunners != spec.MaxRunners
+	imageDrift := scaleSet.Image != spec.Image || scaleSet.Flavor != spec.Flavor
+	if activationDrift || capacityDrift || imageDrift {
+		if activationDrift && !knownActivationSpecs(scaleSet.ExtraSpecs) {
 			return nil, fmt.Errorf("GARM scale set activation extra specs drifted outside the two supported exact states")
 		}
 		candidate := scaleSet
 		candidate.ExtraSpecs = desiredExtraSpecs(spec.DirectJIT)
+		candidate.MaxRunners = spec.MaxRunners
+		candidate.Image = spec.Image
+		candidate.Flavor = spec.Flavor
 		if err := validateScaleSet(candidate, entity, spec); err != nil {
 			return nil, err
 		}
-		if !options.MigrateActivation {
+		if activationDrift && !options.MigrateActivation {
 			return nil, fmt.Errorf("GARM scale set activation mode differs; explicit activation migration is required")
 		}
-		result.Actions = append(result.Actions, "disable_and_migrate_scale_set_activation")
+		if capacityDrift && !options.MigrateCapacity {
+			return nil, fmt.Errorf("GARM scale set capacity differs; explicit capacity migration is required")
+		}
+		if imageDrift && !options.MigrateImage {
+			return nil, fmt.Errorf("GARM scale set image differs; explicit image migration is required")
+		}
+		action := "disable_and_migrate_scale_set_capacity"
+		if imageDrift {
+			action = "disable_and_migrate_scale_set_image"
+		}
+		if activationDrift && capacityDrift && !imageDrift {
+			action = "disable_and_migrate_scale_set_activation_and_capacity"
+		} else if activationDrift && !imageDrift {
+			action = "disable_and_migrate_scale_set_activation"
+		}
+		if imageDrift && (activationDrift || capacityDrift) {
+			action = "disable_and_migrate_scale_set_image_and_runtime"
+		}
+		result.Actions = append(result.Actions, action)
 		candidate.Enabled = false
 		if options.Apply {
 			disabled := false
 			request := struct {
 				Enabled    *bool           `json:"enabled"`
 				ExtraSpecs json.RawMessage `json:"extra_specs"`
-			}{Enabled: &disabled, ExtraSpecs: desiredExtraSpecs(spec.DirectJIT)}
+				MaxRunners uint            `json:"max_runners"`
+				Image      string          `json:"image"`
+				Flavor     string          `json:"flavor"`
+			}{Enabled: &disabled, ExtraSpecs: desiredExtraSpecs(spec.DirectJIT), MaxRunners: spec.MaxRunners, Image: spec.Image, Flavor: spec.Flavor}
 			var updated scaleSetDTO
 			updateEndpoint := "/scalesets/" + strconv.FormatUint(uint64(scaleSet.ID), 10)
 			if err := client.doJSON(ctx, http.MethodPut, updateEndpoint, token, request, &updated); err != nil {
@@ -436,7 +478,7 @@ func desiredScaleSetRequest(spec scaleSetSpec) createScaleSetRequest {
 		Name:                   spec.Name,
 		DisableUpdate:          true,
 		ProviderName:           DefaultProviderName,
-		MaxRunners:             1,
+		MaxRunners:             spec.MaxRunners,
 		MinIdleRunners:         0,
 		Image:                  spec.Image,
 		Flavor:                 spec.Flavor,
@@ -493,7 +535,7 @@ func validateScaleSet(scaleSet scaleSetDTO, entity garmEntity, spec scaleSetSpec
 	if scaleSet.ProviderName != DefaultProviderName || scaleSet.Image != spec.Image || scaleSet.Flavor != spec.Flavor {
 		return fmt.Errorf("GARM scale set provider, image or flavor drifted")
 	}
-	if scaleSet.MaxRunners != 1 || scaleSet.MinIdleRunners != 0 || scaleSet.RunnerBootstrapTimeout != DefaultBootstrapTimeoutMins {
+	if scaleSet.MaxRunners != spec.MaxRunners || scaleSet.MinIdleRunners != 0 || scaleSet.RunnerBootstrapTimeout != DefaultBootstrapTimeoutMins {
 		return fmt.Errorf("GARM scale set capacity or bootstrap timeout drifted")
 	}
 	if scaleSet.OSType != "linux" || scaleSet.OSArch != "amd64" || scaleSet.RunnerPrefix != DefaultRunnerPrefix {
@@ -515,7 +557,7 @@ func resolveScaleSetSpec(name string) (scaleSetSpec, error) {
 	published := PublishedScaleSets()
 	for _, class := range published {
 		if class.Name == name {
-			return scaleSetSpec{Name: class.Name, Image: class.Image, Flavor: class.Flavor}, nil
+			return scaleSetSpec{Name: class.Name, Image: class.Image, Flavor: class.Flavor, MaxRunners: class.MaxRunners, Repository: class.Repository}, nil
 		}
 	}
 	names := make([]string, 0, len(published))

@@ -265,7 +265,7 @@ func authenticatedRequest(ctx context.Context, method, endpoint string, body io.
 func setGitHubHeaders(request *http.Request) {
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
-	request.Header.Set("User-Agent", "nddev-gha-fleet")
+	request.Header.Set("User-Agent", "example-actions-fleet")
 }
 
 func validateRegistration(registration appRegistration, owner, ownerType string, organizationRunners bool) error {

@@ -133,6 +133,18 @@ func Build(cfg config.Config, selectedPools []string) (Plan, error) {
 		slices.Sort(missing)
 		return Plan{}, fmt.Errorf("unknown pools: %v", missing)
 	}
+	containerLimit := "0"
+	virtualMachineLimit := "0"
+	virtualMachineLowLevel := "block"
+	for _, backend := range cfg.Backends {
+		if backend.Implementation == "incus-container" {
+			containerLimit = strconv.Itoa(cfg.Incus.FleetMaxInstances())
+		}
+		if backend.Implementation == "incus-vm" {
+			virtualMachineLimit = strconv.Itoa(cfg.Incus.FleetMaxInstances())
+			virtualMachineLowLevel = "allow"
+		}
+	}
 
 	return Plan{
 		Version:      cfg.Incus.Version,
@@ -151,20 +163,17 @@ func Build(cfg config.Config, selectedPools []string) (Plan, error) {
 			Name: cfg.Incus.Network,
 			Type: "bridge",
 			Config: map[string]string{
-				"dns.domain":                           "gha.internal",
-				"dns.mode":                             "managed",
-				"ipv4.address":                         cfg.Incus.NetworkCIDR,
-				"ipv4.dhcp":                            "true",
-				"ipv4.nat":                             "true",
-				"ipv6.address":                         "none",
-				"security.acls":                        cfg.Incus.EgressACL,
-				"security.acls.default.egress.action":  "reject",
-				"security.acls.default.ingress.action": "reject",
+				"dns.domain":   "gha.internal",
+				"dns.mode":     "managed",
+				"ipv4.address": cfg.Incus.NetworkCIDR,
+				"ipv4.dhcp":    "true",
+				"ipv4.nat":     "true",
+				"ipv6.address": "none",
 			},
 		},
 		Project: Project{
 			Name:        cfg.Incus.Project,
-			Description: "Disposable NDDev GitHub Actions full-VM workers",
+			Description: "Disposable NDDev GitHub Actions workers",
 			Config: map[string]string{
 				"features.images":                "true",
 				"features.networks":              "false",
@@ -173,25 +182,27 @@ func Build(cfg config.Config, selectedPools []string) (Plan, error) {
 				"features.storage.buckets":       "false",
 				"features.storage.volumes":       "true",
 				"images.auto_update_interval":    "0",
-				"limits.containers":              "0",
-				"limits.cpu":                     strconv.Itoa(cfg.Incus.FleetMaxCPUUnits()),
+				"limits.containers":              containerLimit,
 				"limits.disk":                    strconv.Itoa(cfg.Incus.FleetDiskLimitGiB()) + "GiB",
 				"limits.instances":               strconv.Itoa(cfg.Incus.FleetMaxInstances()),
 				"limits.memory":                  strconv.Itoa(cfg.Incus.FleetMaxMemoryMiB()) + "MiB",
 				"limits.networks":                "0",
-				"limits.virtual-machines":        strconv.Itoa(cfg.Incus.FleetMaxInstances()),
+				"limits.virtual-machines":        virtualMachineLimit,
 				"restricted":                     "true",
 				"restricted.backups":             "block",
 				"restricted.containers.lowlevel": "block",
-				"restricted.devices.disk":        "managed",
-				"restricted.devices.nic":         "managed",
-				"restricted.networks.access":     cfg.Incus.Network,
-				"restricted.snapshots":           "block",
-				// Incus 6.0.0 ignores security.nesting=false when it builds a
-				// VM's QEMU CPU arguments. The builder and the pinned provider
-				// therefore set one closed raw.qemu value that removes VMX/SVM.
-				// Workflow VMs never receive Incus API access.
-				"restricted.virtual-machines.lowlevel": "allow",
+				// Allow only the high-level security.nesting switch. Low-level
+				// raw LXC, mount and syscall-intercept options remain blocked, so a
+				// Docker canary cannot escape the reviewed unprivileged profile.
+				"restricted.containers.nesting": "allow",
+				"restricted.devices.disk":       "managed",
+				"restricted.devices.nic":        "managed",
+				"restricted.networks.access":    cfg.Incus.Network,
+				"restricted.snapshots":          "block",
+				// The desired fleet is container-only. Keep this blocked and the
+				// VM count at zero unless a future reviewed configuration declares
+				// an explicit incus-vm backend.
+				"restricted.virtual-machines.lowlevel": virtualMachineLowLevel,
 			},
 		},
 		ACL:      publicEgressACL(cfg, bridgeAddress),
@@ -209,27 +220,46 @@ func profile(cfg config.Config, pool config.Pool) Profile {
 		"security.port_isolation": "true",
 		"type":                    "nic",
 	}
-	// The bridge ACL applies to every NIC on it. A pool that declares its own
-	// destinations gets a second ACL here, on its own NIC, so the wider rule
-	// reaches that pool's workers and no others.
-	if len(pool.Capabilities.EgressAllowlist) > 0 {
+	// Apply exactly one egress policy to each NIC. Keeping the public ACL off
+	// the bridge is what makes a release allowlist narrower than ordinary jobs.
+	if pool.Capabilities.NetworkPolicy == "release-allowlist" {
 		nic["security.acls"] = cfg.Incus.EgressACL + "-" + pool.Name
+	} else {
+		nic["security.acls"] = cfg.Incus.EgressACL
+	}
+	backend, _ := cfg.Backend(pool.Backend)
+	description := "Managed full-VM profile for " + pool.Name
+	instanceConfig := map[string]string{
+		"boot.autostart":       "false",
+		"limits.cpu":           strconv.Itoa(pool.Resources.VCPU),
+		"limits.memory":        strconv.Itoa(pool.Resources.MemoryMiB) + "MiB",
+		"security.nesting":     "false",
+		"security.secureboot":  "true",
+		"user.nddev.pool":      pool.Name,
+		"user.nddev.scale_set": pool.ScaleSetName,
+		"user.nddev.trust":     pool.Trust,
+	}
+	if backend.Implementation == "incus-container" {
+		description = "Managed unprivileged system-container profile for " + pool.Name
+		delete(instanceConfig, "security.secureboot")
+		// A numeric limits.cpu creates a cpuset. Two workers then own disjoint
+		// cores and cannot borrow an idle sibling's CPUs. Containers expose the
+		// whole host set instead; percentage allowance compiles to cpu.weight,
+		// not cpu.max, and therefore preserves the requested 2:4 relative shape
+		// while remaining work-conserving. The provider ledger and live-load
+		// placement retain the bounded admission contract.
+		delete(instanceConfig, "limits.cpu")
+		instanceConfig["limits.cpu.allowance"] = fmt.Sprintf("%d%%", pool.Resources.VCPU*100)
+		instanceConfig["security.idmap.isolated"] = "true"
+		instanceConfig["security.privileged"] = "false"
+		instanceConfig["security.nesting"] = strconv.FormatBool(pool.Capabilities.Docker)
+		instanceConfig["security.syscalls.intercept.mknod"] = "false"
+		instanceConfig["security.syscalls.intercept.setxattr"] = "false"
 	}
 	return Profile{
 		Name:        pool.Name,
-		Description: "Managed full-VM profile for " + pool.Name,
-		Config: map[string]string{
-			"boot.autostart": "false",
-			"limits.cpu":     strconv.Itoa(pool.Resources.VCPU),
-			"limits.memory":  strconv.Itoa(pool.Resources.MemoryMiB) + "MiB",
-			// Incus 6.0 has no project-level VM nesting restriction. The
-			// profile blocks nesting and workers never receive the Incus API.
-			"security.nesting":     "false",
-			"security.secureboot":  "true",
-			"user.nddev.pool":      pool.Name,
-			"user.nddev.scale_set": pool.ScaleSetName,
-			"user.nddev.trust":     pool.Trust,
-		},
+		Description: description,
+		Config:      instanceConfig,
 		Devices: map[string]map[string]string{
 			"eth0": nic,
 			"root": {
@@ -247,20 +277,34 @@ func profile(cfg config.Config, pool config.Pool) Profile {
 // host's own public address. Reading them from the same place is what lets a
 // declared destination be proven not to overlap a rejected one.
 func reservedDestinations(cfg config.Config) []string {
-	return append(config.ReservedEgressDestinations(), cfg.Incus.PublicHostAddress+"/32")
+	hosts := cfg.Incus.EstatePublicHostAddresses
+	if len(hosts) == 0 {
+		hosts = []string{cfg.Incus.PublicHostAddress}
+	}
+	result := append([]string{}, config.ReservedEgressDestinations()...)
+	for _, host := range hosts {
+		result = append(result, host+"/32")
+	}
+	return result
 }
 
 // poolEgressACL renders one pool's declared destinations as an ACL for its own
-// NIC. It repeats the reject rules the bridge ACL already carries: config
-// validation guarantees a declared destination cannot overlap them, so the two
-// can never contradict each other, and repeating them means this ACL is
-// deny-shaped on its own rather than relying on the order an implementation
-// happens to evaluate two attached ACLs in.
+// NIC. It repeats the common rejects, permits public TCP/443 required by the
+// GitHub Actions broker and OIDC endpoints, and then adds local services plus
+// explicit deployment destinations. Private, metadata and fleet-host ranges
+// are rejected first; all other unmatched egress hits Incus' default reject.
 func poolEgressACL(cfg config.Config, pool config.Pool, bridgeAddress string) (ACL, bool) {
-	if len(pool.Capabilities.EgressAllowlist) == 0 {
+	if pool.Capabilities.NetworkPolicy != "release-allowlist" {
 		return ACL{}, false
 	}
-	egress := baseEgressRejects(cfg, bridgeAddress)
+	egress := append(baseEgressRejects(cfg, bridgeAddress), ACLRule{
+		Action:          "allow",
+		State:           "enabled",
+		Description:     "Allow public HTTPS for GitHub Actions control plane and OIDC",
+		Protocol:        "tcp",
+		DestinationPort: "443",
+	})
+	egress = append(egress, localServiceAllows(cfg, bridgeAddress, false)...)
 	for _, destination := range pool.Capabilities.EgressAllowlist {
 		egress = append(egress, ACLRule{
 			Action:          "allow",
@@ -278,6 +322,19 @@ func poolEgressACL(cfg config.Config, pool config.Pool, bridgeAddress string) (A
 		Ingress:     []ACLRule{},
 		Egress:      egress,
 	}, true
+}
+
+func localServiceAllows(cfg config.Config, bridgeAddress string, registry bool) []ACLRule {
+	cachePorts := strconv.Itoa(cfg.Incus.RustFSPort)
+	if registry {
+		cachePorts = strconv.Itoa(cfg.Incus.RegistryPort) + "," + cachePorts
+	}
+	return []ACLRule{
+		{Action: "allow", State: "enabled", Description: "Allow scoped local cache endpoints", Destination: bridgeAddress + "/32", Protocol: "tcp", DestinationPort: cachePorts},
+		{Action: "allow", State: "enabled", Description: "Allow the restricted GARM worker gateway", Destination: bridgeAddress + "/32", Protocol: "tcp", DestinationPort: strconv.Itoa(cfg.Incus.GARMGatewayPort)},
+		{Action: "allow", State: "enabled", Description: "Allow DNS to the managed bridge", Destination: bridgeAddress + "/32", Protocol: "udp", DestinationPort: "53"},
+		{Action: "allow", State: "enabled", Description: "Allow TCP DNS fallback to the managed bridge", Destination: bridgeAddress + "/32", Protocol: "tcp", DestinationPort: "53"},
+	}
 }
 
 func baseEgressRejects(cfg config.Config, bridgeAddress string) []ACLRule {
@@ -310,7 +367,7 @@ func publicEgressACL(cfg config.Config, bridgeAddress string) ACL {
 		// reconciled separately because an accept in one nftables base chain
 		// cannot override a drop in another one.
 		Ingress: []ACLRule{},
-		Egress: []ACLRule{
+		Egress: append([]ACLRule{
 			{
 				Action:      "reject",
 				State:       "enabled",
@@ -328,48 +385,16 @@ func publicEgressACL(cfg config.Config, bridgeAddress string) ACL {
 			{
 				Action:          "allow",
 				State:           "enabled",
-				Description:     "Allow scoped local registry and RustFS endpoints",
-				Destination:     bridgeAddress + "/32",
-				Protocol:        "tcp",
-				DestinationPort: strconv.Itoa(cfg.Incus.RegistryPort) + "," + strconv.Itoa(cfg.Incus.RustFSPort),
-			},
-			{
-				Action:          "allow",
-				State:           "enabled",
-				Description:     "Allow the restricted GARM worker gateway",
-				Destination:     bridgeAddress + "/32",
-				Protocol:        "tcp",
-				DestinationPort: strconv.Itoa(cfg.Incus.GARMGatewayPort),
-			},
-			{
-				Action:          "allow",
-				State:           "enabled",
-				Description:     "Allow DNS to the managed bridge",
-				Destination:     bridgeAddress + "/32",
-				Protocol:        "udp",
-				DestinationPort: "53",
-			},
-			{
-				Action:          "allow",
-				State:           "enabled",
-				Description:     "Allow TCP DNS fallback to the managed bridge",
-				Destination:     bridgeAddress + "/32",
-				Protocol:        "tcp",
-				DestinationPort: "53",
-			},
-			{
-				Action:          "allow",
-				State:           "enabled",
 				Description:     "Allow public HTTP and HTTPS for the standard pilot",
 				Protocol:        "tcp",
 				DestinationPort: "80,443",
 			},
-		},
+		}, localServiceAllows(cfg, bridgeAddress, true)...),
 	}
 }
 
 func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFirewall {
-	return HostFirewall{
+	result := HostFirewall{
 		Backend:         "ufw",
 		RequiredStatus:  "active",
 		RequiredDefault: "deny (incoming), allow (outgoing), deny (routed)",
@@ -395,6 +420,10 @@ func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFir
 				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-fleet-rustfs-v1"},
 			},
 			{
+				Name: "services-rustfs-diagnostics",
+				Args: []string{"allow", "in", "on", "eth1", "from", "10.200.0.7", "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-services-rustfs-diagnostics-v1"},
+			},
+			{
 				Name: "garm-gateway",
 				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.GARMGatewayPort), "proto", "tcp", "comment", "gha-fleet-garm-gateway-v1"},
 			},
@@ -408,6 +437,29 @@ func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFir
 			},
 		},
 	}
+	seen := map[string]struct{}{}
+	for _, pool := range cfg.Pools {
+		if pool.Capabilities.NetworkPolicy != "release-allowlist" {
+			continue
+		}
+		for _, destination := range pool.Capabilities.EgressAllowlist {
+			key := destination.Destination + "\x00" + destination.Protocol + "\x00" + destination.Ports
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result.Rules = append(result.Rules, HostFirewallRule{
+				Name: fmt.Sprintf("release-egress-%d", len(seen)),
+				Args: []string{
+					"route", "allow", "in", "on", cfg.Incus.Network,
+					"from", bridgeSubnet, "to", destination.Destination,
+					"port", destination.Ports, "proto", destination.Protocol,
+					"comment", "gha-fleet-release-egress-v1",
+				},
+			})
+		}
+	}
+	return result
 }
 
 func join(values []string) string {

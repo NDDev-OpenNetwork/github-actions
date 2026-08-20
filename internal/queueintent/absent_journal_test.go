@@ -31,7 +31,7 @@ func TestAbsentJournalReadsAsEmpty(t *testing.T) {
 		t.Error("an absent journal reported active intents")
 	}
 
-	claimed, err := reader.ActiveForScaleSet(context.Background(), "NDDev-OpenNetwork", "nddev-linux-standard")
+	claimed, err := reader.ActiveForScaleSet(context.Background(), "example-org", "nddev-linux-standard")
 	if err != nil {
 		t.Fatalf("ActiveForScaleSet on an absent journal was an error: %v", err)
 	}

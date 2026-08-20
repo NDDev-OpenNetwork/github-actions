@@ -86,6 +86,7 @@ func (d providerDiagnostics) Capture(
 	}
 	metadata := workerdiagnostics.Instance{
 		Name:             instance.Name,
+		Trust:            instance.ExpandedConfig[trustKey],
 		ControllerID:     instance.ExpandedConfig[controllerIDKeyName],
 		PoolID:           instance.ExpandedConfig[poolIDKey],
 		PoolName:         instance.ExpandedConfig[flavorKey],

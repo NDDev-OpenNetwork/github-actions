@@ -1,7 +1,7 @@
 schema_version: 1
 
 repository:
-  id: "repo_01KZFE1YZCB0GY6BQGBVGB49W9"
+  id: "repo_01M0EYTYCS3DNXDHZ0CVKXWWW1"
   display_name: "github-actions"
   roles:
     - "project"
@@ -10,78 +10,41 @@ repository:
 
 provider:
   type: "github"
-  installation: "installation:github-organization"
-  repository_id: 1327297693
+  installation: "installation:github-opennetwork"
+  repository_id: 1336122566
   owner: "NDDev-OpenNetwork"
   name: "github-actions"
-  # A transfer keeps the numeric repository id, so this is the same repository
-  # under a new locator. The previous one is retained: dropping it would break
-  # alias history for anything that resolved the repository by its old path.
-  aliases:
-    - owner: "example-user"
-      name: "github-actions"
-
-product:
-  purpose: >-
-    Secure, disposable GitHub Actions capacity for NDDev. Every job receives a
-    fresh Incus/KVM virtual machine that runs GitHub's official actions/runner
-    exactly once, exports its diagnostics, and is destroyed. This repository
-    owns the policy, admission, lifecycle and integration code around GARM and
-    Incus; it does not reimplement the Actions protocol.
-  capabilities:
-    - "One job per immutable full VM; an executed worker is never reused or returned to a pool"
-    - "Pre-booted warm VMs hold no runner registration or repository identity until one job claims them"
-    - "Durable admission before GitHub job acquisition, with a global budget, per-repository quota, priority aging and weighted stride fairness"
-    - "An fsync-backed cross-process journal binds one job attempt to one VM and reconciles against observed Incus state"
-    - "Digest-pinned golden images with baked Go, Rust, Bun and uv toolchains and current/previous rollback aliases"
-    - "Trust-scoped RustFS compiler cache and a minimal Zot OCI registry, delivered per job and never baked into an image"
-    - "Bounded, redacted diagnostics exported outside the VM before teardown"
-    - "Loopback fleet observer and an OpenTelemetry collector exporting into a dedicated OpenObserve instance"
-    - "In-tree GARM and Incus-provider derivatives, reproducibly rebuilt from pinned upstream commits and patch digests"
-  entrypoints:
-    - change: "Fleet policy, pools, host reserve and cache manifests"
-      path: "config"
-    - change: "Typed platform configuration and its fail-closed validation"
-      path: "internal/config"
-    - change: "Host capacity, health and cold-pilot admission decisions"
-      path: "internal/hostprobe"
-    - change: "Central queue admission before GitHub job acquisition"
-      path: "internal/queueintent"
-    - change: "Worker state machine and job-attempt identity"
-      path: "internal/lifecycle"
-    - change: "Incus provisioning, warm claims and direct-JIT activation"
-      path: "internal/garmproviderincus/provider"
-    - change: "Durable provider journal, leases and reconciliation"
-      path: "internal/providerjournal"
-    - change: "GARM credential, entity and Scale Set reconciliation"
-      path: "internal/garmbootstrap"
-    - change: "Organization GitHub App bootstrap and verification"
-      path: "internal/githubappbootstrap"
-    - change: "Golden image build, manifest and rollback aliases"
-      path: "internal/imagebuild"
-    - change: "RustFS cache identities and Zot credentials"
-      path: "internal/rustfscache"
-    - change: "Pre-teardown diagnostic export"
-      path: "internal/diagnosticexport"
-    - change: "Loopback observer and fleet metrics"
-      path: "internal/fleetobserve"
-    - change: "Systemd, sysusers and tmpfiles deployment contracts"
-      path: "deploy"
-    - change: "Operator CLI: validate, preflight, reconcile, render"
-      path: "cmd/gha-fleet"
-    - change: "GARM derivative patches, overlay and reproducible build"
-      path: "third_party/garm"
 
 classification:
   portfolios:
-    - "portfolio:organization-projects"
-  visibility_contract: "private"
-  data_classification: "private"
+    - "portfolio:opennetwork-projects"
+  visibility_contract: "public"
+  data_classification: "public"
+
+product:
+  purpose: >-
+    Open-source GARM and Incus control-plane components for isolated,
+    disposable GitHub Actions runners.
+  capabilities:
+    - "Observation-only JobAssigned and durable complete-identity admission"
+    - "One job per ephemeral Incus container"
+    - "Fail-closed GitHub, provider and instance reconciliation"
+    - "Bounded diagnostic WAL with verified remote confirmation"
+    - "Synthetic configuration examples with no estate data"
+  entrypoints:
+    - change: "Commands"
+      path: "cmd"
+    - change: "Engine implementation"
+      path: "internal"
+    - change: "Synthetic configuration contracts"
+      path: "config"
+    - change: "Pinned GARM derivative"
+      path: "third_party/garm"
 
 policy:
   profiles:
     - "repository-default"
-    - "organization-default"
+    - "public-module"
     - "github-actions"
   rollout_ring: "standard"
 
@@ -92,35 +55,43 @@ git:
   handoff_pr: "preferred"
   cleanup: "merged-only"
 
+ci:
+  profile: "go"
+  go_version: "1.26.6"
+  build_command: "go build -trimpath ./..."
+  test_command: "go test ./..."
+  timeout_minutes: 40
+  runner: "ubuntu-latest"
+
 verification:
   commands:
-    build:
-      - "go build ./..."
-    test:
-      - "go test ./..."
     lint:
       - "go vet ./..."
+    test:
+      - "go test -race ./..."
+    build:
+      - "go build -trimpath ./..."
   required:
-    - "build"
-    - "test"
     - "lint"
+    - "test"
+    - "build"
 
 agent:
   context_profile: "project-default"
-  generated_agents: true
+  generated_agents: false
   serena:
-    enabled: true
-    provenance_required: true
+    enabled: false
+    provenance_required: false
 
 module:
-  contract: "private"
+  contract: "public"
   consumption:
     - "git-submodule"
   compatibility: "commit-contract"
   pin_policy: "default-branch-commit"
   publication:
     registry: "none"
-    github_release: "disabled"
+    github_release: "optional"
 
 release:
-  mode: "none"
+  mode: "bundle"

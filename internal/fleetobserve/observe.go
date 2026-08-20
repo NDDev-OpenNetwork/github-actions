@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	// 7 adds gha-diagnostic-exporter.timer and otelcol-fleet to the service
-	// inventory, so a snapshot now reports seven services where it reported five.
-	SchemaVersion                   = 7
+	// 8 adds role-correct central exporter health, container admission readiness,
+	// phase ages and rollback-compatible WAL progress semantics.
+	SchemaVersion                   = 8
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 )
@@ -36,18 +36,29 @@ const (
 // missing while the observer depended on both -- it reads the exporter's state
 // file and ships its own metrics through the collector -- so a host could lose
 // either and still report healthy.
-var requiredServices = []string{
+var computeHostServices = []string{
 	"garm",
 	"gha-fleet-gateway",
 	"gha-rustfs",
 	"gha-warm-pool.timer",
 	"gha-zot",
+	"gha-diagnostic-exporter.service",
 	"gha-diagnostic-exporter.timer",
 	"otelcol-fleet",
 }
 
 func ServiceNames() []string {
-	return append([]string(nil), requiredServices...)
+	return append([]string(nil), computeHostServices...)
+}
+
+func serviceNamesForConfig(platform config.Config) []string {
+	if !platform.Incus.Cluster.Enabled {
+		return []string{
+			"garm", "gha-fleet-gateway", "gha-diagnostic-exporter.service",
+			"gha-diagnostic-exporter.timer", "otelcol-fleet",
+		}
+	}
+	return ServiceNames()
 }
 
 type HostSource func(context.Context) (hostprobe.Snapshot, error)
@@ -59,15 +70,16 @@ type DiagnosticExportSource func() (diagnosticexport.Status, error)
 type ServiceSource func(context.Context, string) (string, error)
 
 type Collector struct {
-	Config      config.Config
-	Host        HostSource
-	Journal     JournalSource
-	Queue       QueueIntentSource
-	Instances   InstanceSource
-	Diagnostics DiagnosticsSource
-	Export      DiagnosticExportSource
-	Service     ServiceSource
-	Now         func() time.Time
+	Config             config.Config
+	Host               HostSource
+	Journal            JournalSource
+	Queue              QueueIntentSource
+	Instances          InstanceSource
+	Diagnostics        DiagnosticsSource
+	Export             DiagnosticExportSource
+	Service            ServiceSource
+	DiagnosticMaxBytes int64
+	Now                func() time.Time
 }
 
 type Snapshot struct {
@@ -95,35 +107,38 @@ type DiagnosticExportSync struct {
 }
 
 type PoolStatus struct {
-	Name       string `json:"name"`
-	PilotReady bool   `json:"pilot_ready"`
-	Blockers   int    `json:"blockers"`
-	Warnings   int    `json:"warnings"`
-	Info       int    `json:"info"`
+	Name                    string `json:"name"`
+	PilotReady              bool   `json:"pilot_ready"`
+	ContainerAdmissionReady bool   `json:"container_admission_ready"`
+	Blockers                int    `json:"blockers"`
+	Warnings                int    `json:"warnings"`
+	Info                    int    `json:"info"`
 }
 
 type JournalSummary struct {
-	SchemaVersion        int            `json:"schema_version"`
-	Generation           uint64         `json:"generation"`
-	UpdatedAt            time.Time      `json:"updated_at"`
-	Leases               int            `json:"leases"`
-	Claims               int            `json:"claims"`
-	WarmPreemptions      int            `json:"warm_preemptions"`
-	WarmPreemptionsTotal uint64         `json:"warm_preemptions_total"`
-	ByState              map[string]int `json:"by_state"`
+	SchemaVersion         int              `json:"schema_version"`
+	Generation            uint64           `json:"generation"`
+	UpdatedAt             time.Time        `json:"updated_at"`
+	Leases                int              `json:"leases"`
+	Claims                int              `json:"claims"`
+	WarmPreemptions       int              `json:"warm_preemptions"`
+	WarmPreemptionsTotal  uint64           `json:"warm_preemptions_total"`
+	ByState               map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds map[string]int64 `json:"oldest_state_age_seconds"`
 }
 
 type QueueSummary struct {
-	Generation            uint64         `json:"generation"`
-	Stored                int            `json:"stored"`
-	Active                int            `json:"active"`
-	Expired               int            `json:"expired"`
-	InFlight              int            `json:"in_flight"`
-	OldestQueueAgeSeconds int64          `json:"oldest_queue_age_seconds"`
-	UncoveredRunning      int            `json:"uncovered_running"`
-	ByState               map[string]int `json:"by_state"`
-	ByPriority            map[int]int    `json:"by_priority"`
-	ByScaleSet            map[string]int `json:"by_scale_set"`
+	Generation            uint64           `json:"generation"`
+	Stored                int              `json:"stored"`
+	Active                int              `json:"active"`
+	Expired               int              `json:"expired"`
+	InFlight              int              `json:"in_flight"`
+	OldestQueueAgeSeconds int64            `json:"oldest_queue_age_seconds"`
+	UncoveredRunning      int              `json:"uncovered_running"`
+	ByState               map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds map[string]int64 `json:"oldest_state_age_seconds"`
+	ByPriority            map[int]int      `json:"by_priority"`
+	ByScaleSet            map[string]int   `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -140,6 +155,7 @@ type ServiceStatus struct {
 
 func (c Collector) Collect(ctx context.Context) Snapshot {
 	now := c.now()
+	requiredServices := serviceNamesForConfig(c.Config)
 	snapshot := Snapshot{
 		SchemaVersion:    SchemaVersion,
 		CapturedAt:       now,
@@ -167,7 +183,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	serviceErrors := make([]error, len(requiredServices))
 
 	var group sync.WaitGroup
-	group.Add(6 + len(requiredServices))
+	sourceCount := 5
+	if c.Export != nil {
+		sourceCount++
+	}
+	group.Add(sourceCount + len(requiredServices))
 	go func() {
 		defer group.Done()
 		host, hostErr = c.Host(ctx)
@@ -188,17 +208,19 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		defer group.Done()
 		diagnostics, diagnosticsErr = c.Diagnostics(now)
 	}()
-	go func() {
-		defer group.Done()
-		diagnosticExport, diagnosticExportErr = c.Export()
-	}()
+	if c.Export != nil {
+		go func() {
+			defer group.Done()
+			diagnosticExport, diagnosticExportErr = c.Export()
+		}()
+	}
 	for index, name := range requiredServices {
 		index, name := index, name
 		go func() {
 			defer group.Done()
 			state, err := c.Service(ctx, name)
 			serviceErrors[index] = err
-			snapshot.Services[index] = ServiceStatus{Name: name, State: state, Active: state == "active"}
+			snapshot.Services[index] = ServiceStatus{Name: name, State: state, Active: serviceHealthy(name, state)}
 		}()
 	}
 	group.Wait()
@@ -224,15 +246,23 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		}
 	}
 
-	boundNames := make(map[string]struct{})
+	coveredNames := make(map[string]struct{})
+	expectedNames := make(map[string]struct{})
 	if journalErr != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("journal", journalErr))
 	} else {
-		snapshot.Journal = summarizeJournal(journal)
+		snapshot.Journal = summarizeJournal(journal, now)
 		for name, lease := range journal.Leases {
+			// Incus can publish the instance before the provider's final created
+			// transaction. An admitted lease therefore covers a visible name but
+			// does not yet require one: both sides of that transition are valid.
+			if lease.State == providerjournal.StateAdmitted {
+				coveredNames[name] = struct{}{}
+			}
 			if lease.State == providerjournal.StateCreated || lease.State == providerjournal.StateDeleting ||
 				lease.State == providerjournal.StateWarmReady || lease.State == providerjournal.StateWarmClaimed {
-				boundNames[name] = struct{}{}
+				coveredNames[name] = struct{}{}
+				expectedNames[name] = struct{}{}
 			}
 		}
 	}
@@ -257,11 +287,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			snapshot.Incus.VisibleInstances = len(visibleNames)
 			if journalErr == nil {
 				for name := range visibleNames {
-					if _, exists := boundNames[name]; !exists {
+					if _, exists := coveredNames[name]; !exists {
 						snapshot.Incus.OrphanInstances++
 					}
 				}
-				for name := range boundNames {
+				for name := range expectedNames {
 					if _, exists := visibleNames[name]; !exists {
 						snapshot.Incus.MissingInstances++
 					}
@@ -274,8 +304,14 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("diagnostics", diagnosticsErr))
 	} else {
 		snapshot.Diagnostics = diagnostics
+		if workerdiagnostics.AtDurableWALHighWatermark(diagnostics, c.DiagnosticMaxBytes) {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "diagnostics: durable WAL high-watermark reached")
+		}
 	}
-	if diagnosticExportErr != nil {
+	if c.Export == nil {
+		// The queue host receives diagnostic bundles but does not own the
+		// credentialed object-store exporter. Compute hosts retain this gate.
+	} else if diagnosticExportErr != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("diagnostic export", diagnosticExportErr))
 	} else {
 		snapshot.DiagnosticExport = diagnosticExport
@@ -309,6 +345,14 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			snapshot.Healthy = false
 		}
 	}
+	for index := range snapshot.Pools {
+		pool, exists := c.Config.Pool(snapshot.Pools[index].Name)
+		if !exists {
+			continue
+		}
+		backend, exists := c.Config.Backend(pool.Backend)
+		snapshot.Pools[index].ContainerAdmissionReady = exists && backend.Implementation == "incus-container" && snapshot.Healthy
+	}
 	return snapshot
 }
 
@@ -316,14 +360,20 @@ func (c Collector) Validate() error {
 	if err := c.Config.Validate(); err != nil {
 		return err
 	}
-	if c.Host == nil || c.Journal == nil || c.Queue == nil || c.Instances == nil || c.Diagnostics == nil || c.Export == nil || c.Service == nil {
+	if c.Host == nil || c.Journal == nil || c.Queue == nil || c.Instances == nil || c.Diagnostics == nil || c.Service == nil {
 		return fmt.Errorf("every observer source is required")
+	}
+	if c.DiagnosticMaxBytes <= 0 {
+		return fmt.Errorf("observer diagnostic WAL byte boundary is required")
+	}
+	if !c.Config.Incus.Cluster.Enabled && c.Export == nil {
+		return fmt.Errorf("services observer diagnostic export source is required")
 	}
 	// The inventory used to be asserted at exactly five, which made adding a
 	// service two edits and stated a count rather than a property. What matters
 	// is that it is not empty; which services belong in it is decided by the
 	// list above and held by the deployment contract.
-	if len(requiredServices) == 0 {
+	if len(serviceNamesForConfig(c.Config)) == 0 {
 		return fmt.Errorf("observer service inventory is empty")
 	}
 	return nil
@@ -335,13 +385,14 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		knownScaleSets[pool.ScaleSetName] = struct{}{}
 	}
 	summary := QueueSummary{
-		Generation: snapshot.Generation,
-		Stored:     snapshot.Stored,
-		Active:     len(snapshot.Active),
-		Expired:    snapshot.Expired,
-		ByState:    make(map[string]int),
-		ByPriority: make(map[int]int),
-		ByScaleSet: make(map[string]int),
+		Generation:            snapshot.Generation,
+		Stored:                snapshot.Stored,
+		Active:                len(snapshot.Active),
+		Expired:               snapshot.Expired,
+		ByState:               make(map[string]int),
+		OldestStateAgeSeconds: make(map[string]int64),
+		ByPriority:            make(map[int]int),
+		ByScaleSet:            make(map[string]int),
 	}
 	for scaleSet := range knownScaleSets {
 		summary.ByScaleSet[scaleSet] = 0
@@ -354,6 +405,13 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			return QueueSummary{}, fmt.Errorf("active intent %q has a future queue timestamp", intent.Key)
 		}
 		summary.ByState[string(intent.State)]++
+		if intent.UpdatedAt.After(now.Add(time.Second)) {
+			return QueueSummary{}, fmt.Errorf("active intent %q has a future state timestamp", intent.Key)
+		}
+		stateAge := int64(now.Sub(intent.UpdatedAt).Seconds())
+		if stateAge > summary.OldestStateAgeSeconds[string(intent.State)] {
+			summary.OldestStateAgeSeconds[string(intent.State)] = stateAge
+		}
 		summary.ByPriority[intent.Priority]++
 		summary.ByScaleSet[intent.ScaleSetName]++
 		if intent.State != queueintent.StateQueued {
@@ -385,9 +443,10 @@ func validateDiagnosticExport(
 	if err != nil || observedAt.After(now.Add(5*time.Second)) || now.Sub(observedAt) > diagnosticExportStatusMaxAge {
 		return syncStatus, fmt.Errorf("status timestamp is invalid or stale")
 	}
+	legacyCounters := status.ExportedBundles+status.PendingBundles == status.SourceBundles
+	walCounters := status.PendingBundles == status.SourceBundles
 	if status.SourceBundles < 0 || status.ExportedBundles < 0 || status.PendingBundles < 0 ||
-		status.ExportedBundles+status.PendingBundles != status.SourceBundles ||
-		status.SourceBytes < 0 || status.ExportedBytes < 0 || status.ExportedBytes > status.SourceBytes {
+		(!legacyCounters && !walCounters) || status.SourceBytes < 0 || status.ExportedBytes < 0 {
 		return syncStatus, fmt.Errorf("status counters are inconsistent")
 	}
 	if status.LastErrorCode != "" || status.ConsecutiveFailures != 0 || status.PendingBundles != 0 {
@@ -419,6 +478,15 @@ func validateDiagnosticExport(
 	return syncStatus, nil
 }
 
+func serviceHealthy(name, state string) bool {
+	if name == "gha-diagnostic-exporter.service" {
+		// A successful oneshot is normally inactive between timer firings. Failed
+		// is the state that must make services-host health false.
+		return state == "active" || state == "activating" || state == "deactivating" || state == "inactive"
+	}
+	return state == "active"
+}
+
 func (c Collector) now() time.Time {
 	if c.Now != nil {
 		return c.Now().UTC()
@@ -426,7 +494,7 @@ func (c Collector) now() time.Time {
 	return time.Now().UTC()
 }
 
-func summarizeJournal(journal providerjournal.Journal) JournalSummary {
+func summarizeJournal(journal providerjournal.Journal, now time.Time) JournalSummary {
 	byState := map[string]int{
 		string(providerjournal.StateAdmitted):    0,
 		string(providerjournal.StateCreated):     0,
@@ -435,21 +503,27 @@ func summarizeJournal(journal providerjournal.Journal) JournalSummary {
 		string(providerjournal.StateWarmClaimed): 0,
 	}
 	preemptions := 0
+	oldestStateAge := make(map[string]int64, len(byState))
 	for _, lease := range journal.Leases {
 		byState[string(lease.State)]++
+		age := int64(now.Sub(lease.UpdatedAt).Seconds())
+		if age > oldestStateAge[string(lease.State)] {
+			oldestStateAge[string(lease.State)] = age
+		}
 		if lease.PreemptedBy != "" {
 			preemptions++
 		}
 	}
 	return JournalSummary{
-		SchemaVersion:        journal.SchemaVersion,
-		Generation:           journal.Generation,
-		UpdatedAt:            journal.UpdatedAt,
-		Leases:               len(journal.Leases),
-		Claims:               len(journal.Claims),
-		WarmPreemptions:      preemptions,
-		WarmPreemptionsTotal: journal.WarmPreemptionsTotal,
-		ByState:              byState,
+		SchemaVersion:         journal.SchemaVersion,
+		Generation:            journal.Generation,
+		UpdatedAt:             journal.UpdatedAt,
+		Leases:                len(journal.Leases),
+		Claims:                len(journal.Claims),
+		WarmPreemptions:       preemptions,
+		WarmPreemptionsTotal:  journal.WarmPreemptionsTotal,
+		ByState:               byState,
+		OldestStateAgeSeconds: oldestStateAge,
 	}
 }
 

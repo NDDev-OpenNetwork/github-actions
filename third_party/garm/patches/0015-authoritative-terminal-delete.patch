@@ -1,0 +1,84 @@
+diff --git a/workers/provider/failed_scale_set_runner_cleanup_test.go b/workers/provider/failed_scale_set_runner_cleanup_test.go
+index ef2b93b..3301fd6 100644
+--- a/workers/provider/failed_scale_set_runner_cleanup_test.go
++++ b/workers/provider/failed_scale_set_runner_cleanup_test.go
+@@ -9,6 +9,8 @@ import (
+ 	commonParams "github.com/cloudbase/garm-provider-common/params"
+ 	"github.com/cloudbase/garm/auth"
+ 	"github.com/cloudbase/garm/params"
++	"github.com/cloudbase/garm/runner/common/mocks"
++	"github.com/stretchr/testify/mock"
+ )
+ 
+ type failedScaleSetRunnerCleanupHelper struct {
+@@ -20,6 +22,8 @@ type failedScaleSetRunnerCleanupHelper struct {
+ 	removedAgent int64
+ 	statusCalls  int
+ 	status       commonParams.InstanceStatus
++	statuses     []commonParams.InstanceStatus
++	forces       []bool
+ }
+ 
+ func (f *failedScaleSetRunnerCleanupHelper) GetInstance(_ context.Context, _ string) (params.Instance, error) {
+@@ -27,12 +31,42 @@ func (f *failedScaleSetRunnerCleanupHelper) GetInstance(_ context.Context, _ str
+ 	return f.instance, f.getErr
+ }
+ 
+-func (f *failedScaleSetRunnerCleanupHelper) SetInstanceStatus(_ string, status commonParams.InstanceStatus, _ []byte, _ bool) error {
++func (f *failedScaleSetRunnerCleanupHelper) SetInstanceStatus(_ string, status commonParams.InstanceStatus, _ []byte, force bool) error {
+ 	f.statusCalls++
+ 	f.status = status
++	f.statuses = append(f.statuses, status)
++	f.forces = append(f.forces, force)
+ 	return nil
+ }
+ 
++func TestProviderDeleteCommitsTerminalStateAuthoritatively(t *testing.T) {
++	t.Setenv(nddevRetryFileEnv, t.TempDir()+"/retry.json")
++	t.Setenv(nddevRetryLockEnv, t.TempDir()+"/retry.lock")
++	helper := &failedScaleSetRunnerCleanupHelper{}
++	provider := mocks.NewProvider(t)
++	provider.EXPECT().DeleteInstance(mock.Anything, "runner-delete", mock.Anything).Return(nil).Once()
++	manager := &instanceManager{
++		ctx: context.Background(),
++		instance: params.Instance{
++			Name: "runner-delete", Status: commonParams.InstancePendingDelete,
++		},
++		provider: provider,
++		helper:   helper,
++	}
++	manager.running.Store(true)
++
++	if err := manager.consolidateState(); !errors.Is(err, ErrInstanceDeleted) {
++		t.Fatalf("consolidating deleted provider instance: %v", err)
++	}
++	if len(helper.statuses) != 2 || helper.statuses[0] != commonParams.InstanceDeleting ||
++		helper.statuses[1] != commonParams.InstanceDeleted {
++		t.Fatalf("status sequence = %v", helper.statuses)
++	}
++	if len(helper.forces) != 2 || !helper.forces[0] || !helper.forces[1] {
++		t.Fatalf("terminal status was not authoritative: forces=%v", helper.forces)
++	}
++}
++
+ func (*failedScaleSetRunnerCleanupHelper) InstanceTokenGetter() auth.InstanceTokenGetter {
+ 	return nil
+ }
+diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_manager.go
+index fde6802..fc071ce 100644
+--- a/workers/provider/instance_manager.go
++++ b/workers/provider/instance_manager.go
+@@ -401,7 +401,12 @@ func (i *instanceManager) consolidateState() error {
+ 				return fmt.Errorf("error removing instance. Will retry: %w", err)
+ 			}
+ 		}
+-		if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstanceDeleted, nil, false); err != nil {
++		// Provider deletion is the authoritative terminal commit. A concurrent
++		// cleanup worker may have rewritten the intermediate deleting row back to
++		// pending-delete after our provider call completed; forcing only this
++		// proven terminal result prevents that stale transition from stranding the
++		// already absent VM.
++		if err := i.helper.SetInstanceStatus(i.instance.Name, commonParams.InstanceDeleted, nil, true); err != nil {
+ 			if !errors.Is(err, runnerErrors.ErrNotFound) {
+ 				return fmt.Errorf("setting instance status to deleted: %w", err)
+ 			}

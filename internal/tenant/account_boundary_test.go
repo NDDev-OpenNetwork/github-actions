@@ -11,7 +11,7 @@ func TestNDDevOrganizationTenantServesItsAccount(t *testing.T) {
 	if !row.ServesWholeAccount {
 		t.Fatal("NDDev organization tenant must serve the whole account")
 	}
-	want := "https://github.com/NDDev-OpenNetwork/"
+	want := "https://github.com/example-org/"
 	if _, present := AccountURLPrefixes()[want]; !present {
 		t.Fatalf("NDDev account boundary %q is missing", want)
 	}
@@ -35,12 +35,16 @@ func TestAccountPrefixesHoldOnlyTenantsThatDeclaredIt(t *testing.T) {
 // can never narrow another.
 func TestExactRepositoryURLsCoverEveryTenant(t *testing.T) {
 	urls := RepositoryURLs()
-	if len(urls) != len(tenants) {
-		t.Fatalf("exact boundary holds %d of %d tenants", len(urls), len(tenants))
-	}
+	want := 0
 	for id, row := range tenants {
-		if _, present := urls["https://github.com/"+row.Repository]; !present {
-			t.Fatalf("tenant %q is missing from the exact boundary", id)
+		want += len(row.ManagedRepositories)
+		for _, repository := range row.ManagedRepositories {
+			if _, present := urls["https://github.com/"+repository]; !present {
+				t.Fatalf("tenant %q managed repository %q is missing from the exact boundary", id, repository)
+			}
 		}
+	}
+	if len(urls) != want {
+		t.Fatalf("exact boundary holds %d repositories, want %d", len(urls), want)
 	}
 }

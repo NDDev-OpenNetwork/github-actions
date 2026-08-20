@@ -16,12 +16,12 @@ import (
 // both directions so adding either half alone fails here rather than on a box.
 func TestSupportedPlatformHostsMatchDeclaredConfigs(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	matches, err := filepath.Glob(filepath.Join(root, "config", "server-*.yaml"))
+	matches, err := filepath.Glob(filepath.Join(root, "config", "example-*.yaml"))
 	if err != nil {
 		t.Fatalf("glob platform configs: %v", err)
 	}
 	if len(matches) == 0 {
-		t.Fatal("no config/server-*.yaml found; the glob no longer locates the repository root")
+		t.Fatal("no config/example-*.yaml found; the glob no longer locates the repository root")
 	}
 
 	declared := map[string]string{}
@@ -42,7 +42,7 @@ func TestSupportedPlatformHostsMatchDeclaredConfigs(t *testing.T) {
 
 	for host := range supportedPlatformHosts {
 		if _, ok := declared[host]; !ok {
-			t.Errorf("supportedPlatformHosts allows %q, but no config/server-*.yaml declares it", host)
+			t.Errorf("supportedPlatformHosts allows %q, but no config/example-*.yaml declares it", host)
 		}
 	}
 	for host, file := range declared {

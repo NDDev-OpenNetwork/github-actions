@@ -39,6 +39,7 @@ func IsBundleName(name string) bool {
 
 type Instance struct {
 	Name             string `json:"name"`
+	Trust            string `json:"trust,omitempty"`
 	ControllerID     string `json:"controller_id"`
 	PoolID           string `json:"pool_id"`
 	PoolName         string `json:"pool_name"`
@@ -112,8 +113,8 @@ func (s Store) Write(
 		return Result{}, fmt.Errorf("validate diagnostics directory: %w", err)
 	}
 	now := s.now()
-	if err := s.prune(now, ""); err != nil {
-		return Result{}, fmt.Errorf("prune diagnostics before capture: %w", err)
+	if err := s.checkDurableWALBoundary(); err != nil {
+		return Result{}, fmt.Errorf("check diagnostics before capture: %w", err)
 	}
 
 	stored, total, normalizedErrors, err := s.prepare(ctx, artifacts, collectionErrors)
@@ -144,8 +145,8 @@ func (s Store) Write(
 	if err := s.writeBundle(ctx, finalPath, now, manifestBytes, stored); err != nil {
 		return Result{}, err
 	}
-	if err := s.prune(now, finalPath); err != nil {
-		return Result{}, fmt.Errorf("prune diagnostics after capture: %w", err)
+	if err := s.checkDurableWALBoundary(); err != nil {
+		return Result{}, fmt.Errorf("check diagnostics after capture: %w", err)
 	}
 	return Result{
 		Path:               finalPath,
@@ -298,17 +299,14 @@ func (s Store) writeBundle(
 	return syncDirectory(s.Directory)
 }
 
-func (s Store) prune(now time.Time, preserve string) error {
+// checkDurableWALBoundary never removes data. Only the exporter may unlink a
+// source after durable remote confirmation. Crossing the hard ceiling fails
+// the capture path while preserving every already-written bundle.
+func (s Store) checkDurableWALBoundary() error {
 	entries, err := os.ReadDir(s.Directory)
 	if err != nil {
 		return err
 	}
-	type candidate struct {
-		path    string
-		modTime time.Time
-		size    int64
-	}
-	candidates := make([]candidate, 0, len(entries))
 	var total int64
 	for _, entry := range entries {
 		if !IsBundleName(entry.Name()) {
@@ -321,38 +319,12 @@ func (s Store) prune(now time.Time, preserve string) error {
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		candidatePath := filepath.Join(s.Directory, entry.Name())
-		if candidatePath != preserve && now.Sub(info.ModTime()) > s.Retention {
-			if err := os.Remove(candidatePath); err != nil {
-				return err
-			}
-			continue
-		}
-		candidates = append(candidates, candidate{path: candidatePath, modTime: info.ModTime(), size: info.Size()})
 		total += info.Size()
 	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].modTime.Equal(candidates[j].modTime) {
-			return candidates[i].path < candidates[j].path
-		}
-		return candidates[i].modTime.Before(candidates[j].modTime)
-	})
-	for _, candidate := range candidates {
-		if total <= s.MaxTotalBytes {
-			break
-		}
-		if candidate.path == preserve {
-			continue
-		}
-		if err := os.Remove(candidate.path); err != nil {
-			return err
-		}
-		total -= candidate.size
-	}
 	if total > s.MaxTotalBytes {
-		return fmt.Errorf("diagnostic spool exceeds %d bytes after bounded pruning", s.MaxTotalBytes)
+		return fmt.Errorf("diagnostic spool exceeds the %d-byte durable WAL boundary", s.MaxTotalBytes)
 	}
-	return syncDirectory(s.Directory)
+	return nil
 }
 
 func (s Store) bundleName(instance string, capturedAt time.Time) (string, error) {

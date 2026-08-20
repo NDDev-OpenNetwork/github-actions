@@ -4,7 +4,24 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 )
+
+func TestServicesHostOwnsDiagnosticExporterSource(t *testing.T) {
+	services, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compute, err := config.Load("../../config/example-runner-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !platformOwnsDiagnosticExporter(services) || platformOwnsDiagnosticExporter(compute) {
+		t.Fatalf("diagnostic exporter ownership inverted: services=%t compute=%t",
+			platformOwnsDiagnosticExporter(services), platformOwnsDiagnosticExporter(compute))
+	}
+}
 
 func TestParseOptionsPinsLoopbackAddress(t *testing.T) {
 	var stderr bytes.Buffer

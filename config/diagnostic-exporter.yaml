@@ -1,23 +1,35 @@
-schema_version: 3
+schema_version: 4
 deployment_stage: canary
 source_directory: /run/gha-diagnostic-exporter-source
 source_owner: garm
 state_directory: /var/lib/gha-diagnostic-exporter
-endpoint: https://192.0.2.1:9002
+endpoint: https://198.51.100.1:9002
 region: us-east-1
 bucket: gha-diagnostics-canary
 prefix: diagnostics/v1
 repositories:
+  - example-org/almaty-libraries
   - NDDev-OpenNetwork/github-actions
   - example-guild/ai_stp
 account_scopes:
-  - NDDev-OpenNetwork
   - example-media
+  - example-org
+  - example-guild
 pools:
+  - nddev-almaty-integration
+  - nddev-almaty-standard
+  - nddev-almaty-untrusted
+  - nddev-linux-container-canary
+  - nddev-linux-docker-container-canary
   - nddev-linux-fast
   - nddev-linux-integration
+  - nddev-linux-release
   - nddev-linux-standard
-trust: trusted
+  - nddev-linux-untrusted
+trusts:
+  - release
+  - trusted
+  - untrusted
 platform: linux
 architecture: amd64
 path_style: true

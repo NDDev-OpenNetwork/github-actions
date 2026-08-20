@@ -24,7 +24,10 @@ import (
 
 const (
 	maxManifestBytes = 1024 * 1024
-	maxSourceEntries = 4096
+	// maxBundlesPerRun bounds remote work and state growth for one timer
+	// invocation. The spool itself is a durable WAL and may legitimately be
+	// larger while the object store is unavailable.
+	maxBundlesPerRun = 256
 )
 
 type Bundle struct {
@@ -34,6 +37,8 @@ type Bundle struct {
 	Manifest   workerdiagnostics.Manifest
 	CapturedAt time.Time
 	ObjectKey  string
+	device     uint64
+	inode      uint64
 }
 
 type bundleScope uint8
@@ -51,13 +56,8 @@ func ListBundles(config Config) ([]string, error) {
 	}
 	defer directory.Close()
 	names := make([]string, 0)
-	seen := 0
 	for {
 		entries, readErr := directory.ReadDir(256)
-		seen += len(entries)
-		if seen > maxSourceEntries {
-			return nil, fmt.Errorf("diagnostic spool exceeds the %d-entry boundary", maxSourceEntries)
-		}
 		for _, entry := range entries {
 			if workerdiagnostics.IsBundleName(entry.Name()) {
 				names = append(names, entry.Name())
@@ -72,6 +72,94 @@ func ListBundles(config Config) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// ListBundleBatch returns the oldest bounded slice of the durable spool using
+// the source inode modification time. Ordering by filename is not a global FIFO
+// because the instance name precedes the capture timestamp. Invalid bundles
+// remain visible and sort first so corruption cannot hide behind healthy traffic.
+func ListBundleBatch(ctx context.Context, config Config, limit int) ([]string, int, int64, error) {
+	if limit < 1 {
+		return nil, 0, 0, errors.New("diagnostic export batch limit must be positive")
+	}
+	directory, ownerUID, ownerGID, err := openSourceDirectory(config.SourceDirectory)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer directory.Close()
+	type candidate struct {
+		name    string
+		modTime time.Time
+	}
+	candidates := make([]candidate, 0)
+	var totalBytes int64
+	for {
+		entries, readErr := directory.ReadDir(256)
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, len(candidates), totalBytes, err
+			}
+			if !workerdiagnostics.IsBundleName(entry.Name()) {
+				continue
+			}
+			var stat unix.Stat_t
+			if err := unix.Fstatat(int(directory.Fd()), entry.Name(), &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+				return nil, len(candidates), totalBytes, fmt.Errorf("stat diagnostic spool entry: %w", err)
+			}
+			if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 || stat.Uid != ownerUID ||
+				stat.Gid != ownerGID || stat.Mode&0o777 != 0o600 || stat.Size < 1 || stat.Size > config.MaxBundleBytes {
+				// Keep unsafe entries visible at the front of the batch. ReadBundle
+				// will produce the precise fail-closed diagnostic.
+				candidates = append(candidates, candidate{name: entry.Name()})
+				continue
+			}
+			totalBytes += stat.Size
+			candidates = append(candidates, candidate{name: entry.Name(), modTime: time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec).UTC()})
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, len(candidates), totalBytes, fmt.Errorf("read diagnostic spool: %w", readErr)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].modTime.Equal(candidates[j].modTime) {
+			return candidates[i].name < candidates[j].name
+		}
+		return candidates[i].modTime.Before(candidates[j].modTime)
+	})
+	total := len(candidates)
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	batch := make([]string, len(candidates))
+	for index := range candidates {
+		batch[index] = candidates[index].name
+	}
+	return batch, total, totalBytes, nil
+}
+
+// RemoveBundle removes exactly the source inode verified by ReadBundle. A
+// replacement or symlink race fails closed and remains in the WAL.
+func RemoveBundle(config Config, bundle Bundle) error {
+	directory, ownerUID, ownerGID, err := openSourceDirectory(config.SourceDirectory)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	var stat unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), bundle.Name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return fmt.Errorf("stat confirmed diagnostic bundle: %w", err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 || stat.Uid != ownerUID ||
+		stat.Gid != ownerGID || stat.Mode&0o777 != 0o600 || stat.Dev != bundle.device || stat.Ino != bundle.inode {
+		return errors.New("confirmed diagnostic bundle identity changed before removal")
+	}
+	if err := unix.Unlinkat(int(directory.Fd()), bundle.Name, 0); err != nil {
+		return fmt.Errorf("remove confirmed diagnostic bundle: %w", err)
+	}
+	return directory.Sync()
 }
 
 func ReadBundle(ctx context.Context, config Config, name string) (Bundle, error) {
@@ -142,6 +230,8 @@ func ReadBundle(ctx context.Context, config Config, name string) (Bundle, error)
 		Manifest:   manifest,
 		CapturedAt: capturedAt,
 		ObjectKey:  objectKey,
+		device:     before.Dev,
+		inode:      before.Ino,
 	}, nil
 }
 
@@ -274,6 +364,9 @@ func safeArchivePath(value string) bool {
 }
 
 func classifyBundleScope(config Config, instance workerdiagnostics.Instance) (bundleScope, error) {
+	if !config.AllowsTrust(resolvedTrust(instance)) {
+		return 0, errors.New("trust identity is outside the configured allowlist")
+	}
 	if instance.PoolName != instance.ScaleSet || !config.AllowsPool(instance.PoolName) {
 		return 0, errors.New("pool identity is outside the configured allowlist")
 	}
@@ -295,7 +388,7 @@ func objectKey(config Config, instance workerdiagnostics.Instance, capturedAt ti
 		return "", err
 	}
 	common := []string{
-		"trust", config.Trust,
+		"trust", resolvedTrust(instance),
 		"platform", config.Platform, config.Architecture,
 		"pool", instance.PoolName,
 		capturedAt.UTC().Format("2006/01/02"),
@@ -309,6 +402,16 @@ func objectKey(config Config, instance workerdiagnostics.Instance, capturedAt ti
 	}
 	owner, repository, _ := strings.Cut(instance.Repository, "/")
 	return path.Join(append([]string{config.Prefix, "repository", owner, repository}, common...)...), nil
+}
+
+func resolvedTrust(instance workerdiagnostics.Instance) string {
+	// Bundles captured before trust was added to schema v1 came exclusively
+	// from trusted pools. Preserve their exportability while requiring every
+	// newly captured release bundle to carry its explicit domain.
+	if instance.Trust == "" {
+		return "trusted"
+	}
+	return instance.Trust
 }
 
 func openSourceDirectory(directory string) (*os.File, uint32, uint32, error) {

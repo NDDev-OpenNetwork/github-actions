@@ -19,22 +19,40 @@ const (
 	// account, and it widens who can reach these pools, so it is opt-in and
 	// never inferred. A repository allowlist, if one is wanted, belongs on the
 	// GitHub runner group rather than here.
-	EntityKindRepository    = "repository"
-	EntityKindOrganization  = "organization"
-	DefaultScaleSetName     = "nddev-linux-standard"
-	IntegrationScaleSetName = "nddev-linux-integration"
-	FastScaleSetName        = "nddev-linux-fast"
-	DefaultPoolBalancerType = "roundrobin"
-	DefaultProviderName     = "nddev-incus"
-	DefaultImage            = "nddev-ubuntu-24.04-amd64-current"
-	IntegrationImage        = "nddev-ubuntu-24.04-amd64-docker-current"
-	// The fast class shares the standard image because what separates it is
-	// what it is denied -- no job credential and no Docker -- not what is
-	// baked in. A second image would have to be kept identical by hand.
-	FastImage                   = DefaultImage
+	EntityKindRepository              = "repository"
+	EntityKindOrganization            = "organization"
+	DefaultScaleSetName               = "nddev-linux-standard"
+	IntegrationScaleSetName           = "nddev-linux-integration"
+	FastScaleSetName                  = "nddev-linux-fast"
+	UntrustedScaleSetName             = "nddev-linux-untrusted"
+	ReleaseScaleSetName               = "nddev-linux-release"
+	ContainerCanaryScaleSetName       = "nddev-linux-container-canary"
+	DockerContainerCanaryScaleSetName = "nddev-linux-docker-container-canary"
+	AlmatyStandardScaleSetName        = "nddev-almaty-standard"
+	AlmatyIntegrationScaleSetName     = "nddev-almaty-integration"
+	AlmatyUntrustedScaleSetName       = "nddev-almaty-untrusted"
+	DefaultPoolBalancerType           = "roundrobin"
+	DefaultProviderName               = "nddev-incus"
+	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
+	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2"
+	// Every Linux class is an ephemeral Incus container. Docker-capable classes
+	// use their nested-runtime image; release uses a separately stage-smoked
+	// standard image so OIDC authority does not inherit Docker/nesting.
+	FastImage                   = ContainerCanaryImage
+	UntrustedImage              = IntegrationImage
+	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b7"
+	ContainerCanaryImage        = "nddev-ubuntu-24.04-amd64-container-current"
+	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2"
 	DefaultFlavor               = "nddev-linux-standard"
 	IntegrationFlavor           = "nddev-linux-integration"
 	FastFlavor                  = "nddev-linux-fast"
+	UntrustedFlavor             = "nddev-linux-untrusted"
+	ReleaseFlavor               = "nddev-linux-release"
+	ContainerCanaryFlavor       = "nddev-linux-container-canary"
+	DockerContainerCanaryFlavor = "nddev-linux-docker-container-canary"
+	AlmatyStandardFlavor        = "nddev-almaty-standard"
+	AlmatyIntegrationFlavor     = "nddev-almaty-integration"
+	AlmatyUntrustedFlavor       = "nddev-almaty-untrusted"
 	DefaultRunnerPrefix         = "nddev"
 	DefaultBootstrapTimeoutMins = uint(5)
 	// Mirrors githubappbootstrap. Duplicated rather than imported because the
@@ -53,9 +71,11 @@ const (
 // set name, the Incus image alias a worker of that class boots from, and the
 // pool policy the provider selects by.
 type ScaleSetClass struct {
-	Name   string
-	Image  string
-	Flavor string
+	Name       string
+	Image      string
+	Flavor     string
+	MaxRunners uint
+	Repository string
 }
 
 // PublishedScaleSets is the closed set of classes this reconciler can register,
@@ -66,9 +86,16 @@ type ScaleSetClass struct {
 // fails every create with a pool that has no pinned worker image.
 func PublishedScaleSets() []ScaleSetClass {
 	return []ScaleSetClass{
-		{Name: DefaultScaleSetName, Image: DefaultImage, Flavor: DefaultFlavor},
-		{Name: IntegrationScaleSetName, Image: IntegrationImage, Flavor: IntegrationFlavor},
-		{Name: FastScaleSetName, Image: FastImage, Flavor: FastFlavor},
+		{Name: DefaultScaleSetName, Image: DefaultImage, Flavor: DefaultFlavor, MaxRunners: 12},
+		{Name: IntegrationScaleSetName, Image: IntegrationImage, Flavor: IntegrationFlavor, MaxRunners: 8},
+		{Name: FastScaleSetName, Image: FastImage, Flavor: FastFlavor, MaxRunners: 12},
+		{Name: UntrustedScaleSetName, Image: UntrustedImage, Flavor: UntrustedFlavor, MaxRunners: 8},
+		{Name: ReleaseScaleSetName, Image: ReleaseImage, Flavor: ReleaseFlavor, MaxRunners: 1},
+		{Name: ContainerCanaryScaleSetName, Image: ContainerCanaryImage, Flavor: ContainerCanaryFlavor, MaxRunners: 12},
+		{Name: DockerContainerCanaryScaleSetName, Image: DockerContainerCanaryImage, Flavor: DockerContainerCanaryFlavor, MaxRunners: 1},
+		{Name: AlmatyStandardScaleSetName, Image: DefaultImage, Flavor: AlmatyStandardFlavor, MaxRunners: 12, Repository: "example-org/example-library"},
+		{Name: AlmatyIntegrationScaleSetName, Image: IntegrationImage, Flavor: AlmatyIntegrationFlavor, MaxRunners: 8, Repository: "example-org/example-library"},
+		{Name: AlmatyUntrustedScaleSetName, Image: UntrustedImage, Flavor: AlmatyUntrustedFlavor, MaxRunners: 8, Repository: "example-org/example-library"},
 	}
 }
 
@@ -77,6 +104,7 @@ type Options struct {
 	// DefaultTenantID, so an operator who passes nothing gets the account that
 	// was already deployed.
 	Tenant               string
+	Repository           string
 	BaseURL              string
 	AdminCredentialsPath string
 	CredentialAnchorPath string
@@ -87,6 +115,8 @@ type Options struct {
 	Enable               bool
 	ActivationMode       string
 	MigrateActivation    bool
+	MigrateCapacity      bool
+	MigrateImage         bool
 }
 
 type Result struct {

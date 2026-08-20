@@ -2,7 +2,7 @@
 #
 # Consumers -- github-device-sync above all, which pins this repository as a
 # submodule and has held that pin frozen since 2d277bd waiting for exactly this
-# artifact (NDDev-OpenNetwork/github-device-sync#172) -- need one statement of what
+# artifact (example-org/github-device-sync#172) -- need one statement of what
 # this fleet promises. This file holds only the part that cannot be derived from
 # the tree: what is contractual versus what may move, and what is still open.
 #

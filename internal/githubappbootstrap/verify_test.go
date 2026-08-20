@@ -31,22 +31,22 @@ func liveInstallation(t *testing.T, granted map[string]string) *httptest.Server 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/app/installations/200003":
+		case "/app/installations/153066649":
 			writeTestJSON(t, w, installation{
-				ID: 200003, AppID: 100003,
+				ID: 153066649, AppID: 4565021,
 				Account:             githubAccount{Login: "example-media", Type: "Organization"},
 				TargetType:          "Organization",
 				RepositorySelection: "all",
 				Permissions:         granted,
 			})
-		case "/app/installations/200003/access_tokens":
+		case "/app/installations/153066649/access_tokens":
 			w.WriteHeader(http.StatusCreated)
 			writeTestJSON(t, w, installationToken{
 				Token: "install-token", ExpiresAt: time.Now().Add(time.Hour),
 				Permissions: granted, RepositorySelection: "all",
 			})
-		case "/repos/example-media/server-example-media-ai":
-			writeTestJSON(t, w, installationRepository{FullName: "example-media/server-example-media-ai"})
+		case "/repos/example-media/example-service":
+			writeTestJSON(t, w, installationRepository{FullName: "example-media/example-service"})
 		default:
 			http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
 		}
@@ -56,7 +56,7 @@ func liveInstallation(t *testing.T, granted map[string]string) *httptest.Server 
 func verifyOptions(key, out string) VerifyOptions {
 	return VerifyOptions{
 		Tenant: "example-media", OwnerType: OwnerTypeOrganization,
-		OrganizationRunners: true, AppID: 100003, InstallationID: 200003,
+		OrganizationRunners: true, AppID: 4565021, InstallationID: 153066649,
 		PrivateKeyPath: key, OutputDirectory: out,
 	}
 }
@@ -92,7 +92,7 @@ func TestReVerifyingWritesTheCurrentPermissions(t *testing.T) {
 	if onDisk.Permissions[OrganizationRunnersPermission] != "write" {
 		t.Fatalf("the file is what Reconcile reads, and it is stale: %v", onDisk.Permissions)
 	}
-	if onDisk.AppSlug != "example-media-gha-fleet" || onDisk.RepositorySelection != "all" {
+	if onDisk.AppSlug != "example-media-fleet" || onDisk.RepositorySelection != "all" {
 		t.Fatalf("identity was not carried through: %+v", onDisk)
 	}
 }
@@ -104,7 +104,7 @@ func TestReVerifyingRefusesAnInstallationOnAnotherAccount(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		writeTestJSON(t, w, installation{
-			ID: 200003, AppID: 100003,
+			ID: 153066649, AppID: 4565021,
 			Account:             githubAccount{Login: "Someone-Else", Type: "Organization"},
 			TargetType:          "Organization",
 			RepositorySelection: "all",

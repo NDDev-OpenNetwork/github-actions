@@ -9,19 +9,19 @@ import (
 
 func validConfig() Config {
 	return Config{
-		SchemaVersion:         3,
+		SchemaVersion:         4,
 		DeploymentStage:       "canary",
 		SourceDirectory:       "/run/gha-diagnostic-exporter-source",
 		SourceOwner:           "garm",
 		StateDirectory:        "/var/lib/gha-diagnostic-exporter",
-		Endpoint:              "https://192.0.2.1:9002",
+		Endpoint:              "https://198.51.100.1:9002",
 		Region:                "us-east-1",
 		Bucket:                "gha-diagnostics-canary",
 		Prefix:                "diagnostics/v1",
-		Repositories:          []string{"example-guild/ai_stp", "example-user/github-actions"},
+		Repositories:          []string{"example-guild/example-project", "example-user/github-actions"},
 		AccountScopes:         []string{"example-media", "example-user"},
 		Pools:                 []string{"nddev-linux-integration", "nddev-linux-standard"},
-		Trust:                 "trusted",
+		Trusts:                []string{"release", "trusted"},
 		Platform:              "linux",
 		Architecture:          "amd64",
 		PathStyle:             true,
@@ -44,9 +44,11 @@ func TestConfigValidate(t *testing.T) {
 		edit func(*Config)
 		want string
 	}{
-		{"legacy schema", func(c *Config) { c.SchemaVersion = 2 }, "must be 3"},
+		{"legacy schema", func(c *Config) { c.SchemaVersion = 3 }, "must be 4"},
+		{"unsorted trusts", func(c *Config) { c.Trusts = []string{"trusted", "release"} }, "strictly sorted"},
+		{"missing trusts", func(c *Config) { c.Trusts = nil }, "between 1 and 16"},
 		{"production stage", func(c *Config) { c.DeploymentStage = "production" }, "must remain canary"},
-		{"plaintext endpoint", func(c *Config) { c.Endpoint = "http://192.0.2.1:9002" }, "HTTPS"},
+		{"plaintext endpoint", func(c *Config) { c.Endpoint = "http://198.51.100.1:9002" }, "HTTPS"},
 		{"virtual host", func(c *Config) { c.PathStyle = false }, "must be true"},
 		{"credential outside mount", func(c *Config) { c.SecretKeyFile = "/etc/secret" }, "credential path"},
 		{"wrong source owner", func(c *Config) { c.SourceOwner = "root" }, "must be garm"},
@@ -79,7 +81,7 @@ func TestConfigValidate(t *testing.T) {
 func TestConfigValidationErrorsAreDeterministic(t *testing.T) {
 	config := validConfig()
 	config.Pools = nil
-	config.Trust = ""
+	config.Trusts = nil
 	first := config.Validate().Error()
 	for range 20 {
 		if got := config.Validate().Error(); got != first {

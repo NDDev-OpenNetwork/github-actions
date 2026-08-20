@@ -58,6 +58,14 @@ func collect(
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read meminfo: %w", err)
 	}
+	memory.OOMKillsTotal, err = parseOOMKills(filepath.Join(root, "proc", "vmstat"))
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("read vmstat OOM counter: %w", err)
+	}
+	pressure, err := parsePressure(filepath.Join(root, "proc", "pressure"))
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("read pressure stall information: %w", err)
+	}
 	load1, load5, load15, err := parseLoadavg(filepath.Join(root, "proc", "loadavg"))
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read loadavg: %w", err)
@@ -113,6 +121,7 @@ func collect(
 			Load15:         load15,
 		},
 		Memory:         memory,
+		Pressure:       pressure,
 		RootFilesystem: filesystem,
 		KVM:            kvm,
 		Maintenance: Maintenance{
@@ -126,6 +135,120 @@ func collect(
 		},
 		LegacyRunners: LegacyRunners{Listeners: listeners, Workers: workers},
 	}, nil
+}
+
+func parseOOMKills(path string) (uint64, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) != 2 || fields[0] != "oom_kill" {
+			continue
+		}
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("parse oom_kill: %w", parseErr)
+		}
+		return value, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, nil
+}
+
+func parsePressure(directory string) (Pressure, error) {
+	result := Pressure{}
+	for _, resource := range []struct {
+		name   string
+		target *PressureResource
+	}{
+		{name: "cpu", target: &result.CPU},
+		{name: "memory", target: &result.Memory},
+		{name: "io", target: &result.IO},
+	} {
+		parsed, available, err := parsePressureResource(filepath.Join(directory, resource.name))
+		if err != nil {
+			return Pressure{}, fmt.Errorf("parse %s pressure: %w", resource.name, err)
+		}
+		if !available {
+			return Pressure{}, nil
+		}
+		*resource.target = parsed
+	}
+	result.Available = true
+	return result, nil
+}
+
+func parsePressureResource(path string) (PressureResource, bool, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return PressureResource{}, false, nil
+	}
+	if err != nil {
+		return PressureResource{}, false, err
+	}
+	defer file.Close()
+	result := PressureResource{}
+	seen := false
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) != 5 || (fields[0] != "some" && fields[0] != "full") {
+			return PressureResource{}, false, fmt.Errorf("unexpected pressure line %q", scanner.Text())
+		}
+		window, err := parsePressureWindow(fields[1:])
+		if err != nil {
+			return PressureResource{}, false, err
+		}
+		if fields[0] == "some" {
+			result.Some = window
+		} else {
+			result.Full = window
+		}
+		seen = true
+	}
+	if err := scanner.Err(); err != nil {
+		return PressureResource{}, false, err
+	}
+	if !seen {
+		return PressureResource{}, false, fmt.Errorf("pressure file is empty")
+	}
+	return result, true, nil
+}
+
+func parsePressureWindow(fields []string) (PressureWindow, error) {
+	values := make(map[string]string, len(fields))
+	for _, field := range fields {
+		key, value, found := strings.Cut(field, "=")
+		if !found {
+			return PressureWindow{}, fmt.Errorf("invalid pressure field %q", field)
+		}
+		values[key] = value
+	}
+	var result PressureWindow
+	var err error
+	for key, target := range map[string]*float64{"avg10": &result.Avg10, "avg60": &result.Avg60, "avg300": &result.Avg300} {
+		*target, err = strconv.ParseFloat(values[key], 64)
+		if err != nil {
+			return PressureWindow{}, fmt.Errorf("parse %s: %w", key, err)
+		}
+		if *target < 0 || *target > 100 {
+			return PressureWindow{}, fmt.Errorf("%s is outside 0..100", key)
+		}
+	}
+	result.TotalMicros, err = strconv.ParseUint(values["total"], 10, 64)
+	if err != nil {
+		return PressureWindow{}, fmt.Errorf("parse total: %w", err)
+	}
+	return result, nil
 }
 
 func parseKeyValueFile(path string) (map[string]string, error) {
@@ -323,6 +446,14 @@ func runnerProcesses(procRoot string) (listeners, workers int) {
 			continue
 		}
 		command := strings.TrimSpace(readOptional(filepath.Join(procRoot, entry.Name(), "comm")))
+		cgroup := readOptional(filepath.Join(procRoot, entry.Name(), "cgroup"))
+		// The host /proc includes processes from Incus containers. Counting
+		// their official one-job listeners as legacy host services makes a busy
+		// healthy fleet appear to retain exactly as many legacy listeners as it
+		// currently has container workers.
+		if strings.Contains(cgroup, "/lxc.payload.") || strings.Contains(cgroup, "/machine.slice/") {
+			continue
+		}
 		switch command {
 		case "Runner.Listener":
 			listeners++

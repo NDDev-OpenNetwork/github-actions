@@ -6,7 +6,10 @@
 // that fails after the one irreversible step in the whole flow.
 package tenant
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Tenant is one account this fleet may serve.
 //
@@ -33,6 +36,11 @@ type Tenant struct {
 	// Repository is the exact repository the repository entity serves, in
 	// `owner/name` form. It always belongs to Owner.
 	Repository string
+	// ManagedRepositories is the closed set that may receive a repository-
+	// scoped Scale Set from this tenant's App credential. Organization-scoped
+	// serving remains available when ServesWholeAccount is true, but an exact
+	// repository entity needs this reviewed identity before GARM mutation.
+	ManagedRepositories []string
 	// AppSlug is the slug the verified installation metadata must carry.
 	AppSlug string
 	// CredentialName is the GARM credential this tenant's entities bind to.
@@ -56,29 +64,36 @@ type Tenant struct {
 // DefaultID is the account the fleet ran on before it could serve more
 // than one, and stays the default so an operator who passes no tenant gets the
 // behaviour that is already deployed.
-const DefaultID = "nddev"
+const DefaultID = "example"
 
 // : The closed set. Adding a row is a deliberate act with a review attached.
 var tenants = map[string]Tenant{
 	DefaultID: {
 		ID:             DefaultID,
-		Owner:          "NDDev-OpenNetwork",
-		Repository:     "NDDev-OpenNetwork/github-actions",
-		AppSlug:        "nddev-gha-fleet",
-		CredentialName: "nddev-gha-fleet",
-		HomepageURL:    "https://github.com/NDDev-OpenNetwork/github-actions",
-		// The default row is this project's own account, and it is
-		// organization-scoped so one reviewed fleet can serve every repository
-		// the account holds rather than a single named one.
+		Owner:          "example-org",
+		Repository:     "example-org/example-actions",
+		AppSlug:        "example-actions-fleet",
+		CredentialName: "example-actions-fleet",
+		HomepageURL:    "https://github.com/example-org/example-actions",
+		ManagedRepositories: []string{
+			"example-org/example-actions",
+			"example-org/example-library",
+		},
+		// The NDDev production entity is organization-scoped so the same
+		// reviewed fleet can replace the legacy organization runners for GDS
+		// and the other repositories owned by this account.
 		ServesWholeAccount: true,
 	},
-	"guild": {
-		ID:             "guild",
+	"example-guild": {
+		ID:             "example-guild",
 		Owner:          "example-guild",
-		Repository:     "example-guild/ai_stp",
-		AppSlug:        "guild-gha-fleet",
-		CredentialName: "guild-gha-fleet",
-		HomepageURL:    "https://github.com/example-guild/ai_stp",
+		Repository:     "example-guild/example-project",
+		AppSlug:        "example-guild-fleet",
+		CredentialName: "example-guild-fleet",
+		HomepageURL:    "https://github.com/example-guild/example-project",
+		ManagedRepositories: []string{
+			"example-guild/example-project",
+		},
 		// This account's scale sets hang from an organization entity like the
 		// other two, so its jobs arrive from repositories the row above does
 		// not name. Leaving the boundary at the single repository meant the
@@ -89,10 +104,13 @@ var tenants = map[string]Tenant{
 	"example-media": {
 		ID:             "example-media",
 		Owner:          "example-media",
-		Repository:     "example-media/server-example-media-ai",
-		AppSlug:        "example-media-gha-fleet",
-		CredentialName: "example-media-gha-fleet",
-		HomepageURL:    "https://github.com/example-media/server-example-media-ai",
+		Repository:     "example-media/example-service",
+		AppSlug:        "example-media-fleet",
+		CredentialName: "example-media-fleet",
+		HomepageURL:    "https://github.com/example-media/example-service",
+		ManagedRepositories: []string{
+			"example-media/example-service",
+		},
 		// Eight repositories send jobs to this account's scale sets, and the
 		// row above names one. Its entity is an organization, so the provider
 		// boundary is the account rather than that single repository.
@@ -114,6 +132,20 @@ func ByID(id string) (Tenant, error) {
 	return tenant, nil
 }
 
+// WithRepository selects one reviewed repository entity without widening the
+// tenant or accepting an arbitrary same-owner path. An empty repository keeps
+// the tenant's historical primary entity.
+func WithRepository(selected Tenant, repository string) (Tenant, error) {
+	if repository == "" || repository == selected.Repository {
+		return selected, nil
+	}
+	if !slices.Contains(selected.ManagedRepositories, repository) {
+		return Tenant{}, fmt.Errorf("repository %q is not a managed repository of tenant %q", repository, selected.ID)
+	}
+	selected.Repository = repository
+	return selected, nil
+}
+
 // TenantIDs lists the selectable tenants for help text and error messages.
 func IDs() []string {
 	ids := make([]string, 0, len(tenants))
@@ -130,9 +162,11 @@ func IDs() []string {
 // making it exactly as wide as the registry above, so onboarding a tenant is
 // one place.
 func RepositoryURLs() map[string]struct{} {
-	urls := make(map[string]struct{}, len(tenants))
+	urls := make(map[string]struct{})
 	for _, tenant := range tenants {
-		urls["https://github.com/"+tenant.Repository] = struct{}{}
+		for _, repository := range tenant.ManagedRepositories {
+			urls["https://github.com/"+repository] = struct{}{}
+		}
 	}
 	return urls
 }
@@ -164,6 +198,20 @@ func (t Tenant) Validate() error {
 	}
 	if t.HomepageURL != "https://github.com/"+t.Repository {
 		return fmt.Errorf("tenant %q homepage does not name its repository", t.ID)
+	}
+	if len(t.ManagedRepositories) == 0 || !slices.IsSorted(t.ManagedRepositories) {
+		return fmt.Errorf("tenant %q managed repositories must be non-empty and sorted", t.ID)
+	}
+	for index, repository := range t.ManagedRepositories {
+		if repository != t.Owner+"/"+repositoryName(repository) {
+			return fmt.Errorf("tenant %q managed repository %q is outside its owner", t.ID, repository)
+		}
+		if index > 0 && repository == t.ManagedRepositories[index-1] {
+			return fmt.Errorf("tenant %q managed repository %q is duplicated", t.ID, repository)
+		}
+	}
+	if !slices.Contains(t.ManagedRepositories, t.Repository) {
+		return fmt.Errorf("tenant %q primary repository is not managed", t.ID)
 	}
 	return nil
 }

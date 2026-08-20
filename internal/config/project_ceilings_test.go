@@ -7,7 +7,7 @@ import "testing"
 // wide enough for the shape the fleet actually runs and narrow enough that a
 // typo cannot ask for a machine nobody owns.
 func TestProjectCeilingsAdmitTheDedicatedShapeAndRefuseBeyondIt(t *testing.T) {
-	dedicated, err := Load("../../config/server-gha-runner-1.yaml")
+	dedicated, err := Load("../../config/example-runner-1.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,21 +15,21 @@ func TestProjectCeilingsAdmitTheDedicatedShapeAndRefuseBeyondIt(t *testing.T) {
 		t.Fatalf("a dedicated host reserves %d CPU units; the ceilings below assume two",
 			dedicated.HostReserve.MinimumCPUUnits)
 	}
-	if dedicated.Incus.ProjectMaxCPUUnits != 6 || dedicated.Incus.ProjectMaxInstances != 3 {
-		t.Fatalf("dedicated project is %d CPU units over %d instances, want 6 over 3",
-			dedicated.Incus.ProjectMaxCPUUnits, dedicated.Incus.ProjectMaxInstances)
+	if dedicated.Incus.ProjectMaxCPUUnits != 10 || dedicated.Incus.ProjectMaxMemoryMiB != 14*1024 || dedicated.Incus.ProjectMaxInstances != 8 {
+		t.Fatalf("dedicated project is %d logical CPU units, %d MiB over %d instances, want 10 units, 14336 MiB over 8",
+			dedicated.Incus.ProjectMaxCPUUnits, dedicated.Incus.ProjectMaxMemoryMiB,
+			dedicated.Incus.ProjectMaxInstances)
 	}
-	// Two reserved plus six given away is exactly the eight cores these hosts
-	// have. Anything more would be overcommit, which the guardrails forbid.
-	if reserved := dedicated.HostReserve.MinimumCPUUnits + dedicated.Incus.ProjectMaxCPUUnits; reserved != 8 {
-		t.Fatalf("reserve plus project is %d CPU units, want exactly the 8 the host has", reserved)
-	}
+	// The field is a logical admission budget, not an Incus cpuset limit. Ten
+	// weighted units allow one opportunistic two-unit worker while placement
+	// still closes at load 7.84 and the committed RAM+swap envelope.
 
 	for name, mutate := range map[string]func(*Config){
-		"more CPU units than a host has beside its reserve": func(c *Config) { c.Incus.ProjectMaxCPUUnits = 7 },
-		"no CPU units at all":                               func(c *Config) { c.Incus.ProjectMaxCPUUnits = 0 },
-		"more instances than CPU units can back":            func(c *Config) { c.Incus.ProjectMaxInstances = 5 },
-		"no instances at all":                               func(c *Config) { c.Incus.ProjectMaxInstances = 0 },
+		"more logical CPU units than the bounded burst": func(c *Config) { c.Incus.ProjectMaxCPUUnits = 11 },
+		"no CPU units at all":                           func(c *Config) { c.Incus.ProjectMaxCPUUnits = 0 },
+		"unbounded instance fanout":                     func(c *Config) { c.Incus.ProjectMaxInstances = 9 },
+		"no instances at all":                           func(c *Config) { c.Incus.ProjectMaxInstances = 0 },
+		"more memory than a member can safely expose":   func(c *Config) { c.Incus.ProjectMaxMemoryMiB = 14337 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -52,9 +52,9 @@ func TestProjectCeilingsAdmitTheDedicatedShapeAndRefuseBeyondIt(t *testing.T) {
 // costs the fleet less than the same job on standard would.
 func TestFastPoolIsSizedForWhatItRuns(t *testing.T) {
 	for _, path := range []string{
-		"../../config/server-gha-runner-1.yaml",
-		"../../config/server-gha-runner-2.yaml",
-		"../../config/server-gha-runner-1.yaml",
+		"../../config/example-runner-1.yaml",
+		"../../config/example-runner-2.yaml",
+		"../../config/example-runner-1.yaml",
 	} {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()

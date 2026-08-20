@@ -1,0 +1,28 @@
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 1abb467..52928fa 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -806,7 +806,13 @@ func (w *Worker) handleScaleUp() {
+ 		return
+ 	}
+ 
+-	if w.targetRunners() <= w.runnerCount() {
++	intentTarget, err := newQueueIntentCoordinatorFromEnvironment().AdmittedCapacityTarget(w.scaleSet, w.entity)
++	if err != nil {
++		slog.ErrorContext(w.ctx, "queue intent preflight failed closed", "error", err)
++		return
++	}
++	current, target := w.runnerCount(), min(w.targetRunners(), intentTarget)
++	if target <= current {
+ 		slog.DebugContext(w.ctx, "target is less than or equal to current; not scaling up")
+ 		return
+ 	}
+@@ -826,7 +832,7 @@ func (w *Worker) handleScaleUp() {
+ 		slog.ErrorContext(w.ctx, "error getting scale set client", "error", err)
+ 		return
+ 	}
+-	for i := w.runnerCount(); i < w.targetRunners(); i++ {
++	for i := current; i < target; i++ {
+ 		newRunnerName := strings.ToLower(fmt.Sprintf("%s-%s", w.scaleSet.GetRunnerPrefix(), util.NewID()))
+ 		jitConfig, err := scaleSetCli.GenerateJitRunnerConfig(w.ctx, newRunnerName, w.scaleSet.ScaleSetID)
+ 		if err != nil {

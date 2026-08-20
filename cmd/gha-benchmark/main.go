@@ -45,7 +45,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 func runCollect(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("collect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	repository := flags.String("repository", "NDDev-OpenNetwork/github-actions", "exact private owner/name repository")
+	repository := flags.String("repository", "example-org/example-actions", "exact private owner/name repository")
 	runID := flags.Int64("run-id", 0, "completed representative benchmark workflow run ID")
 	timeout := flags.Duration("timeout", 2*time.Minute, "bounded GitHub API and artifact collection timeout")
 	if err := flags.Parse(args); err != nil {

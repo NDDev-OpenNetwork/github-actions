@@ -1,0 +1,113 @@
+schema_version: 1
+
+image:
+  type: container
+  alias: nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2
+  current_alias: nddev-ubuntu-24.04-amd64-container-docker-current
+  previous_alias: nddev-ubuntu-24.04-amd64-container-docker-previous
+  source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801
+  os: ubuntu
+  release: "24.04"
+  architecture: x86_64
+
+source:
+  release_id: "20260801"
+  base_url: https://cloud-images.ubuntu.com/releases/noble/release-20260801
+  checksums_file: SHA256SUMS
+  signature_file: SHA256SUMS.gpg
+  metadata_file: ubuntu-24.04-server-cloudimg-amd64-lxd.tar.xz
+  metadata_sha256: 4881b54323d62bb2a791a48c5bfa841492e55cf7a27af18b047edc904d595051
+  rootfs_file: ubuntu-24.04-server-cloudimg-amd64-root.tar.xz
+  rootfs_sha256: 915b4be62933475c3fb5f5031aa2e159294db95fb32aaa9e8b317aadcb6c065d
+  keyring_path: /usr/share/keyrings/ubuntu-cloudimage-keyring.gpg
+  signer_fingerprint: D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81
+
+runner:
+  version: v2.336.0
+  archive: actions-runner-linux-x64-2.336.0.tar.gz
+  download_url: https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz
+  sha256: 04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+
+compiler_cache:
+  name: sccache
+  version: v0.17.0
+  source_commit: c037e117c7625a2668633574028a6addf2a96a6e
+  archive: sccache-v0.17.0-x86_64-unknown-linux-musl.tar.gz
+  download_url: https://github.com/mozilla/sccache/releases/download/v0.17.0/sccache-v0.17.0-x86_64-unknown-linux-musl.tar.gz
+  archive_sha256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
+  binary_path: sccache-v0.17.0-x86_64-unknown-linux-musl/sccache
+  binary_sha256: 066c5a84c85044c8f48b3ab571ac114293ea717c3d36985db022af8206e21e63
+
+toolchains:
+  - name: bun
+    version: 1.3.14
+    archive: bun-linux-x64.zip
+    download_url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip
+    archive_sha256: 951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
+  - name: go
+    version: 1.26.6
+    archive: go1.26.6.linux-amd64.tar.gz
+    download_url: https://go.dev/dl/go1.26.6.linux-amd64.tar.gz
+    archive_sha256: 708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+  - name: gh
+    version: 2.97.0
+    archive: gh_2.97.0_linux_amd64.tar.gz
+    download_url: https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_linux_amd64.tar.gz
+    archive_sha256: a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112
+  - name: node22
+    version: 22.23.2
+    archive: node-v22.23.2-linux-x64.tar.xz
+    download_url: https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz
+    archive_sha256: d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
+  - name: node24
+    version: 24.19.0
+    archive: node-v24.19.0-linux-x64.tar.xz
+    download_url: https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz
+    archive_sha256: 14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
+  - name: node25
+    version: 25.9.0
+    archive: node-v25.9.0-linux-x64.tar.xz
+    download_url: https://nodejs.org/dist/v25.9.0/node-v25.9.0-linux-x64.tar.xz
+    archive_sha256: 1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e
+  - name: rust
+    version: 1.97.1
+    archive: rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
+    download_url: https://static.rust-lang.org/dist/rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
+    archive_sha256: 88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f
+  - name: uv
+    version: 0.11.30
+    archive: uv-x86_64-unknown-linux-gnu.tar.gz
+    download_url: https://github.com/astral-sh/uv/releases/download/0.11.30/uv-x86_64-unknown-linux-gnu.tar.gz
+    archive_sha256: 04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68
+
+guest:
+  builder_disk_gib: 24
+  variant: integration
+  docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
+  packages:
+    - build-essential
+    - busybox-static
+    - ca-certificates
+    - curl
+    - docker-buildx
+    - docker-compose-v2
+    - docker.io
+    - git
+    - git-lfs
+    - jq
+    - libssl-dev
+    - pigz
+    - pkg-config
+    - rsync
+    - sudo
+    - tar
+    - unzip
+    - xz-utils
+    - zip
+    - zstd
+  package_versions:
+    busybox-static: 1:1.36.1-6ubuntu3.1
+    docker-buildx: 0.30.1-0ubuntu1~24.04.1
+    docker-compose-v2: 2.40.3+ds1-0ubuntu1~24.04.1
+    docker.io: 29.1.3-0ubuntu3~24.04.2
+    pigz: 2.8-1

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/fleettrace"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/provider"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
 	"github.com/cloudbase/garm-provider-common/execution"
@@ -151,6 +152,16 @@ func runWarmPool(args []string, stdout, stderr io.Writer) int {
 func runExternalProvider(stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), signals...)
 	defer stop()
+	shutdown, err := fleettrace.Configure(ctx, "garm-provider-incus-nddev", version)
+	if err != nil {
+		fmt.Fprintf(stderr, "garm-provider-incus-nddev: configure tracing: %v\n", err)
+		return 1
+	}
+	defer func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(shutdownContext)
+	}()
 
 	executionEnv, err := execution.GetEnvironment()
 	if err != nil {

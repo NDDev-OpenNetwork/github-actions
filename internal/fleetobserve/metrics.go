@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
@@ -33,6 +34,42 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_host_load1", "One-minute host load average.", snapshot.Host.CPU.Load1)
 	gauge(&output, "gha_fleet_host_memory_total_bytes", "Total host memory in bytes.", float64(snapshot.Host.Memory.TotalMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_memory_available_bytes", "Available host memory in bytes.", float64(snapshot.Host.Memory.AvailableMiB)*1024*1024)
+	counter(&output, "gha_fleet_host_oom_kills_total", "Kernel OOM kills observed since host boot.", float64(snapshot.Host.Memory.OOMKillsTotal))
+	gauge(&output, "gha_fleet_host_psi_available", "Whether Linux pressure stall information is available.", boolFloat(snapshot.Host.Pressure.Available))
+	labeledGaugeHeader(&output, "gha_fleet_host_psi_stall_percent", "Percentage of wall time stalled over each Linux PSI averaging window.")
+	labeledCounterHeader(&output, "gha_fleet_host_psi_stall_seconds_total", "Cumulative Linux PSI stall time since host boot.")
+	for _, resource := range []struct {
+		name     string
+		pressure hostprobe.PressureResource
+	}{
+		{name: "cpu", pressure: snapshot.Host.Pressure.CPU},
+		{name: "memory", pressure: snapshot.Host.Pressure.Memory},
+		{name: "io", pressure: snapshot.Host.Pressure.IO},
+	} {
+		for _, mode := range []struct {
+			name   string
+			window hostprobe.PressureWindow
+		}{
+			{name: "some", window: resource.pressure.Some},
+			{name: "full", window: resource.pressure.Full},
+		} {
+			for _, average := range []struct {
+				window string
+				value  float64
+			}{
+				{window: "10", value: mode.window.Avg10},
+				{window: "60", value: mode.window.Avg60},
+				{window: "300", value: mode.window.Avg300},
+			} {
+				metric(&output, "gha_fleet_host_psi_stall_percent", map[string]string{
+					"resource": resource.name, "mode": mode.name, "window_seconds": average.window,
+				}, average.value)
+			}
+			metric(&output, "gha_fleet_host_psi_stall_seconds_total", map[string]string{
+				"resource": resource.name, "mode": mode.name,
+			}, float64(mode.window.TotalMicros)/1_000_000)
+		}
+	}
 	gauge(&output, "gha_fleet_host_root_available_bytes", "Available bytes on the root filesystem.", float64(snapshot.Host.RootFilesystem.AvailableMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_root_free_percent", "Free block percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreePercent))
 	gauge(&output, "gha_fleet_host_root_free_inodes_percent", "Free inode percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreeInodesPercent))
@@ -41,12 +78,14 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_legacy_runner_listeners", "Legacy runner listeners retained during migration.", float64(snapshot.Host.LegacyRunners.Listeners))
 	gauge(&output, "gha_fleet_legacy_runner_workers", "Active legacy runner workers observed during migration.", float64(snapshot.Host.LegacyRunners.Workers))
 
-	labeledGaugeHeader(&output, "gha_fleet_pool_pilot_ready", "Whether a cold worker in the pool passes current host admission preflight.")
+	labeledGaugeHeader(&output, "gha_fleet_pool_pilot_ready", "Deprecated VM/KVM cold-pilot preflight; do not use for container-pool availability.")
+	labeledGaugeHeader(&output, "gha_fleet_pool_container_admission_ready", "Whether the current container pool has healthy control-plane, provider inventory, resource journal and diagnostic WAL inputs for admission.")
 	labeledGaugeHeader(&output, "gha_fleet_pool_findings", "Current preflight finding count by pool and severity.")
 	pools := append([]PoolStatus(nil), snapshot.Pools...)
 	sort.SliceStable(pools, func(i, j int) bool { return pools[i].Name < pools[j].Name })
 	for _, pool := range pools {
 		metric(&output, "gha_fleet_pool_pilot_ready", map[string]string{"pool": pool.Name}, boolFloat(pool.PilotReady))
+		metric(&output, "gha_fleet_pool_container_admission_ready", map[string]string{"pool": pool.Name}, boolFloat(pool.ContainerAdmissionReady))
 		for _, finding := range []struct {
 			severity string
 			count    int
@@ -74,6 +113,13 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	} {
 		metric(&output, "gha_fleet_provider_journal_leases_by_state", map[string]string{"state": string(state)}, float64(snapshot.Journal.ByState[string(state)]))
 	}
+	labeledGaugeHeader(&output, "gha_fleet_provider_lease_oldest_state_age_seconds", "Age since the oldest provider lease last progressed in its current state.")
+	for _, state := range []providerjournal.LeaseState{
+		providerjournal.StateAdmitted, providerjournal.StateCreated, providerjournal.StateDeleting,
+		providerjournal.StateWarmReady, providerjournal.StateWarmClaimed,
+	} {
+		metric(&output, "gha_fleet_provider_lease_oldest_state_age_seconds", map[string]string{"state": string(state)}, float64(snapshot.Journal.OldestStateAgeSeconds[string(state)]))
+	}
 	gauge(&output, "gha_fleet_queue_journal_generation", "Current fsync-backed pre-AcquireJobs queue journal generation.", float64(snapshot.Queue.Generation))
 	gauge(&output, "gha_fleet_queue_intents_stored", "Queue intents stored in the current journal generation.", float64(snapshot.Queue.Stored))
 	gauge(&output, "gha_fleet_queue_intents_active", "Unexpired queue intents owned by central admission.", float64(snapshot.Queue.Active))
@@ -91,6 +137,13 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	} {
 		metric(&output, "gha_fleet_queue_intents_by_state", map[string]string{"state": string(state)}, float64(snapshot.Queue.ByState[string(state)]))
 	}
+	labeledGaugeHeader(&output, "gha_fleet_queue_intent_oldest_state_age_seconds", "Age since the oldest active queue intent last progressed in its current state.")
+	for _, state := range []queueintent.State{
+		queueintent.StateQueued, queueintent.StateAcquiring, queueintent.StateAcquired,
+		queueintent.StateAssigned, queueintent.StateRunning,
+	} {
+		metric(&output, "gha_fleet_queue_intent_oldest_state_age_seconds", map[string]string{"state": string(state)}, float64(snapshot.Queue.OldestStateAgeSeconds[string(state)]))
+	}
 	labeledGaugeHeader(&output, "gha_fleet_queue_intents_by_priority", "Active central queue intents by bounded priority lane.")
 	for priority := range 4 {
 		metric(&output, "gha_fleet_queue_intents_by_priority", map[string]string{"priority": strconv.Itoa(priority)}, float64(snapshot.Queue.ByPriority[priority]))
@@ -105,18 +158,20 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 		metric(&output, "gha_fleet_queue_intents_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.ByScaleSet[scaleSet]))
 	}
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
-	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without a created or deleting journal lease.", float64(snapshot.Incus.OrphanInstances))
+	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without an admitted, created, deleting or warm journal lease.", float64(snapshot.Incus.OrphanInstances))
 	gauge(&output, "gha_fleet_journal_missing_instances", "Created or deleting journal leases without a visible Incus instance.", float64(snapshot.Incus.MissingInstances))
 
 	gauge(&output, "gha_fleet_diagnostic_bundles", "Private retained worker diagnostic bundle count.", float64(snapshot.Diagnostics.Bundles))
 	gauge(&output, "gha_fleet_diagnostic_bytes", "Private retained worker diagnostic bundle bytes.", float64(snapshot.Diagnostics.Bytes))
 	gauge(&output, "gha_fleet_diagnostic_oldest_age_seconds", "Age of the oldest retained worker diagnostic bundle.", float64(snapshot.Diagnostics.OldestAgeSeconds))
-	gauge(&output, "gha_fleet_diagnostic_export_source_bundles", "Diagnostic bundles observed by the RustFS exporter.", float64(snapshot.DiagnosticExport.SourceBundles))
-	gauge(&output, "gha_fleet_diagnostic_export_exported_bundles", "Diagnostic bundles durably confirmed in RustFS.", float64(snapshot.DiagnosticExport.ExportedBundles))
+	gauge(&output, "gha_fleet_diagnostic_export_source_bundles", "Diagnostic bundles remaining in the local durable export WAL.", float64(snapshot.DiagnosticExport.SourceBundles))
+	gauge(&output, "gha_fleet_diagnostic_export_exported_bundles", "Diagnostic bundles durably confirmed and drained by the latest exporter run.", float64(snapshot.DiagnosticExport.ExportedBundles))
 	gauge(&output, "gha_fleet_diagnostic_export_pending_bundles", "Diagnostic bundles pending durable RustFS confirmation.", float64(snapshot.DiagnosticExport.PendingBundles))
 	gauge(&output, "gha_fleet_diagnostic_export_consecutive_failures", "Consecutive diagnostic exporter failures.", float64(snapshot.DiagnosticExport.ConsecutiveFailures))
-	gauge(&output, "gha_fleet_diagnostic_export_source_bytes", "Diagnostic spool bytes observed by the RustFS exporter.", float64(snapshot.DiagnosticExport.SourceBytes))
-	gauge(&output, "gha_fleet_diagnostic_export_exported_bytes", "Diagnostic bytes durably confirmed in RustFS.", float64(snapshot.DiagnosticExport.ExportedBytes))
+	gauge(&output, "gha_fleet_diagnostic_export_source_bytes", "Diagnostic bytes remaining in the local durable export WAL.", float64(snapshot.DiagnosticExport.SourceBytes))
+	gauge(&output, "gha_fleet_diagnostic_export_exported_bytes", "Diagnostic bytes durably confirmed and drained by the latest exporter run.", float64(snapshot.DiagnosticExport.ExportedBytes))
+	gauge(&output, "gha_fleet_diagnostic_export_scanned_bundles", "Diagnostic bundles scanned in the latest bounded exporter batch.", float64(snapshot.DiagnosticExport.ScannedBundles))
+	gauge(&output, "gha_fleet_diagnostic_export_deleted_bundles", "Remotely confirmed diagnostic bundles safely deleted from the local WAL in the latest run.", float64(snapshot.DiagnosticExport.DeletedBundles))
 	labeledGaugeHeader(&output, "gha_fleet_diagnostic_export_sync_state", "Current bounded reconciliation state between the local diagnostic spool and exporter status.")
 	for _, state := range []string{
 		diagnosticExportSyncUnavailable,
@@ -131,8 +186,12 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_diagnostic_export_local_byte_delta", "Signed local diagnostic bytes minus the exporter source view.", float64(snapshot.DiagnosticExportSync.LocalByteDelta))
 	observedAt, observedErr := snapshot.DiagnosticExport.ObservedTime()
 	lastSuccessAt, lastSuccessErr := snapshot.DiagnosticExport.LastSuccessTime()
+	lastProgressAt, lastProgressErr := snapshot.DiagnosticExport.LastProgressTime()
+	lastFullSyncAt, lastFullSyncErr := snapshot.DiagnosticExport.LastFullSyncTime()
 	gauge(&output, "gha_fleet_diagnostic_export_observed_age_seconds", "Age of the latest diagnostic exporter observation, or -1 when unavailable.", diagnosticTimestampAge(observedAt, observedErr, now))
 	gauge(&output, "gha_fleet_diagnostic_export_last_success_age_seconds", "Age of the latest successful diagnostic export, or -1 when unavailable.", diagnosticTimestampAge(lastSuccessAt, lastSuccessErr, now))
+	gauge(&output, "gha_fleet_diagnostic_export_last_progress_age_seconds", "Age of the latest confirmed local-WAL drain progress, or -1 when unavailable.", diagnosticTimestampAge(lastProgressAt, lastProgressErr, now))
+	gauge(&output, "gha_fleet_diagnostic_export_last_full_sync_age_seconds", "Age of the latest zero-backlog full synchronization, or -1 when unavailable.", diagnosticTimestampAge(lastFullSyncAt, lastFullSyncErr, now))
 
 	labeledGaugeHeader(&output, "gha_fleet_service_up", "Whether a required fleet systemd unit is active.")
 	services := append([]ServiceStatus(nil), snapshot.Services...)
@@ -160,6 +219,10 @@ func counter(output *strings.Builder, name, help string, value float64) {
 
 func labeledGaugeHeader(output *strings.Builder, name, help string) {
 	fmt.Fprintf(output, "# HELP %s %s\n# TYPE %s gauge\n", name, help, name)
+}
+
+func labeledCounterHeader(output *strings.Builder, name, help string) {
+	fmt.Fprintf(output, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
 }
 
 func metric(output *strings.Builder, name string, labels map[string]string, value float64) {

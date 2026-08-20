@@ -18,7 +18,7 @@ const (
 	// that: a worker can be placed on any member, so the endpoint it reaches
 	// has to be one address the whole fleet shares, and the default below is
 	// only the single-host case.
-	ExpectedListenAddress = "192.0.2.1:9443"
+	ExpectedListenAddress = "198.51.100.1:9443"
 	ExpectedUpstreamURL   = "http://127.0.0.1:9997"
 	MaxRequestBodyBytes   = int64(1 << 20)
 )

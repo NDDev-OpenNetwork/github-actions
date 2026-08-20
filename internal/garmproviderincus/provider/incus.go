@@ -38,6 +38,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incuspolicy"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/provideradmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetryattrs"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/tenant"
 	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
 	execution "github.com/cloudbase/garm-provider-common/execution/v0.1.0"
@@ -45,6 +46,10 @@ import (
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cloudbase/garm-provider-common/cloudconfig"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
@@ -59,8 +64,8 @@ var Commit = "unknown"
 const IncusSDKVersion = "v7.3.0"
 
 const (
-	expectedCallbackURL = "https://192.0.2.1:9443/api/v1/callbacks"
-	expectedMetadataURL = "https://192.0.2.1:9443/api/v1/metadata"
+	expectedCallbackURL = "https://198.51.100.1:9443/api/v1/callbacks"
+	expectedMetadataURL = "https://198.51.100.1:9443/api/v1/metadata"
 	expectedRunnerGroup = "Default"
 )
 
@@ -79,6 +84,7 @@ const (
 	createOperationTimeout = 2 * time.Minute
 	deleteOperationTimeout = time.Minute
 	stateOperationTimeout  = time.Minute
+	defaultPlacementLock   = "/var/lib/gha-fleet/placement.lock"
 )
 
 const (
@@ -168,8 +174,9 @@ func NewIncusProvider(configFile, controllerID string) (*Incus, error) {
 	}
 
 	provider := &Incus{
-		cfg:          cfg,
-		controllerID: controllerID,
+		cfg:               cfg,
+		controllerID:      controllerID,
+		placementLockPath: defaultPlacementLock,
 		imageManager: &image{
 			remotes: cfg.ImageRemotes,
 		},
@@ -200,12 +207,27 @@ type CompatibilityProbe struct {
 }
 
 func (l *Incus) workerImagePolicy(flavor string) (config.WorkerImage, error) {
-	if _, exists := l.platform.Pool(flavor); !exists {
+	pool, exists := l.platform.Pool(flavor)
+	if !exists {
 		return config.WorkerImage{}, runnerErrors.NewBadRequestError("pool policy %q does not exist", flavor)
 	}
 	image, exists := l.cfg.WorkerImageForFlavor(flavor)
 	if !exists {
 		return config.WorkerImage{}, runnerErrors.NewBadRequestError("pool %q has no pinned worker image", flavor)
+	}
+	backend, exists := l.platform.Backend(pool.Backend)
+	if !exists {
+		return config.WorkerImage{}, runnerErrors.NewBadRequestError("pool %q backend %q does not exist", flavor, pool.Backend)
+	}
+	wantedType := config.IncusImageVirtualMachine
+	if backend.Implementation == "incus-container" {
+		wantedType = config.IncusImageContainer
+	}
+	if image.InstanceType != wantedType {
+		return config.WorkerImage{}, runnerErrors.NewUnprocessableError(
+			"pool %q backend %q requires image type %q, configured %q",
+			flavor, backend.Implementation, wantedType, image.InstanceType,
+		)
 	}
 	return image, nil
 }
@@ -288,7 +310,7 @@ func (l *Incus) Probe(ctx context.Context, profile string) (CompatibilityProbe, 
 	}
 	image, err := l.imageManager.getLocalImageByAlias(
 		imagePolicy.Alias,
-		l.cfg.GetInstanceType(),
+		imagePolicy.InstanceType,
 		configToIncusArchMap[commonParams.Amd64],
 		cli,
 	)
@@ -384,7 +406,7 @@ func repositoryWithinTenant(selected tenant.Tenant, repositoryURL string) bool {
 // the wrong one for deciding admission: a host that declares no pool tenant is
 // not declaring every pool for nddev, it is declaring nothing. Reading the
 // default as a declaration refused every other tenant on every deployed host --
-// observed on gha-runner-2, which serves example-guild/ai_stp through its
+// observed on gha-runner-2, which serves example-guild/example-project through its
 // own scale set on this same pool and had every create refused.
 func (l *Incus) poolTenant(flavor string) (tenant.Tenant, bool, error) {
 	pool, exists := l.platform.Pool(flavor)
@@ -465,6 +487,14 @@ func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapPa
 	if err := l.validateManagedSecurity(instance); err != nil {
 		return err
 	}
+	if !l.cfg.AllowsProviderIdentity(
+		instance.ExpandedConfig[providerVersionKey], instance.ExpandedConfig[providerCommitKey], Version, Commit,
+	) {
+		return runnerErrors.NewUnprocessableError(
+			"existing instance %q has unsupported provider identity %q@%q, current is %q@%q",
+			instance.Name, instance.ExpandedConfig[providerVersionKey], instance.ExpandedConfig[providerCommitKey], Version, Commit,
+		)
+	}
 	pool, exists := l.platform.Pool(bootstrapParams.Flavor)
 	if !exists {
 		return runnerErrors.NewBadRequestError("pool policy %q does not exist", bootstrapParams.Flavor)
@@ -485,8 +515,6 @@ func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapPa
 		{poolIDKey, bootstrapParams.PoolID},
 		{imageAliasKey, imagePolicy.Alias},
 		{imageFingerprintKey, imagePolicy.Fingerprint},
-		{providerVersionKey, Version},
-		{providerCommitKey, Commit},
 		{flavorKey, bootstrapParams.Flavor},
 		{lifecycleKey, "ephemeral-one-job"},
 		{trustKey, pool.Trust},
@@ -526,25 +554,22 @@ func (l *Incus) validateWarmInstance(instance *api.InstanceFull, bootstrapParams
 }
 
 func (l *Incus) validateManagedSecurity(instance *api.InstanceFull) error {
-	if instance == nil || instance.Type != string(api.InstanceTypeVM) {
-		return runnerErrors.NewUnprocessableError("managed instance must be a virtual machine")
+	if instance == nil {
+		return runnerErrors.NewUnprocessableError("managed instance is missing")
 	}
 	flavor := instance.ExpandedConfig[flavorKey]
 	imagePolicy, err := l.workerImagePolicy(flavor)
 	if err != nil {
 		return runnerErrors.NewUnprocessableError("managed instance %q image policy: %s", instance.Name, err)
 	}
-	checks := []struct {
+	wantedType, checks := managedSecurityContract(imagePolicy)
+	if instance.Type != wantedType {
+		return runnerErrors.NewUnprocessableError("managed instance %q has type %q, expected %q", instance.Name, instance.Type, wantedType)
+	}
+	checks = append(checks, struct {
 		key      string
 		expected string
-	}{
-		{imageAliasKey, imagePolicy.Alias},
-		{imageFingerprintKey, imagePolicy.Fingerprint},
-		{lifecycleKey, "ephemeral-one-job"},
-		{"security.secureboot", "true"},
-		{"security.nesting", "false"},
-		{"raw.qemu", incuspolicy.DisableNestedVirtualizationRawQEMU},
-	}
+	}{lifecycleKey, "ephemeral-one-job"})
 	for _, check := range checks {
 		if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
 			return runnerErrors.NewUnprocessableError(
@@ -557,6 +582,37 @@ func (l *Incus) validateManagedSecurity(instance *api.InstanceFull) error {
 		}
 	}
 	return nil
+}
+
+func managedSecurityContract(image config.WorkerImage) (string, []struct {
+	key      string
+	expected string
+}) {
+	checks := []struct {
+		key      string
+		expected string
+	}{
+		{imageAliasKey, image.Alias},
+		{imageFingerprintKey, image.Fingerprint},
+	}
+	if image.InstanceType == config.IncusImageContainer {
+		nesting := "false"
+		if image.Variant == "integration" {
+			nesting = "true"
+		}
+		return string(api.InstanceTypeContainer), append(checks,
+			struct{ key, expected string }{"security.nesting", nesting},
+			struct{ key, expected string }{"security.privileged", "false"},
+			struct{ key, expected string }{"security.syscalls.intercept.mknod", "false"},
+			struct{ key, expected string }{"security.syscalls.intercept.setxattr", "false"},
+			struct{ key, expected string }{"raw.lxc", ""},
+		)
+	}
+	return string(api.InstanceTypeVM), append(checks,
+		struct{ key, expected string }{"security.nesting", "false"},
+		struct{ key, expected string }{"security.secureboot", "true"},
+		struct{ key, expected string }{"raw.qemu", incuspolicy.DisableNestedVirtualizationRawQEMU},
+	)
 }
 
 type InstanceServerInterface interface {
@@ -599,6 +655,9 @@ type Incus struct {
 	// cacheDelivery reads one trust-scoped identity only after a disposable VM
 	// is bound to a job; unregistered warm capacity never receives it.
 	cacheDelivery cacheDeliveryLoader
+	// placementLockPath serializes only the Incus placement request across
+	// short-lived provider processes. Guest boot remains fully parallel.
+	placementLockPath string
 
 	mux sync.Mutex
 }
@@ -706,7 +765,7 @@ func (l *Incus) getCreateInstanceArgs(ctx context.Context, bootstrapParams commo
 		return api.InstancesPost{}, errors.Wrap(err, "fetching archictecture")
 	}
 
-	instanceType := l.cfg.GetInstanceType()
+	instanceType := imagePolicy.InstanceType
 	imageDetails, err := l.imageManager.getLocalImageByAlias(bootstrapParams.Image, instanceType, arch, l.cli)
 	if err != nil {
 		return api.InstancesPost{}, errors.Wrap(err, "getting local image")
@@ -761,6 +820,14 @@ func (l *Incus) getCreateInstanceArgs(ctx context.Context, bootstrapParams commo
 		for key, value := range incuspolicy.VMInstanceConfig() {
 			configMap[key] = value
 		}
+	} else {
+		configMap["security.privileged"] = "false"
+		configMap["security.nesting"] = "false"
+		if pool.Capabilities.Docker {
+			configMap["security.nesting"] = "true"
+		}
+		configMap["security.syscalls.intercept.mknod"] = "false"
+		configMap["security.syscalls.intercept.setxattr"] = "false"
 	}
 
 	args := api.InstancesPost{
@@ -1094,8 +1161,23 @@ func (l *Incus) launchInstance(ctx context.Context, createArgs api.InstancesPost
 	if err != nil {
 		return errors.Wrap(err, "fetching client")
 	}
-	// Get Incus to create the instance (background operation)
+	var placement *placementLock
+	if l.placementLockPath != "" {
+		placement, err = acquirePlacementLock(ctx, l.placementLockPath)
+		if err != nil {
+			return errors.Wrap(err, "serializing Incus placement request")
+		}
+	}
+	// Get Incus to create the instance (background operation). Release the
+	// placement lock as soon as Incus has durably selected a member; waiting for
+	// boot here would serialize the expensive part of every cold start.
 	op, err := cli.CreateInstance(createArgs)
+	if placement != nil {
+		unlockErr := placement.Close()
+		if err == nil && unlockErr != nil {
+			return errors.Wrap(unlockErr, "releasing Incus placement request")
+		}
+	}
 	if err != nil {
 		return errors.Wrap(err, "creating instance")
 	}
@@ -1130,8 +1212,12 @@ func (l *Incus) launchInstance(ctx context.Context, createArgs api.InstancesPost
 }
 
 // CreateInstance creates a new compute instance in the provider.
-func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams.BootstrapInstance) (commonParams.ProviderInstance, error) {
-	var err error
+func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams.BootstrapInstance) (result commonParams.ProviderInstance, err error) {
+	ctx, span := otel.Tracer("nddev.drakkars.provider").Start(ctx, "provider.create_instance", trace.WithAttributes(
+		attribute.String(telemetryattrs.RunnerName, bootstrapParams.Name),
+		attribute.String(telemetryattrs.RunnerPool, bootstrapParams.Flavor),
+	))
+	defer finishProviderSpan(span, &err)
 	bootstrapParams, err = l.narrowBootstrapRepository(ctx, bootstrapParams)
 	if err != nil {
 		return commonParams.ProviderInstance{}, err
@@ -1187,6 +1273,7 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	if err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "claiming warm instance")
 	}
+	span.SetAttributes(attribute.Bool(telemetryattrs.RunnerWarmClaimed, claim.Found))
 	if claim.Found {
 		return l.activateWarmInstance(ctx, bootstrapParams, claim, extraSpecs.EncodedJITConfig)
 	}
@@ -1199,6 +1286,10 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	if err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "evaluating provider admission")
 	}
+	span.SetAttributes(
+		attribute.String(telemetryattrs.AdmissionReason, string(admissionResult.Decision.Reason)),
+		attribute.Int(telemetryattrs.AdmissionPreemptedWorkers, len(admissionResult.PreemptedWarmWorkers)),
+	)
 	if !admissionResult.Decision.Admitted && len(admissionResult.PreemptedWarmWorkers) == 0 {
 		return commonParams.ProviderInstance{}, runnerErrors.NewNoPoolsAvailableError(
 			"provider admission rejected pool %q: %s",
@@ -1233,9 +1324,11 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 		}
 	}
 
+	span.AddEvent("incus.launch_started")
 	if err := l.launchInstance(ctx, args); err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "creating instance")
 	}
+	span.AddEvent("incus.launch_completed")
 	if err := l.injectColdCacheAssignment(ctx, args.Name, bootstrapParams); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		cleanupErr := l.DeleteInstance(cleanupContext, args.Name)
@@ -1250,8 +1343,20 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	if err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching instance")
 	}
+	span.AddEvent("instance.ready")
 
 	return ret, nil
+}
+
+func finishProviderSpan(span trace.Span, err *error) {
+	if err != nil && *err != nil {
+		span.SetStatus(codes.Error, "provider operation failed")
+		span.SetAttributes(attribute.String(telemetryattrs.OperationOutcome, telemetryattrs.OutcomeError))
+	} else {
+		span.SetStatus(codes.Ok, "")
+		span.SetAttributes(attribute.String(telemetryattrs.OperationOutcome, telemetryattrs.OutcomeSuccess))
+	}
+	span.End()
 }
 
 // GetInstance will return details about one instance.
@@ -1312,7 +1417,11 @@ func (l *Incus) projectGARMInstanceIdentity(
 }
 
 // Delete instance will delete the instance in a provider.
-func (l *Incus) DeleteInstance(ctx context.Context, instance string) error {
+func (l *Incus) DeleteInstance(ctx context.Context, instance string) (err error) {
+	ctx, span := otel.Tracer("nddev.drakkars.provider").Start(ctx, "provider.delete_instance", trace.WithAttributes(
+		attribute.String(telemetryattrs.RunnerName, instance),
+	))
+	defer finishProviderSpan(span, &err)
 	if l.admission == nil {
 		return fmt.Errorf("admission controller is not configured")
 	}
@@ -1333,6 +1442,7 @@ func (l *Incus) DeleteInstance(ctx context.Context, instance string) error {
 		return errors.Wrap(err, "authorizing instance deletion")
 	}
 	l.captureDiagnosticsBeforeTeardown(ctx, managedInstance)
+	span.AddEvent("diagnostics.capture_attempted")
 	if err := l.admission.MarkDeleting(ctx, instance); err != nil {
 		return errors.Wrap(err, "recording deleting instance")
 	}
@@ -1388,9 +1498,17 @@ func (l *Incus) DeleteInstance(ctx context.Context, instance string) error {
 		}
 		return errors.Wrap(err, "waiting for instance deletion")
 	}
-	if err := l.admission.Release(ctx, instance); err != nil {
-		return errors.Wrap(err, "releasing instance admission")
+	// A completed cluster delete operation can precede convergence of the
+	// global instance inventory. Releasing the durable lease here made a
+	// briefly visible tombstone (with no ExpandedConfig) look unowned to a
+	// concurrent create. Reconcile against the same inventory used by
+	// admission instead: an absent instance releases the lease immediately,
+	// while a visible tombstone retains its deleting lease until a subsequent
+	// reconciliation observes absence.
+	if err := l.admission.Reconcile(ctx, cli); err != nil {
+		return errors.Wrap(err, "reconciling deleted instance visibility")
 	}
+	span.AddEvent("admission.delete_visibility_reconciled")
 	return nil
 }
 

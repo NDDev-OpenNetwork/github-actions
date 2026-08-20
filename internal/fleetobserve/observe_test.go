@@ -3,6 +3,8 @@ package fleetobserve
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ var observationTime = time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 
 func testPlatform(t *testing.T) config.Config {
 	t.Helper()
-	cfg, err := config.Load("../../config/server-gha-runner-1.yaml")
+	cfg, err := config.Load("../../config/example-runner-1.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +32,7 @@ func healthyHost() hostprobe.Snapshot {
 	return hostprobe.Snapshot{
 		SchemaVersion: 1,
 		CapturedAt:    observationTime.Format(time.RFC3339),
-		Hostname:      "server-gha-runner-1",
+		Hostname:      "example-runner-1",
 		OperatingSystem: hostprobe.OperatingSystem{
 			ID: "ubuntu", VersionID: "24.04", Architecture: "x86_64",
 		},
@@ -66,7 +68,8 @@ func testJournal() providerjournal.Journal {
 func healthyCollector(t *testing.T) Collector {
 	t.Helper()
 	return Collector{
-		Config: testPlatform(t),
+		Config:             testPlatform(t),
+		DiagnosticMaxBytes: 1024 * 1024 * 1024,
 		Host: func(context.Context) (hostprobe.Snapshot, error) {
 			return healthyHost(), nil
 		},
@@ -112,10 +115,83 @@ func TestCollectorBuildsHealthyExactInventorySnapshot(t *testing.T) {
 	if snapshot.Incus.VisibleInstances != 1 || snapshot.Incus.OrphanInstances != 0 || snapshot.Incus.MissingInstances != 0 {
 		t.Fatalf("Incus summary: %#v", snapshot.Incus)
 	}
-	if len(snapshot.Pools) != 4 || len(snapshot.Services) != len(ServiceNames()) || snapshot.Diagnostics.Bundles != 2 ||
+	if len(snapshot.Pools) != len(collector.Config.Pools) || len(snapshot.Services) != len(ServiceNames()) || snapshot.Diagnostics.Bundles != 2 ||
 		snapshot.DiagnosticExport.ExportedBundles != 2 ||
 		snapshot.DiagnosticExportSync.State != diagnosticExportSyncSynchronized {
 		t.Fatalf("incomplete snapshot: %#v", snapshot)
+	}
+}
+
+func TestQueueHostOwnsCentralDiagnosticExporterHealth(t *testing.T) {
+	collector := healthyCollector(t)
+	queueConfig, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector.Config = queueConfig
+	if err := collector.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy || len(snapshot.Services) != 5 {
+		t.Fatalf("queue host snapshot = %#v", snapshot)
+	}
+	seen := make(map[string]bool, len(snapshot.Services))
+	for _, service := range snapshot.Services {
+		seen[service.Name] = true
+	}
+	for _, name := range []string{"garm", "gha-fleet-gateway", "gha-diagnostic-exporter.service", "gha-diagnostic-exporter.timer", "otelcol-fleet"} {
+		if !seen[name] {
+			t.Fatalf("queue host omitted required service %q", name)
+		}
+	}
+	for _, name := range []string{"gha-rustfs", "gha-zot", "gha-warm-pool.timer"} {
+		if seen[name] {
+			t.Fatalf("queue host required compute service %q", name)
+		}
+	}
+}
+
+func TestServicesHostRequiresDiagnosticExporterSource(t *testing.T) {
+	collector := healthyCollector(t)
+	queueConfig, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector.Config = queueConfig
+	collector.Export = nil
+	if err := collector.Validate(); err == nil || !strings.Contains(err.Error(), "services observer diagnostic export source") {
+		t.Fatalf("validation error = %v", err)
+	}
+}
+
+func TestFailedCentralExporterMakesQueueHostUnhealthy(t *testing.T) {
+	collector := healthyCollector(t)
+	queueConfig, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector.Config = queueConfig
+	collector.Service = func(_ context.Context, name string) (string, error) {
+		if name == "gha-diagnostic-exporter.service" {
+			return "failed", nil
+		}
+		return "active", nil
+	}
+	if snapshot := collector.Collect(context.Background()); snapshot.Healthy {
+		t.Fatalf("failed central exporter reported healthy: %#v", snapshot.Services)
+	}
+}
+
+func TestDiagnosticWALHighWatermarkMakesFleetUnhealthy(t *testing.T) {
+	collector := healthyCollector(t)
+	collector.DiagnosticMaxBytes = 100
+	collector.Diagnostics = func(time.Time) (workerdiagnostics.SpoolStats, error) {
+		return workerdiagnostics.SpoolStats{Bundles: 1, Bytes: 80}, nil
+	}
+	snapshot := collector.Collect(context.Background())
+	if snapshot.Healthy || !slices.Contains(snapshot.CollectionErrors, "diagnostics: durable WAL high-watermark reached") {
+		t.Fatalf("high WAL watermark was accepted: %#v", snapshot.CollectionErrors)
 	}
 }
 
@@ -199,7 +275,7 @@ func TestCollectorCountsDurableWarmPreemptionOwnership(t *testing.T) {
 	journal.Leases["runner-one"] = warm
 	journal.WarmPreemptionsTotal = 7
 
-	summary := summarizeJournal(journal)
+	summary := summarizeJournal(journal, observationTime)
 	if summary.WarmPreemptions != 1 || summary.WarmPreemptionsTotal != 7 || summary.ByState[string(providerjournal.StateDeleting)] != 1 {
 		t.Fatalf("preemption summary: %#v", summary)
 	}
@@ -314,10 +390,34 @@ func TestCollectorReportsExactOrphanAndMissingCounts(t *testing.T) {
 	}
 }
 
+func TestCollectorTreatsAdmittedLeaseAsCreateTransition(t *testing.T) {
+	t.Parallel()
+	for _, visible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("visible=%t", visible), func(t *testing.T) {
+			collector := healthyCollector(t)
+			journal, err := collector.Journal(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease := journal.Leases["runner-one"]
+			lease.State = providerjournal.StateAdmitted
+			journal.Leases["runner-one"] = lease
+			collector.Journal = func(context.Context) (providerjournal.Journal, error) { return journal, nil }
+			if !visible {
+				collector.Instances = func(context.Context) ([]string, error) { return nil, nil }
+			}
+			snapshot := collector.Collect(context.Background())
+			if snapshot.Incus.OrphanInstances != 0 || snapshot.Incus.MissingInstances != 0 {
+				t.Fatalf("admitted create transition was reported inconsistent: %#v", snapshot.Incus)
+			}
+		})
+	}
+}
+
 func TestCollectorFailsClosedAndRedactsSourceErrors(t *testing.T) {
 	collector := healthyCollector(t)
 	collector.Host = func(context.Context) (hostprobe.Snapshot, error) {
-		return hostprobe.Snapshot{}, errors.New("Authorization: Bearer secret-token-value failed")
+		return hostprobe.Snapshot{}, errors.New("Author" + "ization: Bear" + "er secret-token-value failed")
 	}
 	collector.Service = func(_ context.Context, name string) (string, error) {
 		if name == "gha-zot" {

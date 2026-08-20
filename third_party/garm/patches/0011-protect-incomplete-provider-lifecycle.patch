@@ -1,0 +1,86 @@
+diff --git a/workers/scaleset/autoscale_wake_test.go b/workers/scaleset/autoscale_wake_test.go
+index dcd7249..607f6f8 100644
+--- a/workers/scaleset/autoscale_wake_test.go
++++ b/workers/scaleset/autoscale_wake_test.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"testing"
+ 
++	commonParams "github.com/cloudbase/garm-provider-common/params"
+ 	dbCommon "github.com/cloudbase/garm/database/common"
+ 	"github.com/cloudbase/garm/params"
+ )
+@@ -18,6 +19,29 @@ func TestSignalAutoScaleCoalesces(t *testing.T) {
+ 	}
+ }
+ 
++func TestProviderRemovalProtectsIncompleteLifecycleStates(t *testing.T) {
++	for _, status := range []commonParams.InstanceStatus{
++		commonParams.InstancePendingCreate,
++		commonParams.InstanceCreating,
++		commonParams.InstancePendingDelete,
++		commonParams.InstancePendingForceDelete,
++		commonParams.InstanceDeleting,
++		commonParams.InstanceDeleted,
++	} {
++		if !providerRemovalProtected(status) {
++			t.Fatalf("providerRemovalProtected(%q) = false", status)
++		}
++	}
++	for _, status := range []commonParams.InstanceStatus{
++		commonParams.InstanceRunning,
++		commonParams.InstanceError,
++	} {
++		if providerRemovalProtected(status) {
++			t.Fatalf("providerRemovalProtected(%q) = true", status)
++		}
++	}
++}
++
+ func TestScaleSetUpdateSignalsAutoScale(t *testing.T) {
+ 	w := &Worker{
+ 		ctx:           context.Background(),
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 099607f..1abb467 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -397,9 +397,7 @@ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference)
+ 		if time.Since(runner.CreatedAt).Minutes() < float64(w.scaleSet.RunnerTimeout()) {
+ 			continue
+ 		}
+-		switch runner.Status {
+-		case commonParams.InstancePendingDelete, commonParams.InstancePendingForceDelete,
+-			commonParams.InstanceDeleting, commonParams.InstanceDeleted:
++		if providerRemovalProtected(runner.Status) {
+ 			continue
+ 		}
+ 
+@@ -474,9 +472,7 @@ func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error
+ 		// in which we create a runner in the DB and one does not exist in github.
+ 		// We can safely assume that if the runner is not in github anymore, it can
+ 		// be removed from the provider and the DB.
+-		switch runner.Status {
+-		case commonParams.InstancePendingDelete, commonParams.InstancePendingForceDelete,
+-			commonParams.InstanceDeleting, commonParams.InstanceDeleted:
++		if providerRemovalProtected(runner.Status) {
+ 			continue
+ 		}
+ 
+@@ -962,6 +958,17 @@ func scaleDownProtected(status params.RunnerStatus) bool {
+ 	}
+ }
+ 
++func providerRemovalProtected(status commonParams.InstanceStatus) bool {
++	switch status {
++	case commonParams.InstancePendingCreate, commonParams.InstanceCreating,
++		commonParams.InstancePendingDelete, commonParams.InstancePendingForceDelete,
++		commonParams.InstanceDeleting, commonParams.InstanceDeleted:
++		return true
++	default:
++		return false
++	}
++}
++
+ func (w *Worker) targetRunners() int {
+ 	var desiredRunners uint
+ 	if w.scaleSet.DesiredRunnerCount > 0 {

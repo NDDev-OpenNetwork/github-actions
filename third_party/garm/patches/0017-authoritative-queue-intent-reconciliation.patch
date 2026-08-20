@@ -1,0 +1,61 @@
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 37adb4d..ebbebb0 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -46,8 +46,11 @@ import (
+ 	ghClient "github.com/cloudbase/garm/util/github"
+ 	"github.com/cloudbase/garm/util/github/scalesets"
+ 	garmX509 "github.com/cloudbase/garm/util/x509"
++	scaleSetWorker "github.com/cloudbase/garm/workers/scaleset"
+ )
+ 
++var nddevRemoveAuthoritativeQueueIntent = scaleSetWorker.NDDevRemoveQueueIntent
++
+ var (
+ 	poolIDLabelprefix     = "runner-pool-id"
+ 	controllerLabelPrefix = "runner-controller-id"
+@@ -2107,6 +2110,10 @@ func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
+ }
+ 
+ func (r *basePoolManager) deleteStaleScaleSetJob(job params.Job, reason string) bool {
++	if _, err := nddevRemoveAuthoritativeQueueIntent(r.ctx, job.ScaleSetJobID); err != nil {
++		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to release authoritative stale queue intent", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
+ 	if err := r.store.DeleteScaleSetJob(r.ctx, job.ScaleSetJobID); err != nil && !errors.Is(err, runnerErrors.ErrNotFound) {
+ 		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to delete stale scale set job", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
+index 68220e4..e341e75 100644
+--- a/runner/pool/pool_test.go
++++ b/runner/pool/pool_test.go
+@@ -58,6 +58,9 @@ type PoolStressTestSuite struct {
+ }
+ 
+ func (s *PoolStressTestSuite) SetupTest() {
++	originalQueueReconciler := nddevRemoveAuthoritativeQueueIntent
++	nddevRemoveAuthoritativeQueueIntent = func(context.Context, string) (bool, error) { return false, nil }
++	s.T().Cleanup(func() { nddevRemoveAuthoritativeQueueIntent = originalQueueReconciler })
+ 	dbCfg := garmTesting.GetTestSqliteDBConfig(s.T())
+ 	db, err := database.NewDatabase(context.Background(), dbCfg)
+ 	s.Require().NoError(err)
+@@ -792,6 +795,11 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
+ }
+ 
+ func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
++	reconciledJobID := ""
++	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
++		reconciledJobID = jobID
++		return true, nil
++	}
+ 	job := params.Job{
+ 		ScaleSetJobID: "scale-job-1", RunID: 4242, Name: "wanted",
+ 		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
+@@ -807,6 +815,7 @@ func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAb
+ 	})).Return(&github.Jobs{}, &github.Response{}, nil).Once()
+ 
+ 	s.True(s.mgr.reconcileStaleScaleSetJob(job))
++	s.Equal(job.ScaleSetJobID, reconciledJobID)
+ 	jobs, err := s.store.ListAllJobs(s.adminCtx)
+ 	s.Require().NoError(err)
+ 	s.Empty(jobs)

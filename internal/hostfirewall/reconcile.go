@@ -3,6 +3,7 @@ package hostfirewall
 import (
 	"context"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 
@@ -119,6 +120,16 @@ func desiredCommands(rules []incusplan.HostFirewallRule) (map[string]struct{}, e
 
 func renderCommand(args []string) string {
 	parts := slices.Clone(args)
+	for index, part := range parts {
+		ip, network, err := net.ParseCIDR(part)
+		if err != nil {
+			continue
+		}
+		ones, bits := network.Mask.Size()
+		if ones == bits {
+			parts[index] = ip.String()
+		}
+	}
 	parts[len(parts)-1] = "'" + parts[len(parts)-1] + "'"
 	return "ufw " + strings.Join(parts, " ")
 }

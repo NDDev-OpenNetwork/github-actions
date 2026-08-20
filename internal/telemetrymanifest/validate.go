@@ -124,7 +124,7 @@ func validateStore(add func(string, string), store Store) {
 	}
 	// A shared bucket would let one tenant's retention policy delete another's
 	// telemetry, which is the whole reason this instance is separate.
-	if store.Bucket == "example-media-telemetry" {
+	if store.Bucket == "myattention-telemetry" {
 		add("store.bucket", "must not reuse another tenant's telemetry bucket")
 	}
 	if store.RetentionDays < 30 || store.RetentionDays > 400 {

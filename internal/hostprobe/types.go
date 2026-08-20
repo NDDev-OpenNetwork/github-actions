@@ -11,6 +11,7 @@ type Snapshot struct {
 	Virtualization  string          `json:"virtualization"`
 	CPU             CPU             `json:"cpu"`
 	Memory          Memory          `json:"memory"`
+	Pressure        Pressure        `json:"pressure"`
 	RootFilesystem  Filesystem      `json:"root_filesystem"`
 	KVM             KVM             `json:"kvm"`
 	Maintenance     Maintenance     `json:"maintenance"`
@@ -38,10 +39,30 @@ type CPU struct {
 }
 
 type Memory struct {
-	TotalMiB     int `json:"total_mib"`
-	AvailableMiB int `json:"available_mib"`
-	SwapTotalMiB int `json:"swap_total_mib"`
-	SwapFreeMiB  int `json:"swap_free_mib"`
+	TotalMiB      int    `json:"total_mib"`
+	AvailableMiB  int    `json:"available_mib"`
+	SwapTotalMiB  int    `json:"swap_total_mib"`
+	SwapFreeMiB   int    `json:"swap_free_mib"`
+	OOMKillsTotal uint64 `json:"oom_kills_total"`
+}
+
+type Pressure struct {
+	Available bool             `json:"available"`
+	CPU       PressureResource `json:"cpu"`
+	Memory    PressureResource `json:"memory"`
+	IO        PressureResource `json:"io"`
+}
+
+type PressureResource struct {
+	Some PressureWindow `json:"some"`
+	Full PressureWindow `json:"full"`
+}
+
+type PressureWindow struct {
+	Avg10       float64 `json:"avg10"`
+	Avg60       float64 `json:"avg60"`
+	Avg300      float64 `json:"avg300"`
+	TotalMicros uint64  `json:"total_micros"`
 }
 
 type Filesystem struct {

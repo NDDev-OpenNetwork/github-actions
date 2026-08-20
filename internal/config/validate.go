@@ -58,7 +58,7 @@ func (c Config) Validate() error {
 	requireEqual(add, "control_plane.provider", c.ControlPlane.Provider, "incus")
 	validateVersion(add, "control_plane.provider_version", c.ControlPlane.ProviderVersion)
 	requireEqual(add, "control_plane.provider_interface", c.ControlPlane.ProviderInterface, "v0.1.0")
-	requireEqual(add, "control_plane.worker_kind", c.ControlPlane.WorkerKind, "virtual-machine")
+	requireEqual(add, "control_plane.worker_kind", c.ControlPlane.WorkerKind, "incus-instance")
 	requireEqual(add, "control_plane.runner", c.ControlPlane.Runner, "actions/runner")
 	validateVersion(add, "control_plane.runner_version", c.ControlPlane.RunnerVersion)
 	requireEqual(add, "control_plane.runner_update_policy", c.ControlPlane.RunnerUpdatePolicy, "image-canary")
@@ -92,12 +92,14 @@ func (c Config) Validate() error {
 	// A retained-workloads host shares its capacity with the legacy listeners
 	// and the retained application stacks, so its reserve must be large enough
 	// to keep them alive under fleet load. A dedicated host protects only the
-	// control plane, measured at 724 MiB, and the operating system.
+	// control plane, measured below 1 GiB, and the operating system. The 2 GiB
+	// emergency swap absorbs a short anonymous-memory spike without turning
+	// swap into scheduled capacity; the ten-percent reserve remains larger.
 	cpuFloor, memoryFloor := 4, 16*1024
 	switch c.HostReserve.Mode {
 	case "retained-workloads":
 	case "dedicated":
-		cpuFloor, memoryFloor = 2, 2*1024
+		cpuFloor, memoryFloor = 2, 1024
 	default:
 		add("host_reserve.mode", "must be retained-workloads or dedicated")
 	}
@@ -109,6 +111,9 @@ func (c Config) Validate() error {
 	}
 	if c.HostReserve.MinimumPercent < 10 || c.HostReserve.MinimumPercent > 50 {
 		add("host_reserve.minimum_percent", "must be between 10 and 50")
+	}
+	if c.HostReserve.MaximumFleetCPUPercent < 80 || c.HostReserve.MaximumFleetCPUPercent > 98 {
+		add("host_reserve.maximum_fleet_cpu_percent", "must be between 80 and 98 so the hard host-wide CPU ceiling leaves operating-system headroom")
 	}
 	if c.HostReserve.MinimumFreeDiskPercent < 20 || c.HostReserve.MinimumFreeDiskPercent > 80 {
 		add("host_reserve.minimum_free_disk_percent", "must be between 20 and 80")
@@ -174,6 +179,9 @@ func (c Config) Validate() error {
 		} else if pool.Capabilities.Docker && !backend.Capabilities.Docker {
 			add(prefix+".capabilities.docker", "requires Docker support from the selected execution backend")
 		}
+		if exists && backend.Implementation == "incus-container" && pool.Warm.MaxReady != 0 {
+			add(prefix+".warm.max_ready", "container backend warm capacity requires a separate completed soak")
+		}
 		if _, exists := seenNames[pool.Name]; exists {
 			add(prefix+".name", "must be unique")
 		}
@@ -223,8 +231,8 @@ func validateBackend(add func(string, string), prefix string, backend Backend, h
 	if backend.Architecture != "amd64" {
 		add(prefix+".architecture", "must be amd64 until another architecture backend is approved")
 	}
-	if backend.Implementation != "incus-vm" {
-		add(prefix+".implementation", "must be incus-vm for the approved Linux backend")
+	if backend.Implementation != "incus-vm" && backend.Implementation != "incus-container" {
+		add(prefix+".implementation", "must be incus-vm or incus-container for an approved Linux backend")
 	}
 	if !namePattern.MatchString(backend.FailureDomain) {
 		add(prefix+".failure_domain", "must be a lowercase DNS-style name")
@@ -235,14 +243,14 @@ func validateBackend(add func(string, string), prefix string, backend Backend, h
 
 func validateIncus(add func(string, string), incus Incus) {
 	validateVersion(add, "incus.version", incus.Version)
-	if incus.Version != "v6.0.0" {
-		add("incus.version", "must remain pinned to the Ubuntu 24.04 Incus 6.0 LTS baseline")
+	if incus.Version != "v6.0.6" {
+		add("incus.version", "must remain pinned to the fleet Incus 6.0.6 LTS baseline")
 	}
 	address, err := netip.ParseAddrPort(incus.APIAddress)
 	if err != nil || !address.Addr().IsLoopback() || address.Port() != 8443 {
 		add("incus.api_address", "must be the loopback TLS endpoint 127.0.0.1:8443")
 	}
-	validateCluster(add, incus.Cluster, incus.PrivateNetwork)
+	validateCluster(add, incus.Cluster)
 	for path, value := range map[string]string{
 		"incus.project":      incus.Project,
 		"incus.storage_pool": incus.StoragePool,
@@ -263,30 +271,51 @@ func validateIncus(add func(string, string), incus Incus) {
 		add("incus.project_disk_limit_gib", "must be at least 40 GiB and smaller than the storage pool")
 	}
 	prefix, err := netip.ParsePrefix(incus.NetworkCIDR)
-	if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 24 || prefix.Addr().String() != "192.0.2.1" {
-		add("incus.network_cidr", "must be the isolated 192.0.2.1/24 pilot bridge")
+	if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 24 || prefix.Addr().As4()[3] != 1 {
+		add("incus.network_cidr", "must be an isolated IPv4 /24 whose declared gateway is .1")
 	}
 	publicAddress, err := netip.ParseAddr(incus.PublicHostAddress)
 	if err != nil || !publicAddress.Is4() || !publicAddress.IsGlobalUnicast() || publicAddress.IsPrivate() {
 		add("incus.public_host_address", "must be the host public IPv4 address")
 	}
+	if incus.Cluster.Enabled {
+		if len(incus.EstatePublicHostAddresses) != incus.Cluster.Members+1 {
+			add("incus.estate_public_host_addresses", "must contain every cluster member plus the queue host")
+		}
+		if !sort.StringsAreSorted(incus.EstatePublicHostAddresses) {
+			add("incus.estate_public_host_addresses", "must be strictly sorted")
+		}
+		seen := make(map[string]struct{}, len(incus.EstatePublicHostAddresses))
+		for index, value := range incus.EstatePublicHostAddresses {
+			address, parseErr := netip.ParseAddr(value)
+			if parseErr != nil || !address.Is4() || !address.IsGlobalUnicast() || address.IsPrivate() {
+				add(fmt.Sprintf("incus.estate_public_host_addresses[%d]", index), "must be a public IPv4 address")
+			}
+			if _, duplicate := seen[value]; duplicate {
+				add("incus.estate_public_host_addresses", "must be unique")
+			}
+			seen[value] = struct{}{}
+		}
+		if _, exists := seen[incus.PublicHostAddress]; !exists {
+			add("incus.estate_public_host_addresses", "must include this host public address")
+		}
+	}
 	// These are fleet-wide bootstrap ceilings, not the real limit. Admission
 	// enforces that against the host it observes, so a configuration that asks
 	// for more than the hardware has is refused at runtime rather than here.
 	//
-	// They were four and two while one eight-core host reserved four CPU units
-	// for its retained tenants, which left exactly four to give away. A
-	// dedicated host reserves two, so six is what remains, and three two-vCPU
-	// workers is what six buys. Raising them does not permit overcommit: the
-	// reserve plus the project still has to fit in the observed cores.
-	if incus.ProjectMaxInstances < 1 || incus.ProjectMaxInstances > 4 {
-		add("incus.project_max_instances", "must be between one and four")
+	// Drakkars exposes the physical eight CPU units and fourteen of sixteen GiB
+	// per member to the shared project. Admission, PSI and placement retain the
+	// live reserve; the project ceiling prevents a configuration typo from
+	// exceeding physical capacity but no longer strands a fixed quarter.
+	if incus.ProjectMaxInstances < 1 || incus.ProjectMaxInstances > 8 {
+		add("incus.project_max_instances", "must be between one and eight")
 	}
-	if incus.ProjectMaxCPUUnits < 1 || incus.ProjectMaxCPUUnits > 6 {
-		add("incus.project_max_cpu_units", "must be between one and six")
+	if incus.ProjectMaxCPUUnits < 1 || incus.ProjectMaxCPUUnits > 10 {
+		add("incus.project_max_cpu_units", "must be between one and ten logical scheduling units")
 	}
-	if incus.ProjectMaxMemoryMiB < 4096 || incus.ProjectMaxMemoryMiB > 12*1024 {
-		add("incus.project_max_memory_mib", "must be between 4096 and 12288 MiB")
+	if incus.ProjectMaxMemoryMiB < 4096 || incus.ProjectMaxMemoryMiB > 14*1024 {
+		add("incus.project_max_memory_mib", "must be between 4096 and 14336 MiB")
 	}
 	validateServicePort(add, "incus.registry_port", incus.RegistryPort)
 	validateServicePort(add, "incus.rustfs_port", incus.RustFSPort)
@@ -405,10 +434,10 @@ func validateEgressAllowlist(add func(string, string), prefix string, pool Pool)
 		}
 		return
 	}
-	// An empty allowlist is legal and means exactly the bounded public egress
-	// every pool receives. That is the honest state of a release pool nobody
-	// has yet given a destination, and requiring one here would only invite an
-	// invented address to satisfy a validator.
+	// An empty allowlist is legal and leaves only the explicitly rendered local
+	// DNS, worker-gateway and read-only cache endpoints. That is the honest state
+	// of a release pool nobody has yet given a public destination; requiring one
+	// here would only invite an invented address to satisfy a validator.
 	if len(pool.Capabilities.EgressAllowlist) == 0 {
 		return
 	}
@@ -512,37 +541,7 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
-// validateCluster keeps a cluster member's endpoint inside the private network
-// the fleet already runs on. A cluster member cannot serve its peers on
-// loopback, so clustering necessarily widens the endpoint -- and that is
-// exactly why the address is checked rather than assumed: the one thing that
-// must never happen is an Incus API reachable from outside the fleet's own
-// subnet, where it would accept a client certificate from anywhere.
-// DefaultFleetPrivateNetwork is the private network an example estate sits on.
-//
-// Which network a fleet actually uses is deployment data, not an engine
-// constant, so a host declares its own in incus.private_network and this is
-// only the fallback. Compiling one estate's subnet into the binary meant a
-// deployment elsewhere could not validate its own cluster without a patched
-// build -- and it is how anonymising this repository once refused every
-// endpoint on the live fleet.
-const DefaultFleetPrivateNetwork = "172.16.0.0/20"
-
-func fleetPrivateNetworkOf(declared string) (netip.Prefix, error) {
-	if declared == "" {
-		declared = DefaultFleetPrivateNetwork
-	}
-	network, err := netip.ParsePrefix(declared)
-	if err != nil {
-		return netip.Prefix{}, err
-	}
-	if !network.Addr().IsPrivate() {
-		return netip.Prefix{}, fmt.Errorf("%s is not a private range", network)
-	}
-	return network, nil
-}
-
-func validateCluster(add func(string, string), cluster Cluster, privateNetwork string) {
+func validateCluster(add func(string, string), cluster Cluster) {
 	if !cluster.Enabled {
 		if cluster.MemberName != "" || cluster.APIAddress != "" || cluster.Members != 0 {
 			add("incus.cluster", "must be empty unless clustering is enabled")
@@ -558,13 +557,8 @@ func validateCluster(add func(string, string), cluster Cluster, privateNetwork s
 		add("incus.cluster.api_address", "must be an address:8443 endpoint")
 	case address.Addr().IsLoopback():
 		add("incus.cluster.api_address", "must not be loopback; a cluster member's peers have to reach it")
-	default:
-		network, networkErr := fleetPrivateNetworkOf(privateNetwork)
-		if networkErr != nil {
-			add("incus.private_network", networkErr.Error())
-		} else if !network.Contains(address.Addr()) {
-			add("incus.cluster.api_address", "must be inside the fleet private network "+network.String())
-		}
+	case !address.Addr().IsPrivate() || !address.Addr().Is4():
+		add("incus.cluster.api_address", "must be a private IPv4 address on port 8443")
 	}
 	// Four hosts is what this fleet has; the bound exists so a typo cannot
 	// multiply the project quota into capacity no set of hosts can serve.
