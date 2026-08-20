@@ -36,7 +36,7 @@ runtime:
   incus_sdk_version: v7.3.0
 
 build:
-  source_commit: 036858e71063827befba699126c964cda0cf59db
+  source_commit: 036858e4c28b5886653d1f70c1359e51a019c084
   binary_sha256: 1a3af37335340ede8ca34bdfddd6a7f43606d82c9070f0647574ee70a9f41c95
   go_version: go1.26.6
   cgo_enabled: false
