@@ -23,8 +23,15 @@ func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
-	if err != nil || target != 0 {
-		t.Fatalf("observed JobAssigned charged capacity: target=%d err=%v", target, err)
+	if err != nil || target != 1 {
+		t.Fatalf("provisional JobAssigned capacity target=%d err=%v", target, err)
+	}
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	target, err = coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 1 {
+		t.Fatalf("provisional capacity was downgraded by journal migration: target=%d err=%v", target, err)
 	}
 	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
 		t.Fatal(err)
@@ -103,7 +110,7 @@ func TestStartupMigratesLegacyAssignedOwnershipAndPhaseTTLs(t *testing.T) {
 	observed := migrated.Intents[queueIntentKey(11, jobs[0].JobID)]
 	reserved := migrated.Intents[queueIntentKey(11, jobs[1].JobID)]
 	acquired := migrated.Intents[queueIntentKey(11, jobs[2].JobID)]
-	if observed.State != queueStateQueued || observed.ExpiresAt.After(now.Add(10*time.Minute)) {
+	if observed.State != queueStateAssigned || observed.ExpiresAt.After(now.Add(2*time.Minute)) {
 		t.Fatalf("legacy observation = %#v", observed)
 	}
 	if reserved.State != queueStateAssigned || reserved.ExpiresAt.After(now.Add(2*time.Minute)) {
@@ -111,6 +118,44 @@ func TestStartupMigratesLegacyAssignedOwnershipAndPhaseTTLs(t *testing.T) {
 	}
 	if acquired.State != queueStateAcquired || acquired.ExpiresAt.After(now.Add(10*time.Minute)) {
 		t.Fatalf("legacy acquisition = %#v", acquired)
+	}
+}
+
+func TestStartupPromotesDurableQueuedIntentWithoutWebhookRedelivery(t *testing.T) {
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(701, "owner", "repository", now.Add(-time.Minute))
+	assigned := job
+	assigned.RunnerRequestID = 0
+	if _, err := coordinator.ObserveLifecycle(
+		scaleSet, testQueueEntityForJob(assigned), []params.ScaleSetJobMessage{assigned}, nil, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := queueIntentKey(11, job.JobID)
+	intent := journal.Intents[key]
+	intent.State = queueStateQueued
+	intent.UpdatedAt = now.Add(-time.Minute)
+	intent.ExpiresAt = now.Add(9 * time.Minute)
+	journal.Intents[key] = intent
+	if err := writeQueueIntentJournal(coordinator.journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := recovered.Intents[key]; got.State != queueStateAssigned ||
+		got.ExpiresAt.After(now.Add(2*time.Minute)) {
+		t.Fatalf("restart recovery did not promote bounded provisional ownership: %#v", got)
 	}
 }
 
@@ -424,8 +469,8 @@ func TestQueueCoordinatorRecordsABatchedAssignedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a batched assigned message was refused: %v", err)
 	}
-	// Both are durable observations before acknowledgement. Neither owns a slot
-	// until JobAvailable supplies a runner request ID.
+	// Both are durable before acknowledgement. The fair scheduler grants one
+	// short provisional slot and leaves the other queued at the global width.
 	if deferred {
 		t.Fatal("a durable assigned batch was retained and would block completion messages")
 	}
@@ -437,7 +482,7 @@ func TestQueueCoordinatorRecordsABatchedAssignedMessage(t *testing.T) {
 	for _, intent := range journal.Intents {
 		states[intent.State]++
 	}
-	if states[queueStateAssigned] != 0 || states[queueStateQueued] != 2 {
+	if states[queueStateAssigned] != 1 || states[queueStateQueued] != 1 {
 		t.Fatalf("batched assigned state = %#v", states)
 	}
 }
@@ -790,7 +835,7 @@ func TestQueueCoordinatorAdmitsLiveAssignedUUIDWithoutRunnerRequestID(t *testing
 	}
 	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
 	intent := journal.Intents[key]
-	if intent.JobID != job.JobID || intent.RunnerRequestID != 0 || intent.State != queueStateQueued {
+	if intent.JobID != job.JobID || intent.RunnerRequestID != 0 || intent.State != queueStateAssigned {
 		t.Fatalf("live assigned intent = %#v", intent)
 	}
 	available := testQueueJob(101, "example-user", "github-actions", now.Add(-time.Second))
@@ -1014,7 +1059,7 @@ func TestRepositoryEntityStillBindsAtAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := journal.Intents[queueIntentKey(22, assigned.JobID)]
-	if intent.Repository != "example-org/example-actions" || !queueIntentRepositoryBound(intent) || intent.State != queueStateQueued {
+	if intent.Repository != "example-org/example-actions" || !queueIntentRepositoryBound(intent) || intent.State != queueStateAssigned {
 		t.Fatalf("repository entity intent = %q, want it bound at assignment", intent.Repository)
 	}
 }
