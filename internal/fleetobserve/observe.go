@@ -450,12 +450,25 @@ func validateDiagnosticExport(
 		(!legacyCounters && !walCounters) || status.SourceBytes < 0 || status.ExportedBytes < 0 {
 		return syncStatus, fmt.Errorf("status counters are inconsistent")
 	}
-	if status.LastErrorCode != "" || status.ConsecutiveFailures != 0 || status.PendingBundles != 0 {
-		return syncStatus, fmt.Errorf("status reports pending or failed exports")
+	if status.LastErrorCode != "" || status.ConsecutiveFailures != 0 {
+		return syncStatus, fmt.Errorf("status reports failed exports")
 	}
 	lastSuccess, err := status.LastSuccessTime()
 	if err != nil || lastSuccess.IsZero() || lastSuccess.After(now.Add(5*time.Second)) {
 		return syncStatus, fmt.Errorf("last successful export timestamp is invalid")
+	}
+	statusAge := now.Sub(observedAt)
+	if statusAge < 0 {
+		statusAge = 0
+	}
+	if status.PendingBundles != 0 {
+		if statusAge >= diagnosticExportSyncGracePeriod {
+			return syncStatus, fmt.Errorf("pending exports exceeded the %s convergence grace", diagnosticExportSyncGracePeriod)
+		}
+		syncStatus.State = diagnosticExportSyncGrace
+		remaining := diagnosticExportSyncGracePeriod - statusAge
+		syncStatus.GraceRemainingSeconds = int64((remaining + time.Second - 1) / time.Second)
+		return syncStatus, nil
 	}
 	if syncStatus.LocalBundleDelta == 0 && syncStatus.LocalByteDelta == 0 {
 		syncStatus.State = diagnosticExportSyncSynchronized
@@ -465,10 +478,6 @@ func validateDiagnosticExport(
 		(syncStatus.LocalBundleDelta < 0) != (syncStatus.LocalByteDelta < 0) ||
 		syncStatus.LocalBundleDelta == 0 || syncStatus.LocalByteDelta == 0 {
 		return syncStatus, fmt.Errorf("status and local spool diverge incoherently")
-	}
-	statusAge := now.Sub(observedAt)
-	if statusAge < 0 {
-		statusAge = 0
 	}
 	if statusAge >= diagnosticExportSyncGracePeriod {
 		return syncStatus, fmt.Errorf("status and local spool exceeded the %s convergence grace", diagnosticExportSyncGracePeriod)

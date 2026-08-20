@@ -358,7 +358,7 @@ func TestCollectorRejectsIncoherentDiagnosticDivergenceImmediately(t *testing.T)
 	}
 }
 
-func TestCollectorRejectsPendingExportDuringConvergenceGrace(t *testing.T) {
+func TestCollectorAllowsPendingExportDuringConvergenceGrace(t *testing.T) {
 	collector := healthyCollector(t)
 	collector.Diagnostics = func(time.Time) (workerdiagnostics.SpoolStats, error) {
 		return workerdiagnostics.SpoolStats{Bundles: 3, Bytes: 5120}, nil
@@ -373,9 +373,30 @@ func TestCollectorRejectsPendingExportDuringConvergenceGrace(t *testing.T) {
 		}, nil
 	}
 	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.DiagnosticExportSync.State != diagnosticExportSyncGrace ||
+		len(snapshot.CollectionErrors) != 0 || snapshot.DiagnosticExportSync.GraceRemainingSeconds != 60 {
+		t.Fatalf("bounded pending exporter state was rejected: %#v", snapshot)
+	}
+}
+
+func TestCollectorRejectsPendingExportAfterConvergenceGrace(t *testing.T) {
+	collector := healthyCollector(t)
+	collector.Diagnostics = func(time.Time) (workerdiagnostics.SpoolStats, error) {
+		return workerdiagnostics.SpoolStats{Bundles: 3, Bytes: 5120}, nil
+	}
+	collector.Export = func() (diagnosticexport.Status, error) {
+		return diagnosticexport.Status{
+			SchemaVersion: 1, DeploymentStage: "canary",
+			ObservedAt:    observationTime.Add(-91 * time.Second).Format(time.RFC3339Nano),
+			LastSuccessAt: observationTime.Add(-91 * time.Second).Format(time.RFC3339Nano),
+			SourceBundles: 2, ExportedBundles: 1, PendingBundles: 1,
+			SourceBytes: 4096, ExportedBytes: 2048,
+		}, nil
+	}
+	snapshot := collector.Collect(context.Background())
 	if snapshot.Healthy || snapshot.DiagnosticExportSync.State != diagnosticExportSyncInvalid ||
-		len(snapshot.CollectionErrors) != 1 || !strings.Contains(snapshot.CollectionErrors[0], "pending or failed") {
-		t.Fatalf("pending exporter state was hidden by convergence grace: %#v", snapshot)
+		len(snapshot.CollectionErrors) != 1 || !strings.Contains(snapshot.CollectionErrors[0], "pending exports exceeded") {
+		t.Fatalf("expired pending exporter state was accepted: %#v", snapshot)
 	}
 }
 
