@@ -18,6 +18,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -179,6 +180,7 @@ type Incus struct {
 	// synthetic examples; the private estate owns the real account identities.
 	AllowedGitHubAccounts     []string `toml:"allowed_github_accounts" json:"allowed-github-accounts"`
 	AllowedGitHubRepositories []string `toml:"allowed_github_repositories" json:"allowed-github-repositories"`
+	WorkerGatewayURL          string   `toml:"worker_gateway_url" json:"worker-gateway-url"`
 
 	// Diagnostics are captured outside a disposable VM immediately before
 	// teardown. These pilot limits are exact so config drift cannot silently
@@ -239,6 +241,16 @@ func (l *Incus) Validate() error {
 	}
 	if err := validateGitHubIdentities("allowed_github_repositories", l.AllowedGitHubRepositories, true); err != nil {
 		return err
+	}
+	gateway, err := url.ParseRequestURI(l.WorkerGatewayURL)
+	if err != nil || gateway.Scheme != "https" || gateway.User != nil || gateway.Path != "" ||
+		gateway.RawQuery != "" || gateway.Fragment != "" {
+		return fmt.Errorf("worker_gateway_url must be a bare HTTPS origin")
+	}
+	host, port, splitErr := net.SplitHostPort(gateway.Host)
+	address := net.ParseIP(host)
+	if splitErr != nil || address == nil || address.IsUnspecified() || address.IsMulticast() || port != "9443" {
+		return fmt.Errorf("worker_gateway_url must use a literal unicast IP and port 9443")
 	}
 	if l.UnixSocket != "" {
 		return fmt.Errorf("unix_socket_path is forbidden; use the pinned loopback TLS endpoint")

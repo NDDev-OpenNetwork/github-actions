@@ -75,6 +75,7 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 				},
 			},
 			AllowedGitHubAccounts: []string{"example-org", "example-guild", "example-media"},
+			WorkerGatewayURL:      "https://198.51.100.1:9443",
 		},
 		cli:          cli,
 		imageManager: &image{},
@@ -645,7 +646,7 @@ func TestValidateBootstrapParamsFailsClosed(t *testing.T) {
 
 func TestWarmAssignmentDoesNotEnableTracingOrEmbedRawToken(t *testing.T) {
 	caBundle := testCABundle(t)
-	rendered := string(renderWarmAssignment("opaque-test-token", caBundle, ""))
+	rendered := string(renderWarmAssignment(expectedMetadataURL, "opaque-test-token", caBundle, ""))
 	require.NotContains(t, rendered, "opaque-test-token")
 	require.NotContains(t, rendered, string(caBundle))
 	require.NotContains(t, rendered, "set -x")
@@ -659,7 +660,7 @@ func TestWarmAssignmentDoesNotEnableTracingOrEmbedRawToken(t *testing.T) {
 
 func TestDirectJITWarmAssignmentUsesOnlyTheOfficialRunnerEntrypoint(t *testing.T) {
 	encoded := testEncodedDirectJIT(t)
-	rendered := string(renderWarmAssignment("unused-metadata-token", testCABundle(t), encoded))
+	rendered := string(renderWarmAssignment(expectedMetadataURL, "unused-metadata-token", testCABundle(t), encoded))
 	require.Contains(t, rendered, `exec "${runner_root}/run.sh" --jitconfig "${JIT_CONFIG}"`)
 	require.Contains(t, rendered, encoded)
 	require.Contains(t, rendered, `"phase":"assignment-script-started"`)
@@ -711,7 +712,7 @@ SCRIPT
 `), 0o700))
 
 	command := exec.Command("/bin/bash")
-	command.Stdin = bytes.NewReader(renderWarmAssignment("opaque-test-token", caBundle, ""))
+	command.Stdin = bytes.NewReader(renderWarmAssignment(expectedMetadataURL, "opaque-test-token", caBundle, ""))
 	command.Env = append(os.Environ(),
 		"PATH="+tempDir+":"+os.Getenv("PATH"),
 		"TEST_CA_PATH_RECORD="+caPathRecord,
@@ -753,7 +754,7 @@ exit 22
 `), 0o700))
 
 	command := exec.Command("/bin/bash")
-	command.Stdin = bytes.NewReader(renderWarmAssignment("opaque-test-token", testCABundle(t), ""))
+	command.Stdin = bytes.NewReader(renderWarmAssignment(expectedMetadataURL, "opaque-test-token", testCABundle(t), ""))
 	command.Env = append(os.Environ(),
 		"PATH="+tempDir+":"+os.Getenv("PATH"),
 		"TEST_CA_PATH_RECORD="+caPathRecord,

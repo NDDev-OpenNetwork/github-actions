@@ -58,6 +58,7 @@ func testConfig(t *testing.T) Incus {
 		QueueIntentFile:       filepath.Join(filepath.Dir(cert), "queue-intents.json"),
 		AdmissionLeaseSeconds: 300,
 		AllowedGitHubAccounts: []string{"example-org"},
+		WorkerGatewayURL:      "https://198.51.100.1:9443",
 		CurrentProviderIdentity: ProviderIdentity{
 			Version: "v0.1.5-nddev.45",
 			Commit:  "0123456789abcdef0123456789abcdef01234567",
