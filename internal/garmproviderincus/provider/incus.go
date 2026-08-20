@@ -561,7 +561,6 @@ func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapPa
 		{controllerIDKeyName, l.controllerID},
 		{poolIDKey, bootstrapParams.PoolID},
 		{imageAliasKey, imagePolicy.Alias},
-		{imageFingerprintKey, imagePolicy.Fingerprint},
 		{flavorKey, bootstrapParams.Flavor},
 		{lifecycleKey, "ephemeral-one-job"},
 		{trustKey, pool.Trust},
@@ -572,6 +571,12 @@ func (l *Incus) validateExistingInstance(instance *api.InstanceFull, bootstrapPa
 		{garmJobNameKey, bootstrapParams.Name},
 		{osTypeKeyName, string(commonParams.Linux)},
 		{osArchKeyNAme, string(commonParams.Amd64)},
+	}
+	if actual := instance.ExpandedConfig[imageFingerprintKey]; !imagePolicy.AllowsExistingFingerprint(actual) {
+		return runnerErrors.NewUnprocessableError(
+			"existing instance %q has %s=%q, expected current or declared previous fingerprint",
+			instance.Name, imageFingerprintKey, actual,
+		)
 	}
 	for _, check := range checks {
 		if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
@@ -613,6 +618,18 @@ func (l *Incus) validateManagedSecurity(instance *api.InstanceFull) error {
 	if instance.Type != wantedType {
 		return runnerErrors.NewUnprocessableError("managed instance %q has type %q, expected %q", instance.Name, instance.Type, wantedType)
 	}
+	lifecycle := instance.ExpandedConfig[lifecycleKey]
+	actualFingerprint := instance.ExpandedConfig[imageFingerprintKey]
+	fingerprintAllowed := actualFingerprint == imagePolicy.Fingerprint
+	if lifecycle == lifecycleEphemeralOneJob {
+		fingerprintAllowed = imagePolicy.AllowsExistingFingerprint(actualFingerprint)
+	}
+	if !fingerprintAllowed {
+		return runnerErrors.NewUnprocessableError(
+			"managed instance %q has %s=%q, expected exact current fingerprint for lifecycle %q or declared N-1 for an executing one-job worker",
+			instance.Name, imageFingerprintKey, actualFingerprint, lifecycle,
+		)
+	}
 	checks = append(checks, struct {
 		key      string
 		expected string
@@ -640,7 +657,6 @@ func managedSecurityContract(image config.WorkerImage) (string, []struct {
 		expected string
 	}{
 		{imageAliasKey, image.Alias},
-		{imageFingerprintKey, image.Fingerprint},
 	}
 	if image.InstanceType == config.IncusImageContainer {
 		nesting := "false"
