@@ -17,9 +17,11 @@ import (
 )
 
 const (
-	// 8 adds role-correct central exporter health, container admission readiness,
-	// phase ages and rollback-compatible WAL progress semantics.
-	SchemaVersion                   = 8
+	// 9 adds exact JobStarted runner correlation and symmetric created-without-
+	// running identity telemetry. Version 8 added role-correct central exporter
+	// health, container admission readiness, phase ages and rollback-compatible
+	// WAL progress semantics.
+	SchemaVersion                   = 9
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 )
@@ -117,29 +119,32 @@ type PoolStatus struct {
 }
 
 type JournalSummary struct {
-	SchemaVersion         int              `json:"schema_version"`
-	Generation            uint64           `json:"generation"`
-	UpdatedAt             time.Time        `json:"updated_at"`
-	Leases                int              `json:"leases"`
-	Claims                int              `json:"claims"`
-	WarmPreemptions       int              `json:"warm_preemptions"`
-	WarmPreemptionsTotal  uint64           `json:"warm_preemptions_total"`
-	ByState               map[string]int   `json:"by_state"`
-	OldestStateAgeSeconds map[string]int64 `json:"oldest_state_age_seconds"`
+	SchemaVersion                                 int              `json:"schema_version"`
+	Generation                                    uint64           `json:"generation"`
+	UpdatedAt                                     time.Time        `json:"updated_at"`
+	Leases                                        int              `json:"leases"`
+	Claims                                        int              `json:"claims"`
+	WarmPreemptions                               int              `json:"warm_preemptions"`
+	WarmPreemptionsTotal                          uint64           `json:"warm_preemptions_total"`
+	ByState                                       map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds                         map[string]int64 `json:"oldest_state_age_seconds"`
+	CreatedWithoutRunningIdentity                 int              `json:"created_without_running_identity"`
+	OldestCreatedWithoutRunningIdentityAgeSeconds int64            `json:"oldest_created_without_running_identity_age_seconds"`
 }
 
 type QueueSummary struct {
-	Generation            uint64           `json:"generation"`
-	Stored                int              `json:"stored"`
-	Active                int              `json:"active"`
-	Expired               int              `json:"expired"`
-	InFlight              int              `json:"in_flight"`
-	OldestQueueAgeSeconds int64            `json:"oldest_queue_age_seconds"`
-	UncoveredRunning      int              `json:"uncovered_running"`
-	ByState               map[string]int   `json:"by_state"`
-	OldestStateAgeSeconds map[string]int64 `json:"oldest_state_age_seconds"`
-	ByPriority            map[int]int      `json:"by_priority"`
-	ByScaleSet            map[string]int   `json:"by_scale_set"`
+	Generation                   uint64           `json:"generation"`
+	Stored                       int              `json:"stored"`
+	Active                       int              `json:"active"`
+	Expired                      int              `json:"expired"`
+	InFlight                     int              `json:"in_flight"`
+	OldestQueueAgeSeconds        int64            `json:"oldest_queue_age_seconds"`
+	UncoveredRunning             int              `json:"uncovered_running"`
+	RunningWithoutRunnerIdentity int              `json:"running_without_runner_identity"`
+	ByState                      map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds        map[string]int64 `json:"oldest_state_age_seconds"`
+	ByPriority                   map[int]int      `json:"by_priority"`
+	ByScaleSet                   map[string]int   `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -330,6 +335,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		}
 	}
 	if journalErr == nil && queueErr == nil {
+		correlation := summarizeExecutionCorrelation(journal, queue, now)
+		snapshot.Queue.RunningWithoutRunnerIdentity = correlation.RunningWithoutRunnerIdentity
+		snapshot.Journal.CreatedWithoutRunningIdentity = correlation.CreatedWithoutRunningIdentity
+		snapshot.Journal.OldestCreatedWithoutRunningIdentityAgeSeconds = correlation.OldestCreatedWithoutRunningIdentityAgeSeconds
 		executionLeases := snapshot.Journal.ByState[string(providerjournal.StateCreated)] +
 			snapshot.Journal.ByState[string(providerjournal.StateWarmClaimed)]
 		running := snapshot.Queue.ByState[string(queueintent.StateRunning)]
@@ -355,6 +364,41 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Pools[index].ContainerAdmissionReady = exists && backend.Implementation == "incus-container" && snapshot.Healthy
 	}
 	return snapshot
+}
+
+type executionCorrelation struct {
+	RunningWithoutRunnerIdentity                  int
+	CreatedWithoutRunningIdentity                 int
+	OldestCreatedWithoutRunningIdentityAgeSeconds int64
+}
+
+func summarizeExecutionCorrelation(journal providerjournal.Journal, queue queueintent.Snapshot, now time.Time) executionCorrelation {
+	runningNames := make(map[string]struct{})
+	result := executionCorrelation{}
+	for _, intent := range queue.Active {
+		if intent.State != queueintent.StateRunning {
+			continue
+		}
+		if intent.RunnerName == "" {
+			result.RunningWithoutRunnerIdentity++
+			continue
+		}
+		runningNames[intent.RunnerName] = struct{}{}
+	}
+	for name, lease := range journal.Leases {
+		if lease.State != providerjournal.StateCreated {
+			continue
+		}
+		if _, covered := runningNames[name]; covered {
+			continue
+		}
+		result.CreatedWithoutRunningIdentity++
+		age := max(int64(0), int64(now.Sub(lease.AdmittedAt)/time.Second))
+		if age > result.OldestCreatedWithoutRunningIdentityAgeSeconds {
+			result.OldestCreatedWithoutRunningIdentityAgeSeconds = age
+		}
+	}
+	return result
 }
 
 func (c Collector) Validate() error {

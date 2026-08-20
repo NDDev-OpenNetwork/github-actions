@@ -525,3 +525,37 @@ func TestCollectorMarksUnreadableDiagnosticExportUnavailable(t *testing.T) {
 		t.Fatalf("unreadable exporter state was not represented safely: %#v", snapshot)
 	}
 }
+
+func TestSummarizeExecutionCorrelationIsSymmetric(t *testing.T) {
+	now := time.Date(2026, 8, 20, 22, 0, 0, 0, time.UTC)
+	journal := providerjournal.Journal{Leases: map[string]providerjournal.Lease{
+		"runner-covered": {
+			InstanceName: "runner-covered", State: providerjournal.StateCreated,
+			AdmittedAt: now.Add(-2 * time.Minute),
+		},
+		"runner-unbound": {
+			InstanceName: "runner-unbound", State: providerjournal.StateCreated,
+			AdmittedAt: now.Add(-17 * time.Minute),
+		},
+		"runner-deleting": {
+			InstanceName: "runner-deleting", State: providerjournal.StateDeleting,
+			AdmittedAt: now.Add(-30 * time.Minute),
+		},
+	}}
+	queue := queueintent.Snapshot{Active: []queueintent.Intent{
+		{State: queueintent.StateRunning, RunnerName: "runner-covered"},
+		{State: queueintent.StateRunning},
+		{State: queueintent.StateAssigned},
+	}}
+
+	got := summarizeExecutionCorrelation(journal, queue, now)
+	if got.RunningWithoutRunnerIdentity != 1 {
+		t.Fatalf("running without runner identity = %d, want 1", got.RunningWithoutRunnerIdentity)
+	}
+	if got.CreatedWithoutRunningIdentity != 1 {
+		t.Fatalf("created without running identity = %d, want 1", got.CreatedWithoutRunningIdentity)
+	}
+	if got.OldestCreatedWithoutRunningIdentityAgeSeconds != 17*60 {
+		t.Fatalf("oldest unbound created age = %d, want %d", got.OldestCreatedWithoutRunningIdentityAgeSeconds, 17*60)
+	}
+}

@@ -107,6 +107,7 @@ var runtimeContractFields = []string{
 	"authoritative_queue_intent_reconciliation",
 	"authoritative_idle_offline_runner_reaping",
 	"authoritative_access_refusal_backoff_seconds",
+	"job_started_runner_identity",
 	"job_reconciliation_interval_seconds",
 	"job_reconciliation_batch_size",
 	"official_actions_runner_unchanged",

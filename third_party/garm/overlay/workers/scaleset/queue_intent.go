@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	queueIntentSchemaVersion = 1
-	queueIntentMaxBytes      = 4 * 1024 * 1024
-	queueSchedulerStride     = uint64(1_000_000)
-	queueAcquireRetryDelay   = 5 * time.Second
+	queueAdmissionSchemaVersion    = 1
+	queueIntentLegacySchemaVersion = 1
+	queueIntentSchemaVersion       = 2
+	queueIntentMaxBytes            = 4 * 1024 * 1024
+	queueSchedulerStride           = uint64(1_000_000)
+	queueAcquireRetryDelay         = 5 * time.Second
 
 	queueConfigEnvironment = "GARM_NDDEV_QUEUE_ADMISSION_CONFIG"
 	queueFileEnvironment   = "GARM_NDDEV_QUEUE_INTENT_FILE"
@@ -72,6 +74,10 @@ type queueIntent struct {
 	JobID           string `json:"job_id"`
 	RunnerRequestID int64  `json:"runner_request_id"`
 	ScaleSetName    string `json:"scale_set_name"`
+	// RunnerName is bound only by JobStarted. It is the exact ephemeral GARM
+	// instance name and lets the observer prove both directions of execution
+	// coverage instead of comparing aggregate counts.
+	RunnerName string `json:"runner_name,omitempty"`
 	// Owner is the forge account the scale set hangs from. It is the half of
 	// the identity that is known when a job is assigned, which Repository is
 	// not for an organization entity. An intent written before this field
@@ -477,9 +483,11 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		return false, fmt.Errorf("queue admission requires a scale set that admits at least one runner, got max_runners=%d", scaleSet.MaxRunners)
 	}
 	var orphanedStarts []string
+	var uncorrelatedStarts []string
 	var reservationTransfers [][2]string
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		orphanedStarts = orphanedStarts[:0]
+		uncorrelatedStarts = uncorrelatedStarts[:0]
 		reservationTransfers = reservationTransfers[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
@@ -491,6 +499,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		}
 		for _, job := range started {
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+			if !validQueueText(job.RunnerName) {
+				// JobStarted is already true at GitHub. Never reject the lifecycle
+				// batch and recreate a head-of-line redelivery loop merely because
+				// its correlation field is missing; persist the running state and
+				// surface the missing identity through observer telemetry.
+				uncorrelatedStarts = append(uncorrelatedStarts, key)
+			}
 			startedKeys[key] = struct{}{}
 			if _, completedInBatch := completedKeys[key]; completedInBatch {
 				continue
@@ -527,6 +542,9 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				continue
 			}
 			intent.State = queueStateRunning
+			if validQueueText(job.RunnerName) {
+				intent.RunnerName = job.RunnerName
+			}
 			intent.UpdatedAt = now
 			intent.ExpiresAt = expiryForState(config, queueStateRunning, now)
 			journal.Intents[key] = intent
@@ -577,6 +595,12 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	for _, key := range orphanedStarts {
 		slog.Warn(
 			"started job has no admitted queue intent; acknowledging anyway",
+			"key", key, "scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
+		)
+	}
+	for _, key := range uncorrelatedStarts {
+		slog.Warn(
+			"started job has no valid runner identity; acknowledging with explicit telemetry gap",
 			"key", key, "scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
 		)
 	}
@@ -793,7 +817,7 @@ func migrateLegacyQueueIntentOwnership(journal *queueIntentJournal, config queue
 }
 
 func (c queueAdmissionConfig) Validate() error {
-	if c.SchemaVersion != queueIntentSchemaVersion ||
+	if c.SchemaVersion != queueAdmissionSchemaVersion ||
 		c.MaxInFlight < 1 || c.MaxInFlight > queueMaxInFlightCeiling ||
 		c.DefaultWeight == 0 || c.DefaultWeight > 100 {
 		return fmt.Errorf("queue admission identity or global limits are invalid")
@@ -826,6 +850,7 @@ func (j queueIntentJournal) Validate() error {
 	for key, intent := range j.Intents {
 		if key == "" || intent.Key != key || intent.Key != queueIntentKey(intent.ScaleSetID, intent.JobID) ||
 			intent.ScaleSetID <= 0 || !validQueueText(intent.JobID) || intent.RunnerRequestID < 0 || !validQueueText(intent.ScaleSetName) ||
+			(intent.RunnerName != "" && !validQueueText(intent.RunnerName)) ||
 			!validQueueAccountOrRepository(intent.Repository) || !validQueueText(intent.WorkflowRef) || !validQueueText(intent.EventName) || intent.QueueTime.IsZero() ||
 			intent.UpdatedAt.IsZero() || intent.ExpiresAt.Before(intent.UpdatedAt) || intent.Priority < 0 || intent.Priority > 3 {
 			return fmt.Errorf("queue intent %q is invalid", key)
@@ -900,12 +925,17 @@ func queueIntentFromLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntit
 		!validQueueText(scaleSet.Name) || !validQueueText(job.JobID) || !validQueueText(entity.Owner) {
 		return queueIntent{}, fmt.Errorf("job %q has incomplete queue admission identity", job.JobID)
 	}
+	runnerName := ""
+	if job.MessageType == params.MessageTypeJobStarted && validQueueText(job.RunnerName) {
+		runnerName = job.RunnerName
+	}
 	return queueIntent{
 		Key:             queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID),
 		ScaleSetID:      int64(scaleSet.ScaleSetID),
 		JobID:           job.JobID,
 		RunnerRequestID: 0,
 		ScaleSetName:    scaleSet.Name,
+		RunnerName:      runnerName,
 		Owner:           entity.Owner,
 		Repository:      repository,
 		WorkflowRef:     "unavailable-before-job-available",
@@ -1064,6 +1094,16 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return queueIntentJournal{}, fmt.Errorf("queue-intent journal has trailing data")
+	}
+	switch journal.SchemaVersion {
+	case queueIntentLegacySchemaVersion:
+		// v2 adds only the JobStarted runner identity. Old active intents have no
+		// value to synthesize; they remain explicitly uncorrelated until their
+		// lifecycle completes, and the next writer transaction upgrades the file.
+		journal.SchemaVersion = queueIntentSchemaVersion
+	case queueIntentSchemaVersion:
+	default:
+		return queueIntentJournal{}, fmt.Errorf("queue-intent journal schema_version must be %d", queueIntentSchemaVersion)
 	}
 	if err := journal.Validate(); err != nil {
 		return queueIntentJournal{}, err
