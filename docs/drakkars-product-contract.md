@@ -55,6 +55,12 @@ Admission reserves declared resources before GitHub job acquisition. Provider
 and placement checks remain physical safety authorities. Capacity pressure is
 bounded backpressure, not a provider-failure storm.
 
+Cluster placement packs eligible workers by the smallest safe remaining hard
+memory after the request. Pressure, disk and host reserve checks run first.
+This best-fit policy prevents small jobs from fragmenting every member and
+preserves contiguous capacity for larger capability classes without dedicating
+a host or leaving safe capacity idle.
+
 ## Three priority levels
 
 The engine supports exactly three owner-configured levels:
