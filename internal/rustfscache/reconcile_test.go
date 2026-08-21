@@ -402,12 +402,7 @@ func (f *fakeRustFS) Do(
 			user.policy = parsed.Query().Get("policyName")
 			f.users[accessKey] = user
 			return status(http.StatusOK), true
-		case method == http.MethodGet && strings.HasPrefix(parsed.Path, "/rustfs/admin/v3/quota-stats/"):
-			if !f.bucket {
-				return status(http.StatusServiceUnavailable), true
-			}
-			return status(http.StatusOK), true
-		case method == http.MethodGet && parsed.Path == "/rustfs/admin/v3/quota/"+f.config.Bucket:
+		case method == http.MethodGet && parsed.Path == "/rustfs/admin/v3/get-bucket-quota" && parsed.Query().Get("bucket") == f.config.Bucket:
 			if f.quota == 0 {
 				return status(http.StatusNotFound), true
 			}
