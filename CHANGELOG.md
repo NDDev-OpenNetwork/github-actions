@@ -7,6 +7,11 @@ Versioning.
 
 ### Changed
 
+- Made the cluster-wide Incus placement scriptlet typed public desired state.
+  Eligible workers now use hard-memory best-fit packing after pressure and disk
+  admission, preserving contiguous capacity for larger jobs instead of
+  spreading small containers by transient host load. Reconciliation updates
+  placement only after immutable Incus resource checks pass.
 - Added GARM derivative `v0.2.1-nddev.58` and queue-admission schema v4.
   Background work now has a separately bounded concurrency envelope. Aging
   chooses fairly within that envelope but cannot let a long soak occupy the

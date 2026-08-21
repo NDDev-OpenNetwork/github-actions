@@ -81,6 +81,7 @@ type profileState struct {
 
 var requiredExtensions = []string{
 	"instance_nic_bridged_port_isolation",
+	"instances_scriptlet_get_instances_count",
 	"network_acl",
 	"network_bridge_acl",
 	"projects_networks_restricted_access",
@@ -106,6 +107,7 @@ func (r Reconciler) Apply(ctx context.Context, plan incusplan.Plan) (Result, err
 	if server.Config == nil {
 		server.Config = map[string]string{}
 	}
+	serverConfigChanged := false
 	// A cluster member's address is how its peers reach it. Rewriting it to
 	// the standalone endpoint partitions the member from the cluster, which is
 	// exactly what an earlier run of this reconciler did to gha-runner-4: the
@@ -120,12 +122,17 @@ func (r Reconciler) Apply(ctx context.Context, plan incusplan.Plan) (Result, err
 				server.Environment.ServerName, server.Config["core.https_address"], plan.APIAddress)
 		}
 		server.Config["core.https_address"] = plan.APIAddress
-		if err := put(ctx, r.Runner, "/1.0", map[string]any{"config": server.Config}); err != nil {
-			return Result{}, fmt.Errorf("bind Incus API to its declared endpoint: %w", err)
-		}
-		result.Changes = append(result.Changes, Change{"server", "local", "update"})
+		serverConfigChanged = true
 	}
-
+	for key, value := range plan.ServerConfig {
+		if key == "" || value == "" {
+			return Result{}, fmt.Errorf("Incus server desired config is incomplete")
+		}
+		if server.Config[key] != value {
+			server.Config[key] = value
+			serverConfigChanged = true
+		}
+	}
 	storages, err := get[[]storageState](ctx, r.Runner, "/1.0/storage-pools?recursion=1")
 	if err != nil {
 		return Result{}, fmt.Errorf("list Incus storage pools: %w", err)
@@ -193,6 +200,16 @@ func (r Reconciler) Apply(ctx context.Context, plan incusplan.Plan) (Result, err
 	}
 	if err := r.ensureProfiles(ctx, plan.Project.Name, plan.Profiles, profiles, &result); err != nil {
 		return Result{}, err
+	}
+
+	// Update cluster-wide placement only after every fail-closed compatibility
+	// and immutable-resource check has passed. A storage or project mismatch
+	// must never leave a partially changed scheduler behind.
+	if serverConfigChanged {
+		if err := put(ctx, r.Runner, "/1.0", map[string]any{"config": server.Config}); err != nil {
+			return Result{}, fmt.Errorf("update Incus server configuration: %w", err)
+		}
+		result.Changes = append(result.Changes, Change{"server", "cluster", "update"})
 	}
 
 	return result, nil

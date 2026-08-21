@@ -85,8 +85,8 @@ func TestCreatePlanNeverIssuesDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create desired state: %v", err)
 	}
-	if len(result.Changes) != 5 {
-		t.Fatalf("changes = %#v, want storage, ACL, network, project and profile", result.Changes)
+	if len(result.Changes) != 6 {
+		t.Fatalf("changes = %#v, want storage, ACL, network, project, profile and server placement", result.Changes)
 	}
 	for _, call := range runner.calls {
 		if contains(call, "DELETE") {
@@ -104,7 +104,7 @@ func TestStorageDriftIsFailClosed(t *testing.T) {
 	plan := repositoryPlan(t)
 	storage := storageState{Name: plan.Storage.Name, Driver: "dir", Config: map[string]string{}}
 	runner := &fakeRunner{responses: map[string][]byte{
-		"/1.0":                           mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
+		"/1.0":                           mustJSON(t, serverWithDesiredConfig(compatibleServer("6.0.6", plan.APIAddress), plan)),
 		"/1.0/storage-pools?recursion=1": mustJSON(t, []storageState{storage}),
 	}}
 	_, err := (Reconciler{Runner: runner}).Apply(context.Background(), plan)
@@ -164,13 +164,20 @@ func desiredResponses(t *testing.T, plan incusplan.Plan) map[string][]byte {
 		profiles = append(profiles, profileState(profile))
 	}
 	return map[string][]byte{
-		"/1.0":                                        mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
+		"/1.0":                                        mustJSON(t, serverWithDesiredConfig(compatibleServer("6.0.6", plan.APIAddress), plan)),
 		"/1.0/storage-pools?recursion=1":              mustJSON(t, []storageState{{Name: plan.Storage.Name, Driver: plan.Storage.Driver, Config: plan.Storage.Config}}),
 		"/1.0/network-acls?recursion=1":               mustJSON(t, []aclState{{Name: plan.ACL.Name, Description: plan.ACL.Description, Config: plan.ACL.Config, Ingress: plan.ACL.Ingress, Egress: plan.ACL.Egress}}),
 		"/1.0/networks?recursion=1":                   mustJSON(t, []networkState{{Name: plan.Network.Name, Description: "Isolated public-egress bridge for disposable GitHub Actions VMs", Type: plan.Network.Type, Managed: true, Config: plan.Network.Config}}),
 		"/1.0/projects?recursion=1":                   mustJSON(t, []projectState{{Name: plan.Project.Name, Description: plan.Project.Description, Config: plan.Project.Config}}),
 		"/1.0/profiles?project=gha-fleet&recursion=1": mustJSON(t, profiles),
 	}
+}
+
+func serverWithDesiredConfig(server serverState, plan incusplan.Plan) serverState {
+	for key, value := range plan.ServerConfig {
+		server.Config[key] = value
+	}
+	return server
 }
 
 func compatibleServer(version, address string) serverState {

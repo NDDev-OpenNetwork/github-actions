@@ -7,16 +7,18 @@ import (
 	"strconv"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplacement"
 )
 
 type Plan struct {
-	Version      string       `json:"version" yaml:"version"`
-	APIAddress   string       `json:"api_address" yaml:"api_address"`
-	HostFirewall HostFirewall `json:"host_firewall" yaml:"host_firewall"`
-	Storage      Storage      `json:"storage" yaml:"storage"`
-	Network      Network      `json:"network" yaml:"network"`
-	Project      Project      `json:"project" yaml:"project"`
-	ACL          ACL          `json:"acl" yaml:"acl"`
+	Version      string            `json:"version" yaml:"version"`
+	APIAddress   string            `json:"api_address" yaml:"api_address"`
+	ServerConfig map[string]string `json:"server_config" yaml:"server_config"`
+	HostFirewall HostFirewall      `json:"host_firewall" yaml:"host_firewall"`
+	Storage      Storage           `json:"storage" yaml:"storage"`
+	Network      Network           `json:"network" yaml:"network"`
+	Project      Project           `json:"project" yaml:"project"`
+	ACL          ACL               `json:"acl" yaml:"acl"`
 	// PoolACLs are the additional ACLs a pool receives on its own NIC. The
 	// bridge ACL above is what every pool shares; anything wider than that is
 	// declared by exactly one pool and reaches only that pool's workers.
@@ -146,9 +148,15 @@ func Build(cfg config.Config, selectedPools []string) (Plan, error) {
 		}
 	}
 
+	placementScriptlet, err := incusplacement.Render(cfg)
+	if err != nil {
+		return Plan{}, fmt.Errorf("render Incus placement: %w", err)
+	}
+
 	return Plan{
 		Version:      cfg.Incus.Version,
 		APIAddress:   cfg.Incus.EffectiveAPIAddress(),
+		ServerConfig: map[string]string{incusplacement.ServerConfigKey: placementScriptlet},
 		HostFirewall: hostFirewall(cfg, bridgeAddress, bridgeSubnet),
 		Storage: Storage{
 			Name:   cfg.Incus.StoragePool,
