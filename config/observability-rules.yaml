@@ -1,11 +1,14 @@
-schema_version: 1
+schema_version: 2
 backend: openobserve
 organization: default
 rules:
   - id: collector_queue_near_full
     severity: page
     query_language: promql
-    query: max(otelcol_exporter_queue_size) / clamp_min(max(otelcol_exporter_queue_capacity), 1) > 0.9
+    stream_name: otelcol_exporter_queue_size
+    expression: max(otelcol_exporter_queue_size) / clamp_min(max(otelcol_exporter_queue_capacity), 1)
+    operator: ">"
+    threshold: 0.9
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
@@ -18,7 +21,10 @@ rules:
   - id: diagnostic_export_failure
     severity: page
     query_language: promql
-    query: max(gha_fleet_diagnostic_export_consecutive_failures) > 0
+    stream_name: gha_fleet_diagnostic_export_consecutive_failures
+    expression: max(gha_fleet_diagnostic_export_consecutive_failures)
+    operator: ">"
+    threshold: 0
     evaluation_seconds: 30
     hold_seconds: 60
     destination_ref: fleet_oncall
@@ -31,7 +37,10 @@ rules:
   - id: fleet_platform_unhealthy
     severity: page
     query_language: promql
-    query: max(gha_fleet_platform_healthy) < 1
+    stream_name: gha_fleet_platform_healthy
+    expression: max(gha_fleet_platform_healthy)
+    operator: "<"
+    threshold: 1
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
@@ -44,7 +53,10 @@ rules:
   - id: host_oom_detected
     severity: page
     query_language: promql
-    query: max(increase(gha_fleet_host_oom_kills_total[5m])) > 0
+    stream_name: gha_fleet_host_oom_kills_total
+    expression: max(increase(gha_fleet_host_oom_kills_total[5m]))
+    operator: ">"
+    threshold: 0
     evaluation_seconds: 30
     hold_seconds: 30
     destination_ref: fleet_oncall
@@ -57,7 +69,10 @@ rules:
   - id: lifecycle_assigned_stall
     severity: page
     query_language: promql
-    query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"}) > 300
+    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
+    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"})
+    operator: ">"
+    threshold: 300
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
@@ -70,7 +85,10 @@ rules:
   - id: lifecycle_created_unbound
     severity: page
     query_language: promql
-    query: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds) > 300
+    stream_name: gha_fleet_provider_created_without_running_identity_oldest_age_seconds
+    expression: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds)
+    operator: ">"
+    threshold: 300
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
@@ -83,7 +101,10 @@ rules:
   - id: lifecycle_inventory_gap
     severity: page
     query_language: promql
-    query: max(gha_fleet_incus_orphan_instances) > 0 or max(gha_fleet_journal_missing_instances) > 0 or max(gha_fleet_queue_uncovered_running) > 0
+    stream_name: gha_fleet_incus_orphan_instances
+    expression: max(gha_fleet_incus_orphan_instances) or max(gha_fleet_journal_missing_instances) or max(gha_fleet_queue_uncovered_running)
+    operator: ">"
+    threshold: 0
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
@@ -96,7 +117,10 @@ rules:
   - id: memory_psi_slow_burn
     severity: ticket
     query_language: promql
-    query: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window_seconds="10"}) > 5
+    stream_name: gha_fleet_host_psi_stall_percent
+    expression: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window_seconds="10"})
+    operator: ">"
+    threshold: 5
     evaluation_seconds: 300
     hold_seconds: 1800
     destination_ref: fleet_oncall
@@ -109,7 +133,10 @@ rules:
   - id: provider_terminal_circuit
     severity: page
     query_language: promql
-    query: max(gha_fleet_provider_terminal_circuits) > 0
+    stream_name: gha_fleet_provider_terminal_circuits
+    expression: max(gha_fleet_provider_terminal_circuits)
+    operator: ">"
+    threshold: 0
     evaluation_seconds: 30
     hold_seconds: 60
     destination_ref: fleet_oncall
@@ -122,7 +149,10 @@ rules:
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql
-    query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) > 120
+    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
+    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"})
+    operator: ">"
+    threshold: 120
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
@@ -135,7 +165,10 @@ rules:
   - id: snapshot_stale
     severity: page
     query_language: promql
-    query: max(gha_fleet_snapshot_stale) > 0
+    stream_name: gha_fleet_snapshot_stale
+    expression: max(gha_fleet_snapshot_stale)
+    operator: ">"
+    threshold: 0
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall

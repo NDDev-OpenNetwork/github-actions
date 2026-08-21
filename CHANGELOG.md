@@ -7,6 +7,10 @@ Versioning.
 
 ### Changed
 
+- Upgraded the OpenObserve rules contract to keep the metric stream, PromQL
+  expression, comparison operator and threshold as separate typed fields, and
+  added deterministic v0.92 alert payload rendering with explicit disabled or
+  reviewed-enabled modes.
 - Published fleet contract v2 for the current one-job ephemeral Incus-container
   implementation. The rendered contract now carries each runner class's trust,
   credentials, network/cache policy, hard resources and cold-only warm support.

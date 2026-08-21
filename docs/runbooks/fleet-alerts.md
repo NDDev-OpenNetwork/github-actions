@@ -3,6 +3,22 @@
 Every fleet alert is symptom-oriented. Confirm the exact metric and correlated
 queue intent, GitHub job, provider lease and Incus instance before recovery.
 
+`config/observability-rules.yaml` is the canonical rule source. Each rule names
+one real OpenObserve metric stream for API ownership and keeps its PromQL
+expression separate from the comparison operator and threshold. Render the
+exact v0.92 API payload with:
+
+```bash
+gha-fleet render-openobserve-alerts \
+  --config config/observability-rules.yaml \
+  --destination fleet_oncall
+```
+
+The default output is disabled. Use `--enable` only after the named destination
+has passed an independent delivery-and-recovery test. A missing, synthetic or
+silent destination is not an acceptable reason to enable rules. The renderer's
+stream names must all exist in the target metrics inventory before apply.
+
 - Platform, lifecycle or diagnostics pages: stop promotion work, preserve
   journals and diagnostic bundles, identify the oldest exact identity, and use
   only the bounded recovery operation that matches authoritative evidence.

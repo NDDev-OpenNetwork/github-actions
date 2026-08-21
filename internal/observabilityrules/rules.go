@@ -3,6 +3,7 @@ package observabilityrules
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -11,9 +12,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
+var metricPattern = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]{0,254}$`)
 
 type Bundle struct {
 	SchemaVersion int    `json:"schema_version" yaml:"schema_version"`
@@ -23,19 +25,22 @@ type Bundle struct {
 }
 
 type Rule struct {
-	ID             string `json:"id" yaml:"id"`
-	Severity       string `json:"severity" yaml:"severity"`
-	QueryLanguage  string `json:"query_language" yaml:"query_language"`
-	Query          string `json:"query" yaml:"query"`
-	EvaluationSecs int    `json:"evaluation_seconds" yaml:"evaluation_seconds"`
-	HoldSecs       int    `json:"hold_seconds" yaml:"hold_seconds"`
-	DestinationRef string `json:"destination_ref" yaml:"destination_ref"`
-	Enabled        bool   `json:"enabled" yaml:"enabled"`
-	Owner          string `json:"owner" yaml:"owner"`
-	Runbook        string `json:"runbook" yaml:"runbook"`
-	Summary        string `json:"summary" yaml:"summary"`
-	Action         string `json:"action" yaml:"action"`
-	Recovery       string `json:"recovery" yaml:"recovery"`
+	ID             string  `json:"id" yaml:"id"`
+	Severity       string  `json:"severity" yaml:"severity"`
+	QueryLanguage  string  `json:"query_language" yaml:"query_language"`
+	StreamName     string  `json:"stream_name" yaml:"stream_name"`
+	Expression     string  `json:"expression" yaml:"expression"`
+	Operator       string  `json:"operator" yaml:"operator"`
+	Threshold      float64 `json:"threshold" yaml:"threshold"`
+	EvaluationSecs int     `json:"evaluation_seconds" yaml:"evaluation_seconds"`
+	HoldSecs       int     `json:"hold_seconds" yaml:"hold_seconds"`
+	DestinationRef string  `json:"destination_ref" yaml:"destination_ref"`
+	Enabled        bool    `json:"enabled" yaml:"enabled"`
+	Owner          string  `json:"owner" yaml:"owner"`
+	Runbook        string  `json:"runbook" yaml:"runbook"`
+	Summary        string  `json:"summary" yaml:"summary"`
+	Action         string  `json:"action" yaml:"action"`
+	Recovery       string  `json:"recovery" yaml:"recovery"`
 }
 
 func Load(path string) (Bundle, error) {
@@ -86,11 +91,14 @@ func (b Bundle) Validate() error {
 }
 
 func (r Rule) Validate() error {
-	if !idPattern.MatchString(r.ID) || (r.Severity != "page" && r.Severity != "ticket") || r.QueryLanguage != "promql" {
+	if !idPattern.MatchString(r.ID) || !metricPattern.MatchString(r.StreamName) || (r.Severity != "page" && r.Severity != "ticket") || r.QueryLanguage != "promql" {
 		return fmt.Errorf("identity, severity or query language is invalid")
 	}
-	if len(r.Query) < 3 || len(r.Query) > 4096 || strings.ContainsAny(r.Query, "\r\x00") {
-		return fmt.Errorf("query is invalid")
+	if len(r.Expression) < 3 || len(r.Expression) > 4096 || strings.ContainsAny(r.Expression, "\r\x00") {
+		return fmt.Errorf("expression is invalid")
+	}
+	if _, valid := map[string]struct{}{">": {}, ">=": {}, "<": {}, "<=": {}, "=": {}, "!=": {}}[r.Operator]; !valid || math.IsNaN(r.Threshold) || math.IsInf(r.Threshold, 0) {
+		return fmt.Errorf("operator or threshold is invalid")
 	}
 	if r.EvaluationSecs < 15 || r.EvaluationSecs > 900 || r.HoldSecs < r.EvaluationSecs || r.HoldSecs > 86400 {
 		return fmt.Errorf("evaluation or hold duration is invalid")
@@ -108,4 +116,8 @@ func (r Rule) Validate() error {
 		return fmt.Errorf("runbook must be public and source-bound")
 	}
 	return nil
+}
+
+func (r Rule) RequiredEvaluations() int {
+	return (r.HoldSecs + r.EvaluationSecs - 1) / r.EvaluationSecs
 }
