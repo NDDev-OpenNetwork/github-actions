@@ -70,6 +70,10 @@ Versioning.
   source as GARM `.50` and observer v0.8.2. This is a required paired rollout:
   the previous `.52` strict reader correctly rejects the new journal and must
   not be mixed with a schema-v2 writer.
+- Cut provider derivative `v0.1.5-nddev.54` for job-start cache claims. An
+  organization bootstrap receives only a random short-lived claim; no cache
+  credential is opened until the synchronous hook binds the exact GitHub
+  repository to the server-owned pool role and private estate allowlist.
 - Added GARM derivative `v0.2.1-nddev.51` and queue-admission schema v2. The
   central durable scheduler now reserves declared CPU units and hard memory
   before JIT/DB/provider creation, backfills smaller work into temporary holes,
