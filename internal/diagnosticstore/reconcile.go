@@ -8,19 +8,26 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 )
 
 type Result struct {
-	SchemaVersion int      `json:"schema_version"`
-	Applied       bool     `json:"applied"`
-	StateBefore   string   `json:"state_before"`
-	StateAfter    string   `json:"state_after"`
-	Bucket        string   `json:"bucket"`
-	QuotaBytes    int64    `json:"quota_bytes"`
-	RetentionDays int      `json:"retention_days"`
-	Actions       []string `json:"actions"`
+	SchemaVersion        int       `json:"schema_version"`
+	Applied              bool      `json:"applied"`
+	StateBefore          string    `json:"state_before"`
+	StateAfter           string    `json:"state_after"`
+	Bucket               string    `json:"bucket"`
+	QuotaBytes           int64     `json:"quota_bytes"`
+	RetentionDays        int       `json:"retention_days"`
+	CurrentUsageBytes    int64     `json:"current_usage_bytes"`
+	RemainingQuotaBytes  int64     `json:"remaining_quota_bytes"`
+	UsagePercentage      float64   `json:"usage_percentage"`
+	MinimumHeadroomBytes int64     `json:"minimum_headroom_bytes"`
+	HeadroomState        string    `json:"headroom_state"`
+	UsageObservedAt      time.Time `json:"usage_observed_at"`
+	Actions              []string  `json:"actions"`
 }
 
 type Runner struct{ Requester rustfscache.Requester }
@@ -28,6 +35,14 @@ type Runner struct{ Requester rustfscache.Requester }
 type quotaInfo struct {
 	Quota     int64  `json:"quota"`
 	QuotaType string `json:"quota_type"`
+}
+
+type quotaStats struct {
+	Bucket          string  `json:"bucket"`
+	QuotaLimit      int64   `json:"quota_limit"`
+	CurrentUsage    int64   `json:"current_usage"`
+	RemainingQuota  int64   `json:"remaining_quota"`
+	UsagePercentage float64 `json:"usage_percentage"`
 }
 
 type lifecycleConfiguration struct {
@@ -56,14 +71,26 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 		return Result{}, err
 	}
 	defer clear(root.SecretKey)
-	state, err := r.inspect(ctx, root, config)
+	state, usage, err := r.inspect(ctx, root, config)
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{SchemaVersion: SchemaVersion, StateBefore: state, StateAfter: state,
-		Bucket: config.Bucket, QuotaBytes: config.QuotaBytes, RetentionDays: config.RetentionDays}
+		Bucket: config.Bucket, QuotaBytes: config.QuotaBytes, RetentionDays: config.RetentionDays,
+		MinimumHeadroomBytes: config.MinimumHeadroom, HeadroomState: "unavailable"}
+	if state != "absent" {
+		result.CurrentUsageBytes = usage.CurrentUsage
+		result.RemainingQuotaBytes = usage.RemainingQuota
+		result.UsagePercentage = usage.UsagePercentage
+		result.UsageObservedAt = time.Now().UTC()
+		result.HeadroomState = "sufficient"
+		if usage.RemainingQuota < config.MinimumHeadroom {
+			result.HeadroomState = "below-minimum"
+			result.Actions = append(result.Actions, "increase_quota_or_reduce_retention")
+		}
+	}
 	if state != "managed" {
-		result.Actions = []string{"create_or_verify_bucket", "apply_hard_quota", "apply_prefix_lifecycle", "verify_read_back"}
+		result.Actions = append(result.Actions, "create_or_verify_bucket", "apply_hard_quota", "apply_prefix_lifecycle", "verify_read_back")
 	}
 	if !apply {
 		return result, nil
@@ -73,7 +100,7 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 			return Result{}, err
 		}
 	}
-	after, err := r.inspect(ctx, root, config)
+	after, usageAfter, err := r.inspect(ctx, root, config)
 	if err != nil {
 		return Result{}, fmt.Errorf("verify diagnostic storage: %w", err)
 	}
@@ -81,41 +108,63 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 		return Result{}, fmt.Errorf("diagnostic storage did not converge")
 	}
 	result.Applied, result.StateAfter = true, after
+	result.CurrentUsageBytes = usageAfter.CurrentUsage
+	result.RemainingQuotaBytes = usageAfter.RemainingQuota
+	result.UsagePercentage = usageAfter.UsagePercentage
+	result.UsageObservedAt = time.Now().UTC()
+	if usageAfter.RemainingQuota < config.MinimumHeadroom {
+		result.HeadroomState = "below-minimum"
+	} else {
+		result.HeadroomState = "sufficient"
+	}
 	return result, nil
 }
 
-func (r Runner) inspect(ctx context.Context, root rustfscache.Credential, config Config) (string, error) {
+func (r Runner) inspect(ctx context.Context, root rustfscache.Credential, config Config) (string, quotaStats, error) {
 	bucket, err := r.Requester.Do(ctx, root, http.MethodHead, "/"+config.Bucket, "", nil)
 	if err != nil {
-		return "", fmt.Errorf("inspect diagnostic bucket: %w", err)
+		return "", quotaStats{}, fmt.Errorf("inspect diagnostic bucket: %w", err)
 	}
 	if bucket.StatusCode == http.StatusNotFound {
-		return "absent", nil
+		return "absent", quotaStats{}, nil
 	}
 	if bucket.StatusCode != http.StatusOK {
-		return "", responseError("inspect diagnostic bucket", bucket)
+		return "", quotaStats{}, responseError("inspect diagnostic bucket", bucket)
 	}
 	quotaResponse, err := r.Requester.Do(ctx, root, http.MethodGet, "/rustfs/admin/v3/quota/"+config.Bucket, "", nil)
 	if err != nil {
-		return "", fmt.Errorf("inspect diagnostic quota: %w", err)
+		return "", quotaStats{}, fmt.Errorf("inspect diagnostic quota: %w", err)
 	}
 	if quotaResponse.StatusCode != http.StatusOK && quotaResponse.StatusCode != http.StatusNotFound {
-		return "", responseError("inspect diagnostic quota", quotaResponse)
+		return "", quotaStats{}, responseError("inspect diagnostic quota", quotaResponse)
 	}
 	var quota quotaInfo
 	quotaOK := quotaResponse.StatusCode == http.StatusOK && json.Unmarshal(quotaResponse.Body, &quota) == nil &&
 		quota.Quota == config.QuotaBytes && quota.QuotaType == "HARD"
+	statsResponse, err := r.Requester.Do(ctx, root, http.MethodGet, "/rustfs/admin/v3/quota-stats/"+config.Bucket, "", nil)
+	if err != nil {
+		return "", quotaStats{}, fmt.Errorf("inspect diagnostic quota usage: %w", err)
+	}
+	if statsResponse.StatusCode != http.StatusOK {
+		return "", quotaStats{}, responseError("inspect diagnostic quota usage", statsResponse)
+	}
+	var usage quotaStats
+	if err := json.Unmarshal(statsResponse.Body, &usage); err != nil || usage.Bucket != config.Bucket || usage.QuotaLimit != config.QuotaBytes ||
+		usage.CurrentUsage < 0 || usage.RemainingQuota < 0 || usage.CurrentUsage > usage.QuotaLimit ||
+		usage.RemainingQuota != usage.QuotaLimit-usage.CurrentUsage || usage.UsagePercentage < 0 || usage.UsagePercentage > 100 {
+		return "", quotaStats{}, fmt.Errorf("diagnostic quota usage response is inconsistent")
+	}
 	lifecycleResponse, err := r.Requester.Do(ctx, root, http.MethodGet, "/"+config.Bucket+"?lifecycle", "", nil)
 	if err != nil {
-		return "", fmt.Errorf("inspect diagnostic lifecycle: %w", err)
+		return "", quotaStats{}, fmt.Errorf("inspect diagnostic lifecycle: %w", err)
 	}
 	if lifecycleResponse.StatusCode != http.StatusOK && lifecycleResponse.StatusCode != http.StatusNotFound {
-		return "", responseError("inspect diagnostic lifecycle", lifecycleResponse)
+		return "", quotaStats{}, responseError("inspect diagnostic lifecycle", lifecycleResponse)
 	}
 	if quotaOK && lifecycleResponse.StatusCode == http.StatusOK && lifecycleEquivalent(lifecycleResponse.Body, config) {
-		return "managed", nil
+		return "managed", usage, nil
 	}
-	return "drifted", nil
+	return "drifted", usage, nil
 }
 
 func (r Runner) apply(ctx context.Context, root rustfscache.Credential, config Config) error {
