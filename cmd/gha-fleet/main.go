@@ -22,6 +22,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachemanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticstore"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetcontract"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmbootstrap"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmderivative"
@@ -87,6 +88,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateRustFSCache(args[1:], stdout, stderr)
 	case "validate-diagnostic-exporter":
 		return runValidateDiagnosticExporter(args[1:], stdout, stderr)
+	case "validate-diagnostic-storage":
+		return runValidateDiagnosticStorage(args[1:], stdout, stderr)
 	case "validate-tenant-registry":
 		return runValidateTenantRegistry(args[1:], stdout, stderr)
 	case "validate-queue-admission":
@@ -97,6 +100,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
 		return runReconcileRustFSCache(args[1:], stdout, stderr)
+	case "reconcile-diagnostic-storage":
+		return runReconcileDiagnosticStorage(args[1:], stdout, stderr)
 	case "bootstrap-github-app":
 		return runBootstrapGitHubApp(args[1:], stdout, stderr)
 	case "verify-github-app":
@@ -400,6 +405,71 @@ func runReconcileRustFSCache(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := writeJSON(stdout, result); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runReconcileDiagnosticStorage(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("reconcile-diagnostic-storage", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", diagnosticstore.DefaultConfigPath, "diagnostic storage configuration path")
+	apply := flags.Bool("apply", false, "create or repair the exact diagnostic bucket capacity and lifecycle")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "gha-fleet: reconcile-diagnostic-storage accepts no positional arguments")
+		return 2
+	}
+	if err := requireCredentialRoot(); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	config, err := diagnosticstore.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	requester, err := rustfscache.NewHTTPRequester(rustfscache.Config{
+		Endpoint: config.Endpoint, Region: config.Region, CAFile: config.CAFile,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: initialize diagnostic storage client: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := (diagnosticstore.Runner{Requester: requester}).Run(ctx, config, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: reconcile diagnostic storage: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, result); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runValidateDiagnosticStorage(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-diagnostic-storage", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", diagnosticstore.DefaultConfigPath, "diagnostic storage configuration path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "gha-fleet: validate-diagnostic-storage accepts no positional arguments")
+		return 2
+	}
+	config, err := diagnosticstore.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, config); err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
 	}
@@ -1502,5 +1572,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

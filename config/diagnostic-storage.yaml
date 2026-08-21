@@ -1,0 +1,14 @@
+schema_version: 1
+endpoint: https://192.0.2.1:9002
+region: us-east-1
+ca_file: /etc/gha-fleet/trust/rustfs-ca.pem
+root_access_key_file: /etc/gha-fleet/secrets/rustfs-access-key
+root_secret_key_file: /etc/gha-fleet/secrets/rustfs-secret-key
+bucket: example-diagnostics
+prefix: diagnostics/v1
+# Eight GiB covers the seven-day example retention window, a complete 1-GiB
+# local WAL replay, and at least 1 GiB of explicit operational headroom. A
+# private estate must size this from its measured object rate and bundle sizes.
+quota_bytes: 8589934592
+retention_days: 7
+minimum_headroom_bytes: 1073741824
