@@ -45,6 +45,7 @@ incus:
     members: 4
   registry_port: 5001
   rustfs_port: 9002
+  cache_gateway_port: 9003
   garm_gateway_port: 9443
 
 guardrails:

@@ -326,6 +326,9 @@ func poolEgressACL(cfg config.Config, pool config.Pool, bridgeAddress string) (A
 
 func localServiceAllows(cfg config.Config, bridgeAddress string, registry bool) []ACLRule {
 	cachePorts := strconv.Itoa(cfg.Incus.RustFSPort)
+	if cfg.Incus.CacheGatewayPort != cfg.Incus.RustFSPort {
+		cachePorts += "," + strconv.Itoa(cfg.Incus.CacheGatewayPort)
+	}
 	if registry {
 		cachePorts = strconv.Itoa(cfg.Incus.RegistryPort) + "," + cachePorts
 	}
@@ -418,6 +421,10 @@ func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFir
 			{
 				Name: "rustfs",
 				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-fleet-rustfs-v1"},
+			},
+			{
+				Name: "cache-gateway",
+				Args: []string{"allow", "in", "on", cfg.Incus.Network, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.CacheGatewayPort), "proto", "tcp", "comment", "gha-fleet-cache-gateway-v1"},
 			},
 			{
 				Name: "services-rustfs-diagnostics",

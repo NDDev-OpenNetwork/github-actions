@@ -76,10 +76,11 @@ type Incus struct {
 	// provider talks to one API and Incus decides which member runs the VM.
 	// Left disabled, every field below is unused and the host is standalone,
 	// which is what a single-host deployment and every existing test expect.
-	Cluster         Cluster `json:"cluster" yaml:"cluster"`
-	RegistryPort    int     `json:"registry_port" yaml:"registry_port"`
-	RustFSPort      int     `json:"rustfs_port" yaml:"rustfs_port"`
-	GARMGatewayPort int     `json:"garm_gateway_port" yaml:"garm_gateway_port"`
+	Cluster          Cluster `json:"cluster" yaml:"cluster"`
+	RegistryPort     int     `json:"registry_port" yaml:"registry_port"`
+	RustFSPort       int     `json:"rustfs_port" yaml:"rustfs_port"`
+	CacheGatewayPort int     `json:"cache_gateway_port" yaml:"cache_gateway_port"`
+	GARMGatewayPort  int     `json:"garm_gateway_port" yaml:"garm_gateway_port"`
 }
 
 type Platform struct {
