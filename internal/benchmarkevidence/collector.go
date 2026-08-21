@@ -314,8 +314,16 @@ func validateRecords(run runResponse, records map[string]artifactRecord) (Sample
 			}
 			continue
 		}
-		if sample.Environment != record.Environment || sample.CacheMode != record.CacheMode || sample.CacheHit != record.CacheHit || sample.Iteration != record.Iteration {
+		if sample.Environment != record.Environment || sample.CacheMode != record.CacheMode || sample.Iteration != record.Iteration {
 			return SampleEvidence{}, fmt.Errorf("artifact records do not describe one coherent sample")
+		}
+		// Cache effectiveness is a workload result, not sample identity. A warm
+		// prime can legitimately hit Go's dependency cache while Rust records an
+		// explicit miss because no repository-scoped compiler credential exists.
+		// Preserve every per-job result and summarize heterogeneous results rather
+		// than rejecting otherwise coherent evidence.
+		if sample.CacheHit != record.CacheHit {
+			sample.CacheHit = "mixed"
 		}
 	}
 	if sample.Environment == "nddev" {
