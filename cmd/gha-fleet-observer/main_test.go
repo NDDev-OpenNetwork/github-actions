@@ -60,6 +60,12 @@ func TestServiceStateRejectsUnboundedName(t *testing.T) {
 	}
 }
 
+func TestServicesRoleBrokerIsInFixedInventory(t *testing.T) {
+	if !serviceNameAllowed("gha-cache-broker") || serviceNameAllowed("ssh") {
+		t.Fatal("service inventory boundary drifted")
+	}
+}
+
 func TestSystemdUnitNamePreservesExplicitTimer(t *testing.T) {
 	for input, expected := range map[string]string{
 		"garm":                "garm.service",
