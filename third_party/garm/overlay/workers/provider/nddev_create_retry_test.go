@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -223,6 +224,57 @@ func TestNDDevCapacityReleaseGrantsOneOldestCapacityDomain(t *testing.T) {
 	}
 	if _, exists := journal.Records[nddevRetryDomainKey(providerKey)]; !exists {
 		t.Fatal("capacity release erased provider domain failure")
+	}
+}
+
+func TestNDDevCapacityRetryReservesOneDomainAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 21, 13, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	first := "scale-set:entity-one:17:instance:first"
+	second := "scale-set:entity-one:17:instance:second"
+	third := "scale-set:entity-one:17:instance:third"
+	domainKey := nddevRetryDomainKey(first)
+
+	if err := nddevBeforeProviderCreate(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), first, errors.New("insufficient-cpu")); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = journal.Records[domainKey].NextAllowedAt
+	domainAttempts := journal.Records[domainKey].Attempts
+	if err := nddevBeforeProviderCreate(context.Background(), second); err != nil {
+		t.Fatalf("first eligible domain retry was refused: %v", err)
+	}
+	journal, err = nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := journal.Records[domainKey]
+	if domain.Attempts != domainAttempts || domain.NextAllowedAt != now.Add(nddevRetryAttemptLease) || domain.UpdatedAt != now {
+		t.Fatalf("capacity domain lease = %#v", domain)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), third); err == nil || !strings.Contains(err.Error(), "retry is deferred") {
+		t.Fatalf("parallel capacity retry was not suppressed: %v", err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), second, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !journal.Records[domainKey].NextAllowedAt.After(now) {
+		t.Fatal("failed reserved retry did not restore capacity backoff")
 	}
 }
 
