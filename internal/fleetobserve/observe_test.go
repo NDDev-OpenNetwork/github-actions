@@ -13,6 +13,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
@@ -76,6 +77,9 @@ func healthyCollector(t *testing.T) Collector {
 		Journal: func(context.Context) (providerjournal.Journal, error) {
 			return testJournal(), nil
 		},
+		ProviderRetry: func(time.Time) (providerretry.Snapshot, error) {
+			return providerretry.Snapshot{Generation: 1, ByErrorClass: map[string]int{}}, nil
+		},
 		Queue: func(context.Context) (queueintent.Snapshot, error) {
 			return queueintent.Snapshot{Generation: 1}, nil
 		},
@@ -119,6 +123,17 @@ func TestCollectorBuildsHealthyExactInventorySnapshot(t *testing.T) {
 		snapshot.DiagnosticExport.ExportedBundles != 2 ||
 		snapshot.DiagnosticExportSync.State != diagnosticExportSyncSynchronized {
 		t.Fatalf("incomplete snapshot: %#v", snapshot)
+	}
+}
+
+func TestCollectorFailsHealthForTerminalProviderCircuit(t *testing.T) {
+	collector := healthyCollector(t)
+	collector.ProviderRetry = func(time.Time) (providerretry.Snapshot, error) {
+		return providerretry.Snapshot{Generation: 2, TerminalCircuits: 1, ByErrorClass: map[string]int{"provider": 1}}, nil
+	}
+	snapshot := collector.Collect(context.Background())
+	if snapshot.Healthy || !slices.Contains(snapshot.CollectionErrors, "provider retry: terminal create circuit blocks a scale set") {
+		t.Fatalf("terminal provider circuit was accepted as healthy: %#v", snapshot)
 	}
 }
 

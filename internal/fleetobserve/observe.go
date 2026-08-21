@@ -12,6 +12,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
@@ -21,7 +22,7 @@ const (
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 9
+	SchemaVersion                   = 10
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 )
@@ -66,6 +67,7 @@ func serviceNamesForConfig(platform config.Config) []string {
 
 type HostSource func(context.Context) (hostprobe.Snapshot, error)
 type JournalSource func(context.Context) (providerjournal.Journal, error)
+type ProviderRetrySource func(time.Time) (providerretry.Snapshot, error)
 type QueueIntentSource func(context.Context) (queueintent.Snapshot, error)
 type InstanceSource func(context.Context) ([]string, error)
 type DiagnosticsSource func(time.Time) (workerdiagnostics.SpoolStats, error)
@@ -76,6 +78,7 @@ type Collector struct {
 	Config             config.Config
 	Host               HostSource
 	Journal            JournalSource
+	ProviderRetry      ProviderRetrySource
 	Queue              QueueIntentSource
 	Instances          InstanceSource
 	Diagnostics        DiagnosticsSource
@@ -92,6 +95,7 @@ type Snapshot struct {
 	Host                 hostprobe.Snapshot           `json:"host"`
 	Pools                []PoolStatus                 `json:"pools"`
 	Journal              JournalSummary               `json:"journal"`
+	ProviderRetry        providerretry.Snapshot       `json:"provider_retry"`
 	Queue                QueueSummary                 `json:"queue"`
 	Incus                IncusSummary                 `json:"incus"`
 	Diagnostics          workerdiagnostics.SpoolStats `json:"diagnostics"`
@@ -178,6 +182,8 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	var hostErr error
 	var journal providerjournal.Journal
 	var journalErr error
+	var providerRetry providerretry.Snapshot
+	var providerRetryErr error
 	var queue queueintent.Snapshot
 	var queueErr error
 	var instances []string
@@ -189,7 +195,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	serviceErrors := make([]error, len(requiredServices))
 
 	var group sync.WaitGroup
-	sourceCount := 5
+	sourceCount := 6
 	if c.Export != nil {
 		sourceCount++
 	}
@@ -201,6 +207,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	go func() {
 		defer group.Done()
 		journal, journalErr = c.Journal(ctx)
+	}()
+	go func() {
+		defer group.Done()
+		providerRetry, providerRetryErr = c.ProviderRetry(now)
 	}()
 	go func() {
 		defer group.Done()
@@ -270,6 +280,14 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				coveredNames[name] = struct{}{}
 				expectedNames[name] = struct{}{}
 			}
+		}
+	}
+	if providerRetryErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("provider retry", providerRetryErr))
+	} else {
+		snapshot.ProviderRetry = providerRetry
+		if providerRetry.TerminalCircuits > 0 {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "provider retry: terminal create circuit blocks a scale set")
 		}
 	}
 	if queueErr != nil {
@@ -405,7 +423,7 @@ func (c Collector) Validate() error {
 	if err := c.Config.Validate(); err != nil {
 		return err
 	}
-	if c.Host == nil || c.Journal == nil || c.Queue == nil || c.Instances == nil || c.Diagnostics == nil || c.Service == nil {
+	if c.Host == nil || c.Journal == nil || c.ProviderRetry == nil || c.Queue == nil || c.Instances == nil || c.Diagnostics == nil || c.Service == nil {
 		return fmt.Errorf("every observer source is required")
 	}
 	if c.DiagnosticMaxBytes <= 0 {

@@ -95,3 +95,36 @@ func TestRecoverTerminalRejectsWrongTenantOrConcreteRetryKey(t *testing.T) {
 		})
 	}
 }
+
+func TestInspectCountsOnlyTerminalFailureDomains(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	now := time.Date(2026, 8, 21, 7, 0, 0, 0, time.UTC)
+	state := journal{SchemaVersion: 1, Generation: 42, UpdatedAt: now.Add(-time.Minute), Records: map[string]record{
+		"scale-set:entity-one:3": {
+			JobID: "scale-set:entity-one:3", Attempts: 8, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-10 * time.Minute), NextAllowedAt: now.Add(-10 * time.Minute), TerminalUntil: now.Add(24 * time.Hour),
+		},
+		"scale-set:entity-one:3:instance:runner-one": {
+			JobID: "scale-set:entity-one:3:instance:runner-one", Attempts: 1, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-10 * time.Minute), NextAllowedAt: now.Add(-9 * time.Minute),
+		},
+		"scale-set:entity-one:4": {
+			JobID: "scale-set:entity-one:4", Attempts: 2, LastErrorClass: "capacity",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(30 * time.Second),
+		},
+	}}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(journalPath, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Generation != 42 || snapshot.Records != 3 || snapshot.TerminalCircuits != 1 ||
+		snapshot.OldestTerminalAgeSeconds != 600 || snapshot.NextRetryDelaySeconds != 30 ||
+		snapshot.ByErrorClass["provider"] != 2 || snapshot.ByErrorClass["capacity"] != 1 {
+		t.Fatalf("unexpected retry snapshot: %#v", snapshot)
+	}
+}

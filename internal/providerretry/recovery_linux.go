@@ -47,6 +47,67 @@ type RecoveryResult struct {
 	RecoveredAt        time.Time `json:"recovered_at"`
 }
 
+// Snapshot is the bounded, identity-free operational view of the durable
+// provider-create retry journal. Dynamic tenant, scale-set, job and runner
+// identities deliberately stay out of metrics.
+type Snapshot struct {
+	Generation               uint64         `json:"generation"`
+	Records                  int            `json:"records"`
+	TerminalCircuits         int            `json:"terminal_circuits"`
+	ByErrorClass             map[string]int `json:"by_error_class"`
+	OldestTerminalAgeSeconds int64          `json:"oldest_terminal_age_seconds"`
+	NextRetryDelaySeconds    int64          `json:"next_retry_delay_seconds"`
+}
+
+// Inspect returns a read-only summary. A terminal domain is counted once even
+// when concrete per-instance attempts remain, because only the domain record
+// can block an entire scale set.
+func Inspect(path string, now time.Time) (Snapshot, error) {
+	state, err := readJournal(path)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if now.IsZero() {
+		return Snapshot{}, errors.New("retry observation time is required")
+	}
+	now = now.UTC()
+	result := Snapshot{
+		Generation:   state.Generation,
+		Records:      len(state.Records),
+		ByErrorClass: map[string]int{"capacity": 0, "identity": 0, "intent": 0, "provider": 0, "timeout": 0, "unknown": 0},
+	}
+	for key, retry := range state.Records {
+		class := retry.LastErrorClass
+		if _, known := result.ByErrorClass[class]; !known {
+			class = "unknown"
+		}
+		result.ByErrorClass[class]++
+		if retry.NextAllowedAt.After(now) {
+			delay := int64(retry.NextAllowedAt.Sub(now) / time.Second)
+			if result.NextRetryDelaySeconds == 0 || delay < result.NextRetryDelaySeconds {
+				result.NextRetryDelaySeconds = delay
+			}
+		}
+		if retry.TerminalUntil.After(now) && retryDomainKey(key) == key {
+			result.TerminalCircuits++
+			age := max(int64(0), int64(now.Sub(retry.UpdatedAt)/time.Second))
+			if age > result.OldestTerminalAgeSeconds {
+				result.OldestTerminalAgeSeconds = age
+			}
+		}
+	}
+	return result, nil
+}
+
+func retryDomainKey(key string) string {
+	for _, marker := range []string{":instance:", ":job:"} {
+		if index := strings.Index(key, marker); index > 0 {
+			return key[:index]
+		}
+	}
+	return key
+}
+
 func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID string, scaleSetID uint, errorClass string, expectedUpdatedAt time.Time, apply bool) (RecoveryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return RecoveryResult{}, err
