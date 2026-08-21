@@ -428,7 +428,7 @@ func hostFirewall(cfg config.Config, bridgeAddress, bridgeSubnet string) HostFir
 			},
 			{
 				Name: "services-rustfs-diagnostics",
-				Args: []string{"allow", "in", "on", "eth1", "from", cfg.Incus.ServicesHostAddress, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-services-rustfs-diagnostics-v1"},
+				Args: []string{"allow", "in", "on", "eth1", "from", cfg.Incus.ServicesHostAddress, "to", bridgeAddress, "port", strconv.Itoa(cfg.Incus.RustFSPort), "proto", "tcp", "comment", "gha-fleet-services-rustfs-diagnostics-v1"},
 			},
 			{
 				Name: "garm-gateway",
