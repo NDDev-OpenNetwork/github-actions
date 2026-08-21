@@ -86,8 +86,9 @@ type policyInfo struct {
 }
 
 type quotaInfo struct {
-	Quota     int64  `json:"quota"`
-	QuotaType string `json:"quota_type"`
+	Quota           int64  `json:"quota"`
+	QuotaType       string `json:"quota_type"`
+	QuotaTypeCompat string `json:"quotatype"`
 }
 
 type lifecycleConfiguration struct {
@@ -391,7 +392,7 @@ func (r Runner) inspectRemote(
 		}
 		var quota quotaInfo
 		quotaManaged := quotaResponse.StatusCode == http.StatusOK && json.Unmarshal(quotaResponse.Body, &quota) == nil &&
-			quota.Quota == config.QuotaBytes && quota.QuotaType == "HARD"
+			quota.Quota == config.QuotaBytes && (quota.QuotaType == "HARD" || strings.EqualFold(quota.QuotaTypeCompat, "hard"))
 
 		lifecycleResponse, err := r.Requester.Do(ctx, root, http.MethodGet,
 			"/"+config.Bucket+"?lifecycle", "", nil)
