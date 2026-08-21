@@ -81,6 +81,7 @@ func FieldDispositions() map[string]Disposition {
 // listed rather than reflected so that the dispositions map and the struct are
 // two statements that have to agree, which is what the test checks.
 var runtimeContractFields = []string{
+	"queue_intent_schema_version",
 	"event_driven_scale_set_wake",
 	"event_driven_instance_wake",
 	"startup_states_protected_from_scale_down",

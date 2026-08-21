@@ -46,7 +46,8 @@ type Upstream struct {
 }
 
 type Runtime struct {
-	IncusSDKVersion string `json:"incus_sdk_version" yaml:"incus_sdk_version"`
+	IncusSDKVersion          string `json:"incus_sdk_version" yaml:"incus_sdk_version"`
+	QueueIntentSchemaVersion int    `json:"queue_intent_schema_version" yaml:"queue_intent_schema_version"`
 }
 
 type Build struct {
@@ -143,6 +144,9 @@ func (m Manifest) Validate() error {
 	}
 	if !plainSemver.MatchString(m.Runtime.IncusSDKVersion) {
 		return fmt.Errorf("runtime.incus_sdk_version: %q must be a plain vMAJOR.MINOR.PATCH", m.Runtime.IncusSDKVersion)
+	}
+	if m.Runtime.QueueIntentSchemaVersion < 1 {
+		return fmt.Errorf("runtime.queue_intent_schema_version must be positive")
 	}
 	if !hex40.MatchString(m.Build.SourceCommit) {
 		return fmt.Errorf("build.source_commit: %q is not a full commit id", m.Build.SourceCommit)

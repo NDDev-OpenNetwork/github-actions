@@ -64,6 +64,7 @@ type Build struct {
 // a build input: it is held by the patch and overlay content assertions in
 // internal/deploycontract, which read the same manifest.
 type RuntimeContract struct {
+	QueueIntentSchemaVersion                 int  `json:"queue_intent_schema_version" yaml:"queue_intent_schema_version"`
 	EventDrivenScaleSetWake                  bool `json:"event_driven_scale_set_wake" yaml:"event_driven_scale_set_wake"`
 	EventDrivenInstanceWake                  bool `json:"event_driven_instance_wake" yaml:"event_driven_instance_wake"`
 	StartupStatesProtected                   bool `json:"startup_states_protected_from_scale_down" yaml:"startup_states_protected_from_scale_down"`
