@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	queueAdmissionSchemaVersion    = 2
-	queueIntentLegacySchemaVersion = 1
-	queueIntentSchemaVersion       = 2
-	queueIntentMaxBytes            = 4 * 1024 * 1024
-	queueSchedulerStride           = uint64(1_000_000)
-	queueAcquireRetryDelay         = 5 * time.Second
+	queueAdmissionSchemaVersion      = 2
+	queueIntentLegacySchemaVersion   = 1
+	queueIntentPreviousSchemaVersion = 2
+	queueIntentSchemaVersion         = 3
+	queueIntentMaxBytes              = 4 * 1024 * 1024
+	queueSchedulerStride             = uint64(1_000_000)
+	queueAcquireRetryDelay           = 5 * time.Second
 
 	queueConfigEnvironment = "GARM_NDDEV_QUEUE_ADMISSION_CONFIG"
 	queueFileEnvironment   = "GARM_NDDEV_QUEUE_INTENT_FILE"
@@ -98,14 +99,15 @@ type queueIntent struct {
 	Owner string `json:"owner,omitempty"`
 	// Repository is the account until JobAvailable names the repository. See
 	// queueIntentRepositoryCompatible for the one transition that is allowed.
-	Repository  string           `json:"repository"`
-	WorkflowRef string           `json:"workflow_ref"`
-	EventName   string           `json:"event_name"`
-	QueueTime   time.Time        `json:"queue_time"`
-	State       queueIntentState `json:"state"`
-	Priority    int              `json:"priority"`
-	UpdatedAt   time.Time        `json:"updated_at"`
-	ExpiresAt   time.Time        `json:"expires_at"`
+	Repository     string           `json:"repository"`
+	WorkflowRef    string           `json:"workflow_ref"`
+	EventName      string           `json:"event_name"`
+	QueueTime      time.Time        `json:"queue_time"`
+	State          queueIntentState `json:"state"`
+	Priority       int              `json:"priority"`
+	StateEnteredAt time.Time        `json:"state_entered_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+	ExpiresAt      time.Time        `json:"expires_at"`
 }
 
 type queueRepositoryState struct {
@@ -216,8 +218,8 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
 			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
 			QueueTime: queueTime, State: queueStateQueued,
-			Priority:  baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
-			UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
+			Priority:       baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
+			StateEnteredAt: now, UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
 		}
 		ensureRepositoryState(journal, config, repository)
 		admitQueuedToBudget(journal, config, now)
@@ -388,6 +390,7 @@ func (c *queueIntentCoordinator) SelectForAcquire(scaleSet params.ScaleSet, jobs
 				continue
 			}
 			intent.State = queueStateAcquiring
+			intent.StateEnteredAt = now
 			intent.UpdatedAt = now
 			intent.ExpiresAt = expiryForState(config, queueStateAcquiring, now)
 			journal.Intents[key] = intent
@@ -431,6 +434,7 @@ func (c *queueIntentCoordinator) CompleteAcquire(scaleSet params.ScaleSet, selec
 			}
 			if _, wasAcquired := acquiredSet[id]; wasAcquired {
 				intent.State = queueStateAcquired
+				intent.StateEnteredAt = now
 			}
 			// A successful API response that omitted this ID is externally
 			// ambiguous after a crash: the earlier call may already have acquired
@@ -463,6 +467,7 @@ func (c *queueIntentCoordinator) FailAcquire(scaleSet params.ScaleSet, selected 
 				return fmt.Errorf("queue intent %q is not durably acquiring", key)
 			}
 			intent.State = queueStateAssigned
+			intent.StateEnteredAt = now
 			intent.UpdatedAt = now
 			intent.ExpiresAt = expiryForState(config, intent.State, now)
 			journal.Intents[key] = intent
@@ -565,11 +570,15 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 					continue
 				}
 				replacement.State = queueStateRunning
+				replacement.StateEnteredAt = now
 				replacement.UpdatedAt = now
 				replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
 				journal.Intents[key] = replacement
 				ensureRepositoryState(journal, config, replacement.Repository)
 				continue
+			}
+			if intent.State != queueStateRunning {
+				intent.StateEnteredAt = now
 			}
 			intent.State = queueStateRunning
 			if validQueueText(job.RunnerName) {
@@ -676,6 +685,7 @@ func transferAssignedReservation(
 	replacement.QueueTime = reservation.QueueTime
 	replacement.Priority = reservation.Priority
 	replacement.State = queueStateRunning
+	replacement.StateEnteredAt = now
 	replacement.UpdatedAt = now
 	replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
 	journal.Intents[replacement.Key] = replacement
@@ -722,6 +732,7 @@ func tryAdmitQueueIntent(journal *queueIntentJournal, config queueAdmissionConfi
 		return false, nil
 	}
 	intent.State = queueStateAssigned
+	intent.StateEnteredAt = now
 	intent.UpdatedAt = now
 	intent.ExpiresAt = expiryForState(config, queueStateAssigned, now)
 	journal.Intents[key] = intent
@@ -900,6 +911,7 @@ func (j queueIntentJournal) Validate() error {
 			intent.ScaleSetID <= 0 || !validQueueText(intent.JobID) || intent.RunnerRequestID < 0 || !validQueueText(intent.ScaleSetName) ||
 			(intent.RunnerName != "" && !validQueueText(intent.RunnerName)) ||
 			!validQueueAccountOrRepository(intent.Repository) || !validQueueText(intent.WorkflowRef) || !validQueueText(intent.EventName) || intent.QueueTime.IsZero() ||
+			intent.StateEnteredAt.IsZero() || intent.StateEnteredAt.After(intent.UpdatedAt) ||
 			intent.UpdatedAt.IsZero() || intent.ExpiresAt.Before(intent.UpdatedAt) || intent.Priority < 0 || intent.Priority > 3 {
 			return fmt.Errorf("queue intent %q is invalid", key)
 		}
@@ -942,6 +954,7 @@ func queueIntentFromJob(scaleSet params.ScaleSet, job params.ScaleSetJobMessage,
 		QueueTime:       job.QueueTime.UTC(),
 		State:           queueStateQueued,
 		Priority:        baseQueuePriority(scaleSet.Name, job),
+		StateEnteredAt:  now,
 		UpdatedAt:       now,
 		ExpiresAt:       now.Add(ttl),
 	}, nil
@@ -991,6 +1004,7 @@ func queueIntentFromLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntit
 		QueueTime:       now,
 		State:           queueStateQueued,
 		Priority:        baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{}),
+		StateEnteredAt:  now,
 		UpdatedAt:       now,
 		ExpiresAt:       now.Add(ttl),
 	}, nil
@@ -1222,11 +1236,15 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 		return queueIntentJournal{}, fmt.Errorf("queue-intent journal has trailing data")
 	}
 	switch journal.SchemaVersion {
-	case queueIntentLegacySchemaVersion:
+	case queueIntentLegacySchemaVersion, queueIntentPreviousSchemaVersion:
 		// v2 adds only the JobStarted runner identity. Old active intents have no
 		// value to synthesize; they remain explicitly uncorrelated until their
 		// lifecycle completes, and the next writer transaction upgrades the file.
 		journal.SchemaVersion = queueIntentSchemaVersion
+		for key, intent := range journal.Intents {
+			intent.StateEnteredAt = intent.UpdatedAt
+			journal.Intents[key] = intent
+		}
 	case queueIntentSchemaVersion:
 	default:
 		return queueIntentJournal{}, fmt.Errorf("queue-intent journal schema_version must be %d", queueIntentSchemaVersion)

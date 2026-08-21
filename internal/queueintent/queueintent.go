@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	LegacySchemaVersion = 1
-	SchemaVersion       = 2
-	maxJournalBytes     = 4 * 1024 * 1024
+	LegacySchemaVersion   = 1
+	PreviousSchemaVersion = 2
+	SchemaVersion         = 3
+	maxJournalBytes       = 4 * 1024 * 1024
 )
 
 type State string
@@ -56,15 +57,16 @@ type Intent struct {
 	// knows the account it serves and has no reason to know the registry ID
 	// the fleet files it under. Translating one into the other is the
 	// provider's job, at the one place that compares them.
-	Owner       string    `json:"owner,omitempty"`
-	Repository  string    `json:"repository"`
-	WorkflowRef string    `json:"workflow_ref"`
-	EventName   string    `json:"event_name"`
-	QueueTime   time.Time `json:"queue_time"`
-	State       State     `json:"state"`
-	Priority    int       `json:"priority"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	Owner          string    `json:"owner,omitempty"`
+	Repository     string    `json:"repository"`
+	WorkflowRef    string    `json:"workflow_ref"`
+	EventName      string    `json:"event_name"`
+	QueueTime      time.Time `json:"queue_time"`
+	State          State     `json:"state"`
+	Priority       int       `json:"priority"`
+	StateEnteredAt time.Time `json:"state_entered_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 type RepositoryState struct {
@@ -264,8 +266,12 @@ func readJournal(path string) (Journal, error) {
 		return Journal{}, fmt.Errorf("decode trailing queue-intent journal data: %w", err)
 	}
 	switch journal.SchemaVersion {
-	case LegacySchemaVersion:
+	case LegacySchemaVersion, PreviousSchemaVersion:
 		journal.SchemaVersion = SchemaVersion
+		for key, intent := range journal.Intents {
+			intent.StateEnteredAt = intent.UpdatedAt
+			journal.Intents[key] = intent
+		}
 	case SchemaVersion:
 	default:
 		return Journal{}, fmt.Errorf("queue-intent journal schema_version must be %d", SchemaVersion)
@@ -292,8 +298,8 @@ func (j Journal) Validate() error {
 			!validAccountOrRepository(intent.Repository) || !validText(intent.WorkflowRef) || !validText(intent.EventName) {
 			return fmt.Errorf("queue intent %q has incomplete identity", key)
 		}
-		if intent.QueueTime.IsZero() || intent.UpdatedAt.IsZero() || intent.ExpiresAt.IsZero() ||
-			intent.ExpiresAt.Before(intent.UpdatedAt) {
+		if intent.QueueTime.IsZero() || intent.StateEnteredAt.IsZero() || intent.UpdatedAt.IsZero() || intent.ExpiresAt.IsZero() ||
+			intent.StateEnteredAt.After(intent.UpdatedAt) || intent.ExpiresAt.Before(intent.UpdatedAt) {
 			return fmt.Errorf("queue intent %q has invalid timestamps", key)
 		}
 		if intent.Priority < 0 || intent.Priority > 3 {
