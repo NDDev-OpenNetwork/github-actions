@@ -1,0 +1,134 @@
+schema_version: 1
+backend: openobserve
+organization: default
+rules:
+  - id: collector_queue_near_full
+    severity: page
+    query_language: promql
+    query: max(otelcol_exporter_queue_size) / clamp_min(max(otelcol_exporter_queue_capacity), 1) > 0.9
+    evaluation_seconds: 30
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A persistent Collector queue is above ninety percent of capacity.
+    action: Restore the backend path or storage before overflow and preserve the queue directory.
+    recovery: Queue ratio stays below fifty percent and enqueue/refusal counters remain zero.
+  - id: diagnostic_export_failure
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_diagnostic_export_consecutive_failures) > 0
+    evaluation_seconds: 30
+    hold_seconds: 60
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Durable diagnostic export is failing.
+    action: Preserve the spool and restore RustFS routing or credentials without pruning evidence.
+    recovery: Consecutive failures and pending backlog return to zero after an exact successful export.
+  - id: fleet_platform_unhealthy
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_platform_healthy) < 1
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: The authoritative fleet observer reports an unhealthy platform.
+    action: Stop promotion work and inspect exact collection errors and service states.
+    recovery: Platform health remains one and all correlated gap metrics are zero.
+  - id: host_oom_detected
+    severity: page
+    query_language: promql
+    query: max(increase(gha_fleet_host_oom_kills_total[5m])) > 0
+    evaluation_seconds: 30
+    hold_seconds: 30
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet host recorded a new OOM kill.
+    action: Close admission on the affected member and preserve workload and pressure evidence.
+    recovery: No new OOM delta occurs and memory pressure returns inside the promotion envelope.
+  - id: lifecycle_assigned_stall
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"}) > 300
+    evaluation_seconds: 30
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: An admitted job has not reached execution within five minutes.
+    action: Correlate the exact intent with GitHub, GARM, provider lease and Incus state.
+    recovery: Assigned age stays below the phase SLO or authoritative reconciliation releases it.
+  - id: lifecycle_created_unbound
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds) > 300
+    evaluation_seconds: 30
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A created worker has no running job identity beyond transition grace.
+    action: Verify GitHub absent/offline state before allowing the normal reaper to delete it.
+    recovery: No created lease remains unbound beyond five minutes.
+  - id: lifecycle_inventory_gap
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_incus_orphan_instances) > 0 or max(gha_fleet_journal_missing_instances) > 0 or max(gha_fleet_queue_uncovered_running) > 0
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Queue, provider journal and Incus inventory disagree.
+    action: Preserve all three states and recover only from exact authoritative identity.
+    recovery: Orphan, missing and uncovered-running metrics remain zero.
+  - id: memory_psi_slow_burn
+    severity: ticket
+    query_language: promql
+    query: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window="avg10"}) > 5
+    evaluation_seconds: 300
+    hold_seconds: 1800
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Sustained memory pressure is consuming useful throughput.
+    action: Create a capacity ticket with class mix, RSS and queue percentile evidence.
+    recovery: Memory PSI remains below five percent for the hold window.
+  - id: queue_wait_slow_burn
+    severity: ticket
+    query_language: promql
+    query: max(gha_fleet_queue_oldest_age_seconds) > 120
+    evaluation_seconds: 300
+    hold_seconds: 900
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Queue latency is persistently above the initial two-minute objective.
+    action: Create a capacity or fairness ticket using phase-specific and class metrics.
+    recovery: Queue age remains below two minutes for the hold window.
+  - id: snapshot_stale
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_snapshot_stale) > 0
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: The authoritative observer snapshot is stale.
+    action: Restore observer sampling and Collector scrape before trusting other fleet metrics.
+    recovery: Snapshot stale is zero and age remains below forty-five seconds.
