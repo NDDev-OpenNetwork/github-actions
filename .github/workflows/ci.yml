@@ -14,6 +14,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Derivative inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      garm: ${{ steps.paths.outputs.garm }}
+      provider: ${{ steps.paths.outputs.provider }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify derivative inputs
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == workflow_dispatch ]]; then
+            printf 'garm=true\nprovider=true\n' >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          base="${BASE_SHA:-${BEFORE_SHA:-}}"
+          if [[ ! "${base}" =~ ^[0-9a-f]{40}$ || "${base}" == 0000000000000000000000000000000000000000 ]]; then
+            printf 'garm=true\nprovider=true\n' >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git cat-file -e "${base}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          garm=false
+          provider=false
+          while IFS= read -r changed; do
+            case "${changed}" in
+              config/garm-derivative.yaml|scripts/build-garm-nddev.sh|third_party/garm/*|internal/garmderivative/*|cmd/gha-fleet/main.go|go.mod|go.sum)
+                garm=true
+                ;;
+            esac
+            case "${changed}" in
+              config/provider-derivative.yaml|cmd/garm-provider-incus-nddev/*|internal/cachenamespace/*|internal/config/*|internal/garmproviderincus/*|internal/provideradmission/*|internal/providerjournal/*|internal/providerrelease/*|internal/providerretry/*|internal/rustfscache/*|go.mod|go.sum)
+                provider=true
+                ;;
+            esac
+          done < <(git diff --name-only --diff-filter=ACMRT "${base}" "${HEAD_SHA}")
+          printf 'garm=%s\nprovider=%s\n' "${garm}" "${provider}" >>"${GITHUB_OUTPUT}"
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -62,6 +110,8 @@ jobs:
 
   derivative:
     name: Reproducible GARM derivative
+    needs: changes
+    if: ${{ needs.changes.outputs.garm == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -72,6 +122,8 @@ jobs:
 
   provider-derivative:
     name: Reproducible provider derivative
+    needs: changes
+    if: ${{ needs.changes.outputs.provider == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -129,9 +181,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [test, race, static, derivative, provider-derivative]
+    needs: [changes, test, race, static, derivative, provider-derivative]
     steps:
       - env:
+          CHANGES: ${{ needs.changes.result }}
           TEST: ${{ needs.test.result }}
           RACE: ${{ needs.race.result }}
           STATIC: ${{ needs.static.result }}
@@ -139,8 +192,9 @@ jobs:
           PROVIDER_DERIVATIVE: ${{ needs.provider-derivative.result }}
         run: |
           set -eu
+          test "${CHANGES}" = success
           test "${TEST}" = success
           test "${RACE}" = success
           test "${STATIC}" = success
-          test "${DERIVATIVE}" = success
-          test "${PROVIDER_DERIVATIVE}" = success
+          test "${DERIVATIVE}" = success || test "${DERIVATIVE}" = skipped
+          test "${PROVIDER_DERIVATIVE}" = success || test "${PROVIDER_DERIVATIVE}" = skipped
