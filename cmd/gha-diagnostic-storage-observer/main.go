@@ -58,7 +58,7 @@ func main() {
 	root, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	state := &diagnosticstoreobserve.State{}
-	sample := func() {
+	sample := func() bool {
 		ctx, cancel := context.WithTimeout(root, 20*time.Second)
 		defer cancel()
 		now := time.Now().UTC()
@@ -70,8 +70,23 @@ func main() {
 			slog.Warn("diagnostic storage capacity sample is unhealthy",
 				"state", snapshot.Result.StateAfter, "headroom_state", snapshot.Result.HeadroomState)
 		}
+		return diagnosticstoreobserve.Healthy(snapshot, now)
 	}
-	sample()
+	startupDeadline := time.NewTimer(2 * time.Minute)
+	defer startupDeadline.Stop()
+	for !sample() {
+		retry := time.NewTimer(5 * time.Second)
+		select {
+		case <-root.Done():
+			retry.Stop()
+			return
+		case <-startupDeadline.C:
+			retry.Stop()
+			slog.Error("diagnostic storage capacity did not converge before startup deadline")
+			os.Exit(1)
+		case <-retry.C:
+		}
+	}
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -80,7 +95,7 @@ func main() {
 			case <-root.Done():
 				return
 			case <-ticker.C:
-				sample()
+				_ = sample()
 			}
 		}
 	}()
