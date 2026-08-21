@@ -235,7 +235,14 @@ func (c Config) AllowsRepository(repository string) bool {
 	return sortedContains(c.Repositories, repository)
 }
 
-func (c Config) AllowsAccount(account string) bool {
+func (c Config) AllowsRepositoryAccount(repository string) bool {
+	account := repository
+	if owner, name, separated := strings.Cut(repository, "/"); separated {
+		if !repositoryPattern.MatchString(repository) || !validIdentity(owner) || !validIdentity(name) {
+			return false
+		}
+		account = owner
+	}
 	return sortedContains(c.AccountScopes, account)
 }
 

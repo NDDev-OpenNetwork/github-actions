@@ -373,7 +373,7 @@ func classifyBundleScope(config Config, instance workerdiagnostics.Instance) (bu
 	if config.AllowsRepository(instance.Repository) && !strings.HasPrefix(instance.PoolID, "warm/") {
 		return bundleScopeRepository, nil
 	}
-	if config.AllowsAccount(instance.Repository) && !strings.HasPrefix(instance.PoolID, "warm/") {
+	if config.AllowsRepositoryAccount(instance.Repository) && !strings.HasPrefix(instance.PoolID, "warm/") {
 		return bundleScopeAccount, nil
 	}
 	if instance.Repository == "" && instance.PoolID == "warm/"+instance.PoolName {
