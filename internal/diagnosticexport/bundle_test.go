@@ -146,6 +146,40 @@ func TestReadBundleAcceptsReviewedWholeAccountScope(t *testing.T) {
 	}
 }
 
+func TestReadBundleAcceptsRepositoryOwnedByReviewedAccount(t *testing.T) {
+	config, name := diagnosticFixtureForScope(
+		t, "nddev-linux-standard", "nddev-linux-standard", "pool-test", "example-user/another-repository",
+	)
+	bundle, err := ReadBundle(context.Background(), config, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := "diagnostics/v1/account/example-user/another-repository/trust/trusted/platform/linux/amd64/"
+	if !strings.HasPrefix(bundle.ObjectKey, wanted) {
+		t.Fatalf("account repository object key = %q", bundle.ObjectKey)
+	}
+}
+
+func TestReadBundleRejectsRepositoryOwnedByUnknownAccount(t *testing.T) {
+	config, name := diagnosticFixtureForScope(
+		t, "nddev-linux-standard", "nddev-linux-standard", "pool-test", "unknown-account/another-repository",
+	)
+	if _, err := ReadBundle(context.Background(), config, name); err == nil ||
+		!strings.Contains(err.Error(), "outside the configured repository or pool") {
+		t.Fatalf("unknown account repository error = %v", err)
+	}
+}
+
+func TestReadBundleRejectsMalformedRepositoryInReviewedAccountScope(t *testing.T) {
+	config, name := diagnosticFixtureForScope(
+		t, "nddev-linux-standard", "nddev-linux-standard", "pool-test", "example-user/repository/extra",
+	)
+	if _, err := ReadBundle(context.Background(), config, name); err == nil ||
+		!strings.Contains(err.Error(), "outside the configured repository or pool") {
+		t.Fatalf("malformed account repository error = %v", err)
+	}
+}
+
 func TestReadBundleSeparatesReviewedTenantScopes(t *testing.T) {
 	for _, test := range []struct {
 		identity string
