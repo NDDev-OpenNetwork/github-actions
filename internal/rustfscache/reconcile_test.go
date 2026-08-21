@@ -406,7 +406,7 @@ func (f *fakeRustFS) Do(
 			if f.quota == 0 {
 				return status(http.StatusNotFound), true
 			}
-			encoded, _ := json.Marshal(quotaInfo{Quota: f.quota, QuotaType: "HARD"})
+			encoded, _ := json.Marshal(quotaInfo{Quota: f.quota, QuotaTypeCompat: "hard"})
 			return Response{StatusCode: http.StatusOK, Body: encoded}, true
 		case method == http.MethodPut && parsed.Path == "/rustfs/admin/v3/quota/"+f.config.Bucket:
 			var request struct {
