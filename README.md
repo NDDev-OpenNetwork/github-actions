@@ -17,6 +17,10 @@ runtime evidence belong in the consuming private estate.
 - Each worker executes one job and is destroyed.
 - Diagnostic data is retained locally until remote size, digest and schema are
   confirmed.
+- `reconcile-diagnostic-storage` plans, applies and reads back the remote hard
+  quota and prefix lifecycle as one source-controlled durability contract. A
+  consuming estate sizes the quota from measured retention, burst and outage
+  demand; reaching the hard quota is never treated as normal backpressure.
 - Host-local CPU, memory and I/O PSI is converted into a hysteretic, expiring
   Incus member signal; missing, stale or closed signals remove capacity rather
   than becoming provider failures or hidden overcommit.
