@@ -155,7 +155,15 @@ jobs:
       - name: Configure NDDev compiler cache
         id: configure-compiler-cache
         if: ${{ inputs.environment == 'nddev' && inputs.cache_mode == 'warm' }}
-        run: modules/github-actions/scripts/configure-sccache.sh modules/github-actions/benchmark/rust/Cargo.lock rustc-1.97.1 benchmark
+        run: |
+          set -euo pipefail
+          if [[ -z "${NDDEV_CACHE_ROLE:-}" ]]; then
+            printf 'enabled=false\n' >>"${GITHUB_OUTPUT}"
+            printf 'repository-scoped compiler cache was not delivered; measuring an explicit warm miss\n'
+            exit 0
+          fi
+          modules/github-actions/scripts/configure-sccache.sh modules/github-actions/benchmark/rust/Cargo.lock rustc-1.97.1 benchmark
+          printf 'enabled=true\n' >>"${GITHUB_OUTPUT}"
 
       - name: Restore dependency cache
         if: ${{ inputs.environment == 'github-hosted' && inputs.cache_mode == 'warm' }}
@@ -185,6 +193,11 @@ jobs:
         if: ${{ always() && steps.configure-compiler-cache.outcome == 'success' }}
         run: |
           set -euo pipefail
+          if [[ "${{ steps.configure-compiler-cache.outputs.enabled }}" != true ]]; then
+            printf 'cache-hit=false\n' >>"${GITHUB_OUTPUT}"
+            printf 'sccache not enabled for this repository\n'
+            exit 0
+          fi
           stats="${RUNNER_TEMP}/nddev-benchmark-rust/sccache-stats.json"
           install -d -m 0700 -- "${stats%/*}"
           sccache --show-stats --stats-format json >"${stats}"
