@@ -75,6 +75,7 @@ type RuntimeContract struct {
 	StartupQueuePromotion                    bool `json:"startup_queue_promotion" yaml:"startup_queue_promotion"`
 	DeferredAvailableMessageRetained         bool `json:"deferred_available_message_retained" yaml:"deferred_available_message_retained"`
 	GlobalMaxInFlight                        int  `json:"global_max_in_flight" yaml:"global_max_in_flight"`
+	MaximumBackgroundInFlight                int  `json:"maximum_background_in_flight" yaml:"maximum_background_in_flight"`
 	WeightedRepositoryFairness               bool `json:"weighted_repository_fairness" yaml:"weighted_repository_fairness"`
 	PerRepositoryLimit                       int  `json:"per_repository_limit" yaml:"per_repository_limit"`
 	PriorityAgingSeconds                     int  `json:"priority_aging_seconds" yaml:"priority_aging_seconds"`

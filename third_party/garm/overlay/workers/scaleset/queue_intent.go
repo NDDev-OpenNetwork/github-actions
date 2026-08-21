@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	queueAdmissionSchemaVersion      = 3
+	queueAdmissionSchemaVersion      = 4
 	queueIntentLegacySchemaVersion   = 1
 	queueIntentPreviousSchemaVersion = 2
 	queueIntentSchemaVersion         = 3
@@ -70,6 +70,7 @@ const queueMaxInFlightCeiling = 64
 type queueAdmissionConfig struct {
 	SchemaVersion          int                               `json:"schema_version"`
 	MaxInFlight            int                               `json:"max_in_flight"`
+	MaxBackgroundInFlight  int                               `json:"max_background_in_flight"`
 	DefaultRepositoryLimit int                               `json:"default_repository_limit"`
 	DefaultWeight          uint64                            `json:"default_weight"`
 	QueuedTTLSeconds       int                               `json:"queued_ttl_seconds"`
@@ -866,6 +867,7 @@ func migrateLegacyQueueIntentOwnership(journal *queueIntentJournal, config queue
 func (c queueAdmissionConfig) Validate() error {
 	if c.SchemaVersion != queueAdmissionSchemaVersion ||
 		c.MaxInFlight < 1 || c.MaxInFlight > queueMaxInFlightCeiling ||
+		c.MaxBackgroundInFlight < 1 || c.MaxBackgroundInFlight > c.MaxInFlight ||
 		c.DefaultWeight == 0 || c.DefaultWeight > 100 {
 		return fmt.Errorf("queue admission identity or global limits are invalid")
 	}
@@ -1033,9 +1035,11 @@ func baseQueuePriority(config queueAdmissionConfig, scaleSetName string, job par
 
 func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	candidates := make([]queueIntent, 0)
+	backgroundInFlight := queueBackgroundInFlight(journal)
 	for _, intent := range journal.Intents {
 		if intent.State != queueStateQueued ||
-			inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight {
+			inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight ||
+			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) {
 			continue
 		}
 		candidates = append(candidates, intent)
@@ -1057,6 +1061,20 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		return candidates[left].Key < candidates[right].Key
 	})
 	return candidates
+}
+
+// queueBackgroundInFlight counts the immutable admission class, not its aged
+// scheduling priority. Aging decides which queued background job receives the
+// next background slot; it must not let long-running maintenance escape the
+// configured concurrency envelope and occupy the whole production fleet.
+func queueBackgroundInFlight(journal *queueIntentJournal) int {
+	total := 0
+	for _, intent := range journal.Intents {
+		if intent.State != queueStateQueued && intent.Priority == 2 {
+			total++
+		}
+	}
+	return total
 }
 
 func effectiveQueuePriority(intent queueIntent, config queueAdmissionConfig, now time.Time) int {

@@ -92,6 +92,7 @@ var runtimeContractFields = []string{
 	"startup_queue_promotion",
 	"deferred_available_message_retained",
 	"global_max_in_flight",
+	"maximum_background_in_flight",
 	"weighted_repository_fairness",
 	"per_repository_limit",
 	"priority_aging_seconds",

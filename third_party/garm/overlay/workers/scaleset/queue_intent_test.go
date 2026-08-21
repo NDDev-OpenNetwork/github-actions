@@ -866,7 +866,7 @@ func TestQueueCoordinatorStillCapsOneRepositoryBelowItsWidth(t *testing.T) {
 // never keep, so it is refused at load rather than silently clamped.
 func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 3, MaxInFlight: 2, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 4, MaxInFlight: 2, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -885,7 +885,7 @@ func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 // than every host together can hold.
 func TestQueueAdmissionConfigRefusesAnUnboundedWidth(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 3, MaxInFlight: queueMaxInFlightCeiling + 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 4, MaxInFlight: queueMaxInFlightCeiling + 1, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: queueMaxInFlightCeiling, MemoryMiB: queueMaxInFlightCeiling * 1024}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -919,6 +919,56 @@ func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	heavy.Priority = 0
 	if selected, exists := resourceFitCandidate(&journal, config, []queueIntent{heavy, light}, now); exists {
 		t.Fatalf("priority-zero reservation backfilled with %#v", selected)
+	}
+}
+
+func TestQueueCoordinatorBoundsBackgroundWithoutBlockingProduction(t *testing.T) {
+	now := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		MaxInFlight: 4, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 4, DefaultWeight: 1,
+		PriorityAgingSeconds: 300,
+		Capacity:             queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
+		ScaleSets: map[string]queueScaleSetResources{
+			"background": {CPUUnits: 1, MemoryMiB: 1024, Priority: 2},
+			"ordinary":   {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
+			"high":       {CPUUnits: 1, MemoryMiB: 1024, Priority: 0},
+		},
+		Repositories: map[string]queueRepositoryPolicy{},
+	}
+	journal := queueIntentJournal{Repositories: map[string]queueRepositoryState{}, Intents: map[string]queueIntent{
+		"running-background":     {State: queueStateRunning, Priority: 2, ScaleSetName: "background", Repository: "owner/maintenance"},
+		"queued-aged-background": {Key: "queued-aged-background", State: queueStateQueued, Priority: 2, ScaleSetName: "background", Repository: "owner/maintenance", QueueTime: now.Add(-time.Hour)},
+		"queued-ordinary":        {Key: "queued-ordinary", State: queueStateQueued, Priority: 1, ScaleSetName: "ordinary", Repository: "owner/product", QueueTime: now},
+		"queued-high":            {Key: "queued-high", State: queueStateQueued, Priority: 0, ScaleSetName: "high", Repository: "owner/priority", QueueTime: now},
+	}}
+	_, byRepository := queueInFlight(&journal)
+	candidates := eligibleQueueCandidates(&journal, config, byRepository, now)
+	if len(candidates) != 2 || candidates[0].Key != "queued-high" || candidates[1].Key != "queued-ordinary" {
+		t.Fatalf("background envelope candidates = %#v", candidates)
+	}
+	delete(journal.Intents, "running-background")
+	_, byRepository = queueInFlight(&journal)
+	candidates = eligibleQueueCandidates(&journal, config, byRepository, now)
+	if len(candidates) != 3 || candidates[0].Key != "queued-high" || candidates[1].Key != "queued-aged-background" {
+		t.Fatalf("drained background slot candidates = %#v", candidates)
+	}
+}
+
+func TestQueueAdmissionConfigRejectsInvalidBackgroundEnvelope(t *testing.T) {
+	config := queueAdmissionConfig{
+		SchemaVersion: 4, MaxInFlight: 4, MaxBackgroundInFlight: 0,
+		DefaultRepositoryLimit: 4, DefaultWeight: 1,
+		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
+		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
+		Capacity:  queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
+		ScaleSets: testQueueScaleSetResourceMap(), Repositories: map[string]queueRepositoryPolicy{},
+	}
+	if err := config.Validate(); err == nil {
+		t.Fatal("zero background concurrency was accepted")
+	}
+	config.MaxBackgroundInFlight = 5
+	if err := config.Validate(); err == nil {
+		t.Fatal("background concurrency above global width was accepted")
 	}
 }
 
@@ -1122,8 +1172,9 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		repositories = map[string]queueRepositoryPolicy{}
 	}
 	config := queueAdmissionConfig{
-		SchemaVersion:          3,
+		SchemaVersion:          4,
 		MaxInFlight:            maxInFlight,
+		MaxBackgroundInFlight:  maxInFlight,
 		DefaultRepositoryLimit: defaultRepositoryLimit,
 		DefaultWeight:          1,
 		QueuedTTLSeconds:       600,
