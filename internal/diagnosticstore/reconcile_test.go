@@ -149,3 +149,21 @@ func TestCredentialDirectoryOverrideIsExactAndValidated(t *testing.T) {
 		t.Fatal("relative credential directory was accepted")
 	}
 }
+
+func TestSystemdCredentialModeIsNarrowlyAccepted(t *testing.T) {
+	if !credentialModeAllowed("/run/credentials/example.service/rustfs-access-key", 0o440) {
+		t.Fatal("systemd credential mode 0440 was rejected")
+	}
+	for _, test := range []struct {
+		path string
+		mode os.FileMode
+	}{
+		{path: "/etc/gha-fleet/secret", mode: 0o440},
+		{path: "/run/credentials/example.service/secret", mode: 0o444},
+		{path: "/run/credentials/example.service/secret", mode: 0o460},
+	} {
+		if credentialModeAllowed(test.path, test.mode) {
+			t.Fatalf("unsafe credential mode %o at %s was accepted", test.mode, test.path)
+		}
+	}
+}

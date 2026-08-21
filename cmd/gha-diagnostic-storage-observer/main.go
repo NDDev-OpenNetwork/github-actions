@@ -61,7 +61,15 @@ func main() {
 	sample := func() {
 		ctx, cancel := context.WithTimeout(root, 20*time.Second)
 		defer cancel()
-		state.Sample(ctx, collect, time.Now().UTC())
+		now := time.Now().UTC()
+		state.Sample(ctx, collect, now)
+		snapshot := state.Snapshot()
+		if snapshot.Error != "" {
+			slog.Warn("diagnostic storage capacity sample failed", "error", snapshot.Error)
+		} else if !diagnosticstoreobserve.Healthy(snapshot, now) {
+			slog.Warn("diagnostic storage capacity sample is unhealthy",
+				"state", snapshot.Result.StateAfter, "headroom_state", snapshot.Result.HeadroomState)
+		}
 	}
 	sample()
 	go func() {
