@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/user"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachenamespace"
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
@@ -40,6 +43,27 @@ const (
 
 type cacheDeliveryLoader func(string) (rustfscache.Delivery, error)
 type cacheRepositoryLoader func() (string, error)
+type cacheClaimLoader func() (cachebroker.Store, string, []byte, error)
+
+type workerCacheClaim struct {
+	SchemaVersion int    `json:"schema_version"`
+	InstanceName  string `json:"instance_name"`
+	ClaimEndpoint string `json:"claim_endpoint"`
+	ClaimToken    string `json:"claim_token"`
+	CAPEMB64      string `json:"ca_pem_b64"`
+}
+
+func productionCacheClaim() (cachebroker.Store, string, []byte, error) {
+	config, err := rustfscache.Load(rustfscache.DefaultConfigPath)
+	if err != nil {
+		return cachebroker.Store{}, "", nil, err
+	}
+	ca, err := os.ReadFile(config.CAFile)
+	if err != nil {
+		return cachebroker.Store{}, "", nil, fmt.Errorf("read cache claim CA: %w", err)
+	}
+	return cachebroker.Store{Path: config.ClaimJournalFile, LockPath: config.ClaimJournalLockFile}, config.ClaimEndpoint, ca, nil
+}
 
 func productionCacheRepository() (string, error) {
 	config, err := rustfscache.Load(rustfscache.DefaultConfigPath)
@@ -67,6 +91,7 @@ var (
 	cacheAccessKeyPattern  = regexp.MustCompile(`^AKIA[0-9A-F]{16}$`)
 	cacheSecretPattern     = regexp.MustCompile(`^[A-Za-z0-9_-]{64}$`)
 	cacheDeliveryIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	cacheBucketPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$`)
 )
 
 func productionCacheDelivery(role string) (rustfscache.Delivery, error) {
@@ -263,7 +288,7 @@ func validateCacheDelivery(role string, delivery rustfscache.Delivery) error {
 	expected, exists := wanted[role]
 	if !exists || delivery.Role != role || delivery.Mode != expected.Mode || delivery.Prefix != expected.Prefix ||
 		rustfscache.ValidateEndpoint(delivery.Endpoint) != nil || delivery.Region != "us-east-1" ||
-		delivery.Bucket != "github-actions-cache" || !cacheAccessKeyPattern.MatchString(delivery.AccessKey) ||
+		!cacheBucketPattern.MatchString(delivery.Bucket) || !cacheAccessKeyPattern.MatchString(delivery.AccessKey) ||
 		!cacheSecretPattern.Match(delivery.SecretKey) || len(delivery.CAPEM) == 0 {
 		return fmt.Errorf("loaded %s cache delivery does not match the worker trust contract", role)
 	}
@@ -305,18 +330,25 @@ test -f "${ready}"
 test "$(stat --format='%%u:%%g:%%a:%%h:%%F' -- "${ready}")" = '0:0:400:1:regular empty file'
 
 jq -e '
-  (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
-  .schema_version == 1 and
-  (.delivery_id | test("^[0-9a-f]{64}$")) and
-  (.endpoint | startswith("https://") and endswith(":9002")) and
-  .region == "us-east-1" and
-  .bucket == "github-actions-cache" and
-  (.access_key | test("^AKIA[0-9A-F]{16}$")) and
-  (.secret_key_b64 | test("^[A-Za-z0-9+/]{86}==$")) and
-  (.ca_pem_b64 | test("^[A-Za-z0-9+/=]+$")) and
-  (
+  if .schema_version == 1 then
+    (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
+    (.delivery_id | test("^[0-9a-f]{64}$")) and
+    (.endpoint | startswith("https://") and endswith(":9002")) and
+    .region == "us-east-1" and
+    (.bucket | test("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$")) and
+    (.access_key | test("^AKIA[0-9A-F]{16}$")) and
+    (.secret_key_b64 | test("^[A-Za-z0-9+/]{86}==$")) and
+    (.ca_pem_b64 | test("^[A-Za-z0-9+/=]+$")) and
+    (
 @@NDDEV_CACHE_ROLE_CLAUSE@@
-  )
+    )
+  elif .schema_version == 2 then
+    (keys | sort) == (["ca_pem_b64","claim_endpoint","claim_token","instance_name","schema_version"] | sort) and
+    (.instance_name | test("^[a-z][a-z0-9-]{5,63}$")) and
+    (.claim_endpoint | startswith("https://") and endswith("/api/v1/cache/claim")) and
+    (.claim_token | test("^[A-Za-z0-9_-]{43}$")) and
+    (.ca_pem_b64 | test("^[A-Za-z0-9+/=]+$"))
+  else false end
 ' "${assignment}" >/dev/null
 
 ca_temp="$(mktemp /tmp/nddev-cache-ca.XXXXXXXXXX)"
@@ -360,6 +392,7 @@ umask 077
 assignment=/home/runner/.gha-cache/provider-assignment.json
 ready=/home/runner/.gha-cache/provider-assignment.ready
 consumed=/home/runner/.gha-cache/provider-assignment.consumed
+ca_path=/home/runner/.gha-cache/rustfs-ca.pem
 cleanup() {
   rm -f -- "${assignment}" "${ready}"
 }
@@ -375,13 +408,33 @@ test ! -L "${GITHUB_ENV}"
 test -f "${GITHUB_ENV}"
 test "$(stat --format='%u:%g' -- "${GITHUB_ENV}")" = "$(id -u):$(id -g)"
 
+if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
+  test -n "${GITHUB_REPOSITORY:-}"
+  test -n "${RUNNER_NAME:-}"
+  instance_name="$(jq -r '.instance_name' "${assignment}")"
+  test "${RUNNER_NAME}" = "${instance_name}"
+  claim_endpoint="$(jq -r '.claim_endpoint' "${assignment}")"
+  claim_token="$(jq -r '.claim_token' "${assignment}")"
+  response="$(mktemp /tmp/nddev-cache-claim.XXXXXXXXXX)"
+  chmod 0600 "${response}"
+  trap 'rm -f -- "${assignment}" "${ready}" "${response}"' EXIT
+  jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
+    --arg repository "${GITHUB_REPOSITORY}" --arg token "${claim_token}" \
+    '{instance_name:$instance,runner_name:$runner,repository:$repository,claim_token:$token}' |
+    curl --silent --show-error --fail --max-time 10 --cacert "${ca_path}" \
+      --header 'Content-Type: application/json' --data-binary @- "${claim_endpoint}" >"${response}"
+  unset claim_token
+  jq -e '.schema_version == 1' "${response}" >/dev/null
+  install -o "$(id -u)" -g "$(id -g)" -m 0400 "${response}" "${assignment}"
+fi
+
 jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
   (.endpoint | startswith("https://") and endswith(":9002")) and
   .region == "us-east-1" and
-  .bucket == "github-actions-cache" and
+  (.bucket | test("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$")) and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and
   (
 @@NDDEV_CACHE_ROLE_CLAUSE@@
@@ -424,10 +477,23 @@ unset secret_key
 
 func (l *Incus) injectColdCacheAssignment(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) error {
 	raw, enabled, err := l.renderCacheAssignment(bootstrap)
-	if err != nil || !enabled {
+	if err != nil {
 		return err
 	}
+	var claimStore *cachebroker.Store
+	if !enabled {
+		raw, claimStore, enabled, err = l.renderCacheClaim(ctx, instanceName, bootstrap)
+		if err != nil || !enabled {
+			return err
+		}
+	}
 	defer clear(raw)
+	claimCommitted := claimStore != nil
+	defer func() {
+		if claimCommitted {
+			_ = claimStore.Remove(context.Background(), instanceName)
+		}
+	}()
 	cli, err := l.getCLI(ctx)
 	if err != nil {
 		return err
@@ -462,7 +528,46 @@ func (l *Incus) injectColdCacheAssignment(ctx context.Context, instanceName stri
 	}); err != nil {
 		return fmt.Errorf("publish one-job cache assignment readiness")
 	}
+	claimCommitted = false
 	return nil
+}
+
+func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) ([]byte, *cachebroker.Store, bool, error) {
+	pool, exists := l.platform.Pool(bootstrap.Flavor)
+	if !exists {
+		return nil, nil, false, fmt.Errorf("pool policy %q does not exist", bootstrap.Flavor)
+	}
+	role, enabled, err := cacheRoleForPool(pool)
+	if err != nil || !enabled || l.cacheClaim == nil {
+		return nil, nil, false, err
+	}
+	store, endpoint, ca, err := l.cacheClaim()
+	if err != nil {
+		return nil, nil, true, fmt.Errorf("load cache claim contract: %w", err)
+	}
+	defer clear(ca)
+	if err := cachebroker.ValidateClaimEndpoint(endpoint); err != nil {
+		return nil, nil, true, err
+	}
+	random := l.cacheClaimRandom
+	if random == nil {
+		random = rand.Reader
+	}
+	token := make([]byte, cachebroker.ClaimTokenBytes)
+	if _, err := io.ReadFull(random, token); err != nil {
+		return nil, nil, true, fmt.Errorf("generate cache claim: %w", err)
+	}
+	defer clear(token)
+	if err := store.Add(ctx, instanceName, pool.Name, role, token); err != nil {
+		return nil, nil, true, fmt.Errorf("persist cache claim: %w", err)
+	}
+	claim := workerCacheClaim{SchemaVersion: 2, InstanceName: instanceName, ClaimEndpoint: endpoint, ClaimToken: base64.RawURLEncoding.EncodeToString(token), CAPEMB64: base64.StdEncoding.EncodeToString(ca)}
+	raw, err := json.Marshal(claim)
+	if err != nil {
+		_ = store.Remove(context.Background(), instanceName)
+		return nil, nil, true, err
+	}
+	return raw, &store, true, nil
 }
 
 func (l *Incus) coldCacheDeliveryPresent(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) (bool, error) {

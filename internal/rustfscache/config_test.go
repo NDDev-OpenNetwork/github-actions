@@ -51,8 +51,8 @@ func TestConfigRejectsTrustContractDrift(t *testing.T) {
 	tests := map[string]func(*Config){
 		"endpoint": func(config *Config) { config.Endpoint = "https://rustfs.invalid:9002" },
 		"region":   func(config *Config) { config.Region = "eu-west-1" },
-		"bucket":   func(config *Config) { config.Bucket = "other-cache" },
-		"quota":    func(config *Config) { config.QuotaBytes-- },
+		"bucket":   func(config *Config) { config.Bucket = "other" },
+		"quota":    func(config *Config) { config.QuotaBytes = 1024 },
 		"prefix": func(config *Config) {
 			config.Identities[0].Prefix = "example-org/example-actions/trust/other"
 		},
@@ -93,6 +93,8 @@ func TestProductionPathsRejectTemporaryCredentialDirectory(t *testing.T) {
 	config.CAFile = DefaultCAFile
 	config.RootAccessKeyFile = DefaultRootAccessKeyFile
 	config.RootSecretKeyFile = DefaultRootSecretKeyFile
+	config.ClaimJournalFile = DefaultClaimJournalFile
+	config.ClaimJournalLockFile = DefaultClaimJournalLockFile
 	if err := config.ValidateProductionPaths(); err == nil || !strings.Contains(err.Error(), DefaultCredentialsDirectory) {
 		t.Fatalf("ValidateProductionPaths error = %v", err)
 	}
@@ -102,10 +104,12 @@ func TestProductionPathsRejectLocatorDrift(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]func(*Config){
-		"CA":          func(config *Config) { config.CAFile += ".other" },
-		"root access": func(config *Config) { config.RootAccessKeyFile += ".other" },
-		"root secret": func(config *Config) { config.RootSecretKeyFile += ".other" },
-		"managed":     func(config *Config) { config.CredentialsDirectory += ".other" },
+		"CA":            func(config *Config) { config.CAFile += ".other" },
+		"root access":   func(config *Config) { config.RootAccessKeyFile += ".other" },
+		"root secret":   func(config *Config) { config.RootSecretKeyFile += ".other" },
+		"managed":       func(config *Config) { config.CredentialsDirectory += ".other" },
+		"claim journal": func(config *Config) { config.ClaimJournalFile += ".other" },
+		"claim lock":    func(config *Config) { config.ClaimJournalLockFile += ".other" },
 	}
 	for name, mutate := range tests {
 		name, mutate := name, mutate
@@ -116,6 +120,8 @@ func TestProductionPathsRejectLocatorDrift(t *testing.T) {
 			config.RootAccessKeyFile = DefaultRootAccessKeyFile
 			config.RootSecretKeyFile = DefaultRootSecretKeyFile
 			config.CredentialsDirectory = DefaultCredentialsDirectory
+			config.ClaimJournalFile = DefaultClaimJournalFile
+			config.ClaimJournalLockFile = DefaultClaimJournalLockFile
 			mutate(&config)
 			if err := config.ValidateProductionPaths(); err == nil {
 				t.Fatal("ValidateProductionPaths accepted locator drift")
@@ -162,6 +168,9 @@ func testConfig(t *testing.T, directory string) Config {
 		CredentialsDirectory: directory,
 		Bucket:               "github-actions-cache",
 		QuotaBytes:           64 * 1024 * 1024 * 1024,
+		ClaimEndpoint:        "https://198.51.100.1:9443/api/v1/cache/claim",
+		ClaimJournalFile:     filepath.Join(directory, "cache-claims.json"),
+		ClaimJournalLockFile: filepath.Join(directory, "cache-claims.lock"),
 		Identities: []Identity{
 			{Role: "trusted-writer", Policy: "gha-cache-github-actions-trusted", Prefix: "example-org/example-actions/trust/trusted", Mode: "read-write", RetentionDays: 30},
 			{Role: "untrusted-writer", Policy: "gha-cache-github-actions-untrusted", Prefix: "example-org/example-actions/trust/untrusted", Mode: "read-write", RetentionDays: 7},

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
@@ -87,6 +88,35 @@ func TestOrganizationBootstrapCreatesWithoutAmbiguousCacheCredential(t *testing.
 	require.False(t, enabled)
 	require.Nil(t, raw)
 	require.Zero(t, loads, "account-only organization create must not open a repository credential")
+}
+
+func TestOrganizationBootstrapInjectsOneTimeClaimWithoutCacheSecret(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	directory := t.TempDir()
+	store := cachebroker.Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	provider.cacheClaim = func() (cachebroker.Store, string, []byte, error) {
+		return store, "https://198.51.100.1:9443/api/v1/cache/claim", []byte("fixture-ca"), nil
+	}
+	provider.cacheClaimRandom = strings.NewReader(strings.Repeat("r", cachebroker.ClaimTokenBytes))
+	bootstrap := validBootstrap()
+	bootstrap.RepoURL = "https://github.com/example-org"
+	var assignment []byte
+	cli.On("CreateInstanceFile", bootstrap.Name, cacheAssignmentPath, mock.Anything).Run(func(arguments mock.Arguments) {
+		args := arguments.Get(2).(incus.InstanceFileArgs)
+		assignment, _ = io.ReadAll(args.Content)
+	}).Return(nil).Once()
+	cli.On("CreateInstanceFile", bootstrap.Name, cacheReadyPath, mock.Anything).Return(nil).Once()
+	require.NoError(t, provider.injectColdCacheAssignment(context.Background(), bootstrap.Name, bootstrap))
+	var claim workerCacheClaim
+	require.NoError(t, json.Unmarshal(assignment, &claim))
+	require.Equal(t, 2, claim.SchemaVersion)
+	require.Equal(t, bootstrap.Name, claim.InstanceName)
+	require.NotContains(t, string(assignment), "AKIA")
+	require.NotContains(t, string(assignment), strings.Repeat("s", 64))
+	journal, err := store.Read(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "trusted-writer", journal.Claims[bootstrap.Name].Role)
 }
 
 func TestRenderedAssignmentBindsOneJobAndContainsNoSecretInCloudConfig(t *testing.T) {
@@ -267,6 +297,38 @@ func TestJobStartedHookMasksExportsAndDeletesOneJobSecret(t *testing.T) {
 	consumed, err := os.ReadFile(consumedPath)
 	require.NoError(t, err)
 	require.Equal(t, assignment.DeliveryID+"\n", string(consumed))
+}
+
+func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
+	directory := t.TempDir()
+	assignmentPath := filepath.Join(directory, "assignment.json")
+	readyPath := filepath.Join(directory, "assignment.ready")
+	consumedPath := filepath.Join(directory, "assignment.consumed")
+	caPath := filepath.Join(directory, "ca.pem")
+	githubEnv := filepath.Join(directory, "github-env")
+	delivery := testCacheDelivery()
+	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	raw, _ := json.Marshal(assignment)
+	require.NoError(t, os.WriteFile(assignmentPath, raw, 0o400))
+	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))
+	require.NoError(t, os.WriteFile(caPath, delivery.CAPEM, 0o400))
+	require.NoError(t, os.WriteFile(githubEnv, nil, 0o600))
+	response := workerCacheAssignment{SchemaVersion: 1, DeliveryID: strings.Repeat("b", 64), Role: delivery.Role, Mode: delivery.Mode, Endpoint: delivery.Endpoint, Region: delivery.Region, Bucket: delivery.Bucket, PrefixRoot: delivery.Prefix, AccessKey: delivery.AccessKey, SecretKeyB64: base64.StdEncoding.EncodeToString(delivery.SecretKey), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	responseRaw, _ := json.Marshal(response)
+	fakeCurl := filepath.Join(directory, "curl")
+	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '"+string(responseRaw)+"'\n"), 0o700))
+	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
+	command := exec.Command("bash", "-c", hook)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv, "GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("claim hook failed: %v\n%s", err, output)
+	}
+	environment, _ := os.ReadFile(githubEnv)
+	require.Contains(t, string(environment), "NDDEV_CACHE_ROLE=trusted-writer")
+	require.Contains(t, string(environment), "AWS_ACCESS_KEY_ID="+delivery.AccessKey)
+	consumed, _ := os.ReadFile(consumedPath)
+	require.Equal(t, response.DeliveryID+"\n", string(consumed))
 }
 
 func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {

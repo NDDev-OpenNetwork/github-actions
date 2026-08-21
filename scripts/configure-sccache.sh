@@ -45,6 +45,9 @@ case "${NDDEV_CACHE_ROLE}:${NDDEV_CACHE_MODE}:${ref_class}" in
   trusted-writer:read-write:branch|trusted-writer:read-write:merge-queue|trusted-writer:read-write:nightly|trusted-writer:read-write:benchmark)
     s3_mode=READ_WRITE
     ;;
+  untrusted-writer:read-write:branch|untrusted-writer:read-write:merge-queue|untrusted-writer:read-write:nightly|untrusted-writer:read-write:benchmark)
+    s3_mode=READ_WRITE
+    ;;
   release-reader:read-only:release)
     s3_mode=READ_ONLY
     ;;
@@ -57,6 +60,7 @@ esac
 expected_prefix="${GITHUB_REPOSITORY}/trust/"
 case "${NDDEV_CACHE_ROLE}" in
   trusted-writer) expected_prefix+=trusted ;;
+  untrusted-writer) expected_prefix+=untrusted ;;
   release-reader) expected_prefix+=promoted ;;
   *) printf 'cache role is not supported by the sccache adapter\n' >&2; exit 1 ;;
 esac

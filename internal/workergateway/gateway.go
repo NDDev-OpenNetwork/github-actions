@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 )
 
 const (
@@ -28,19 +30,38 @@ const (
 // Gateway exposes only the GARM endpoints required by disposable workers. The
 // GARM administrative API remains bound to loopback and is never routed here.
 type Gateway struct {
-	proxy  *httputil.ReverseProxy
-	logger *slog.Logger
+	proxy      *httputil.ReverseProxy
+	cacheProxy *httputil.ReverseProxy
+	logger     *slog.Logger
 }
 
 func New(upstream *url.URL, logger *slog.Logger) (*Gateway, error) {
+	return NewWithCache(upstream, nil, logger)
+}
+
+func NewWithCache(upstream, cacheUpstream *url.URL, logger *slog.Logger) (*Gateway, error) {
 	if err := validateUpstream(upstream); err != nil {
 		return nil, err
+	}
+	if cacheUpstream != nil {
+		if err := validateUpstream(cacheUpstream); err != nil {
+			return nil, fmt.Errorf("cache upstream: %w", err)
+		}
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	proxy := &httputil.ReverseProxy{
+	proxy := newReverseProxy(upstream, logger)
+	var cacheProxy *httputil.ReverseProxy
+	if cacheUpstream != nil {
+		cacheProxy = newReverseProxy(cacheUpstream, logger)
+	}
+	return &Gateway{proxy: proxy, cacheProxy: cacheProxy, logger: logger}, nil
+}
+
+func newReverseProxy(upstream *url.URL, logger *slog.Logger) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(upstream)
 			request.Out.Host = upstream.Host
@@ -61,8 +82,6 @@ func New(upstream *url.URL, logger *slog.Logger) (*Gateway, error) {
 			return nil
 		},
 	}
-
-	return &Gateway{proxy: proxy, logger: logger}, nil
 }
 
 func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -72,6 +91,28 @@ func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := validateRequestTarget(request); err != nil {
 		g.deny(writer, request, http.StatusBadRequest, err)
+		return
+	}
+	if request.URL.Path == cachebroker.ClaimPath {
+		if g.cacheProxy == nil {
+			g.deny(writer, request, http.StatusNotFound, errors.New("cache broker is not configured"))
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			g.deny(writer, request, http.StatusMethodNotAllowed, errors.New("method is not allowed"))
+			return
+		}
+		if request.URL.RawQuery != "" {
+			g.deny(writer, request, http.StatusBadRequest, errors.New("query parameters are not accepted"))
+			return
+		}
+		if request.ContentLength > MaxRequestBodyBytes {
+			g.deny(writer, request, http.StatusRequestEntityTooLarge, errors.New("request body is too large"))
+			return
+		}
+		request.Body = http.MaxBytesReader(writer, request.Body, MaxRequestBodyBytes)
+		g.cacheProxy.ServeHTTP(writer, request)
 		return
 	}
 	allowedMethods, allowed := routePolicy(request.URL.Path)

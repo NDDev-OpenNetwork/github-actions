@@ -24,6 +24,8 @@ const (
 	DefaultCAFile               = "/etc/gha-fleet/trust/rustfs-ca.pem"
 	DefaultRootAccessKeyFile    = "/etc/gha-fleet/secrets/rustfs-access-key"
 	DefaultRootSecretKeyFile    = "/etc/gha-fleet/secrets/rustfs-secret-key"
+	DefaultClaimJournalFile     = "/var/lib/gha-cache-broker/claims.json"
+	DefaultClaimJournalLockFile = "/var/lib/gha-cache-broker/claims.lock"
 	MaximumConfigBytes          = 64 * 1024
 )
 
@@ -43,6 +45,9 @@ type Config struct {
 	CredentialsDirectory string     `yaml:"credentials_directory" json:"credentials_directory"`
 	Bucket               string     `yaml:"bucket" json:"bucket"`
 	QuotaBytes           int64      `yaml:"quota_bytes" json:"quota_bytes"`
+	ClaimEndpoint        string     `yaml:"claim_endpoint" json:"claim_endpoint"`
+	ClaimJournalFile     string     `yaml:"claim_journal_file" json:"claim_journal_file"`
+	ClaimJournalLockFile string     `yaml:"claim_journal_lock_file" json:"claim_journal_lock_file"`
 	Identities           []Identity `yaml:"identities" json:"identities"`
 }
 
@@ -104,11 +109,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s must be an absolute clean non-root path", path.label)
 		}
 	}
-	if !bucketPattern.MatchString(c.Bucket) || c.Bucket != "github-actions-cache" {
-		return fmt.Errorf("bucket must be github-actions-cache")
+	if !bucketPattern.MatchString(c.Bucket) || !strings.HasSuffix(c.Bucket, "-cache") {
+		return fmt.Errorf("bucket must be a valid name ending in -cache")
 	}
-	if c.QuotaBytes != 64*1024*1024*1024 {
-		return fmt.Errorf("quota_bytes must be exactly 68719476736")
+	if c.QuotaBytes < 2*1024*1024*1024 || c.QuotaBytes > 1024*1024*1024*1024 {
+		return fmt.Errorf("quota_bytes must be between 2 GiB and 1 TiB")
+	}
+	if err := validateClaimEndpoint(c.ClaimEndpoint); err != nil {
+		return err
+	}
+	for label, value := range map[string]string{"claim_journal_file": c.ClaimJournalFile, "claim_journal_lock_file": c.ClaimJournalLockFile} {
+		if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+			return fmt.Errorf("%s must be an absolute clean non-root path", label)
+		}
 	}
 	if len(c.Identities) != 4 {
 		return fmt.Errorf("identities must contain exactly four trust roles")
@@ -120,16 +133,17 @@ func (c Config) Validate() error {
 	if err != nil {
 		return fmt.Errorf("derive cache repository identity: %w", err)
 	}
+	policyNamespace := "gha-cache-" + strings.TrimSuffix(c.Bucket, "-cache")
 	wanted := map[string]struct {
 		mode      string
 		policy    string
 		prefix    string
 		retention int
 	}{
-		"trusted-writer":   {"read-write", "gha-cache-github-actions-trusted", mustPrefix(repository, cachenamespace.Trusted), 30},
-		"untrusted-writer": {"read-write", "gha-cache-github-actions-untrusted", mustPrefix(repository, cachenamespace.Untrusted), 7},
-		"promoter":         {"read-write", "gha-cache-github-actions-promoter", mustPrefix(repository, cachenamespace.Promoted), 90},
-		"release-reader":   {"read-only", "gha-cache-github-actions-release", mustPrefix(repository, cachenamespace.Promoted), 90},
+		"trusted-writer":   {"read-write", policyNamespace + "-trusted", mustPrefix(repository, cachenamespace.Trusted), 30},
+		"untrusted-writer": {"read-write", policyNamespace + "-untrusted", mustPrefix(repository, cachenamespace.Untrusted), 7},
+		"promoter":         {"read-write", policyNamespace + "-promoter", mustPrefix(repository, cachenamespace.Promoted), 90},
+		"release-reader":   {"read-only", policyNamespace + "-release", mustPrefix(repository, cachenamespace.Promoted), 90},
 	}
 	seenRoles := make(map[string]struct{}, len(c.Identities))
 	seenPolicies := make(map[string]struct{}, len(c.Identities))
@@ -142,7 +156,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("identity role %q is duplicated", identity.Role)
 		}
 		seenRoles[identity.Role] = struct{}{}
-		if !namePattern.MatchString(identity.Policy) || !strings.HasPrefix(identity.Policy, "gha-cache-github-actions-") {
+		if !namePattern.MatchString(identity.Policy) || !strings.HasPrefix(identity.Policy, policyNamespace+"-") {
 			return fmt.Errorf("identity %s policy is outside the managed namespace", identity.Role)
 		}
 		if _, duplicate := seenPolicies[identity.Policy]; duplicate {
@@ -157,6 +171,19 @@ func (c Config) Validate() error {
 			identity.RetentionDays != expected.retention {
 			return fmt.Errorf("identity %s trust contract drifted", identity.Role)
 		}
+	}
+	return nil
+}
+
+func validateClaimEndpoint(value string) error {
+	endpoint, err := url.ParseRequestURI(value)
+	if err != nil {
+		return fmt.Errorf("claim_endpoint must be an HTTPS /api/v1/cache/claim URL using a literal IP and explicit port")
+	}
+	host, port, splitErr := net.SplitHostPort(endpoint.Host)
+	address := net.ParseIP(host)
+	if endpoint.Scheme != "https" || splitErr != nil || address == nil || port == "" || address.IsUnspecified() || address.IsMulticast() || endpoint.Path != "/api/v1/cache/claim" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.User != nil {
+		return fmt.Errorf("claim_endpoint must be an HTTPS /api/v1/cache/claim URL using a literal IP and explicit port")
 	}
 	return nil
 }
@@ -209,12 +236,16 @@ func (c Config) ValidateProductionPaths() error {
 		{"ca_file", c.CAFile, DefaultCAFile},
 		{"root_access_key_file", c.RootAccessKeyFile, DefaultRootAccessKeyFile},
 		{"root_secret_key_file", c.RootSecretKeyFile, DefaultRootSecretKeyFile},
-		{"credentials_directory", c.CredentialsDirectory, DefaultCredentialsDirectory},
+		{"claim_journal_file", c.ClaimJournalFile, DefaultClaimJournalFile},
+		{"claim_journal_lock_file", c.ClaimJournalLockFile, DefaultClaimJournalLockFile},
 	}
 	for _, path := range paths {
 		if path.actual != path.expected {
 			return fmt.Errorf("%s must be %s", path.label, path.expected)
 		}
+	}
+	if c.CredentialsDirectory != DefaultCredentialsDirectory && !strings.HasPrefix(c.CredentialsDirectory, DefaultCredentialsDirectory+"/") {
+		return fmt.Errorf("credentials_directory must be %s or one private child", DefaultCredentialsDirectory)
 	}
 	return nil
 }

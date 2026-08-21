@@ -1,0 +1,26 @@
+schema_version: 1
+listen_address: 192.0.2.2:9444
+endpoint: https://192.0.2.1:9002
+region: us-east-1
+bucket: github-actions-cache
+ca_file: /etc/gha-fleet/trust/rustfs-ca.pem
+journal_file: /var/lib/gha-cache-broker/claims.json
+journal_lock_file: /var/lib/gha-cache-broker/claims.lock
+repositories:
+  - name: example-org/example-actions
+    roles:
+      - role: trusted-writer
+        mode: read-write
+        prefix: example-org/example-actions/trust/trusted
+        access_key_file: /etc/garm/cache/example-actions/trusted-writer-access-key
+        secret_key_file: /etc/garm/cache/example-actions/trusted-writer-secret-key
+      - role: untrusted-writer
+        mode: read-write
+        prefix: example-org/example-actions/trust/untrusted
+        access_key_file: /etc/garm/cache/example-actions/untrusted-writer-access-key
+        secret_key_file: /etc/garm/cache/example-actions/untrusted-writer-secret-key
+      - role: release-reader
+        mode: read-only
+        prefix: example-org/example-actions/trust/promoted
+        access_key_file: /etc/garm/cache/example-actions/release-reader-access-key
+        secret_key_file: /etc/garm/cache/example-actions/release-reader-secret-key

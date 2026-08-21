@@ -57,7 +57,7 @@ func ServiceNames() []string {
 func serviceNamesForConfig(platform config.Config) []string {
 	if !platform.Incus.Cluster.Enabled {
 		return []string{
-			"garm", "gha-fleet-gateway", "gha-diagnostic-exporter.service",
+			"garm", "gha-fleet-gateway", "gha-cache-broker", "gha-diagnostic-exporter.service",
 			"gha-diagnostic-exporter.timer", "otelcol-fleet",
 		}
 	}
