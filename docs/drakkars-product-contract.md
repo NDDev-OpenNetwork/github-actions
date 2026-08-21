@@ -69,6 +69,11 @@ never interrupts a running job. Scheduled work is background unless it uses a
 high scale set. Background work ages into ordinary service so it cannot starve
 forever.
 
+Background work has a separate bounded concurrency envelope. Aging selects
+which background job receives those slots; it never lets a long maintenance or
+soak workload occupy the whole production fleet. A reduced limit does not
+preempt already-running work: the observed overage drains naturally.
+
 Sparse lifecycle events do not carry reliable repository or workflow metadata.
 Therefore priority is part of the scale-set policy available before admission,
 not a hard-coded tenant name or a guess from a job title.

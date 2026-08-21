@@ -7,6 +7,11 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.58` and queue-admission schema v4.
+  Background work now has a separately bounded concurrency envelope. Aging
+  chooses fairly within that envelope but cannot let a long soak occupy the
+  production fleet; already-running overage remains authoritative and drains
+  without preemption.
 - Added GARM derivative `v0.2.1-nddev.56`: authoritative cleanup of an
   in-progress job now removes only its stale queued database duplicate and
   preserves the running central admission intent.

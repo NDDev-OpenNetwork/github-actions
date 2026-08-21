@@ -11,7 +11,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 const maxConfigBytes = 64 * 1024
 
 type ResourceBudget struct {
@@ -33,6 +33,7 @@ type RepositoryPolicy struct {
 type Config struct {
 	SchemaVersion          int                          `json:"schema_version"`
 	MaxInFlight            int                          `json:"max_in_flight"`
+	MaxBackgroundInFlight  int                          `json:"max_background_in_flight"`
 	DefaultRepositoryLimit int                          `json:"default_repository_limit"`
 	DefaultWeight          uint64                       `json:"default_weight"`
 	QueuedTTLSeconds       int                          `json:"queued_ttl_seconds"`
@@ -71,6 +72,7 @@ func Load(path string) (Config, error) {
 
 func (c Config) Validate() error {
 	if c.SchemaVersion != SchemaVersion || c.MaxInFlight < 1 || c.MaxInFlight > 64 ||
+		c.MaxBackgroundInFlight < 1 || c.MaxBackgroundInFlight > c.MaxInFlight ||
 		c.DefaultRepositoryLimit < 1 || c.DefaultRepositoryLimit > c.MaxInFlight ||
 		c.DefaultWeight < 1 || c.DefaultWeight > 100 {
 		return fmt.Errorf("queue admission identity or count limits are invalid")
