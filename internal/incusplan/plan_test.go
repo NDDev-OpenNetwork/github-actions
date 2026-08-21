@@ -173,6 +173,30 @@ func TestContainerCanaryProfileIsUnprivilegedAndNonNested(t *testing.T) {
 	}
 }
 
+func TestSelectedDistributedCachePortMovesFromRejectToAllow(t *testing.T) {
+	cfg, err := config.Load("../../config/example-runner-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Incus.RustFSPort = 9003
+	rejects := baseEgressRejects(cfg, "198.51.100.1")
+	for _, rule := range rejects {
+		if rule.Description == "Block sensitive host bridge services" && strings.Contains(rule.DestinationPort, "9003") {
+			t.Fatalf("selected cache port remained rejected: %#v", rule)
+		}
+	}
+	allows := localServiceAllows(cfg, "198.51.100.1", true)
+	found := false
+	for _, rule := range allows {
+		if rule.Description == "Allow scoped local cache endpoints" && rule.DestinationPort == "5001,9003" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("distributed cache port not allowed: %#v", allows)
+	}
+}
+
 func TestDockerContainerCanaryProfileHasNestedRuntimeAndSoftCPUWeight(t *testing.T) {
 	t.Parallel()
 	plan := loadPlan(t, "nddev-linux-docker-container-canary")
