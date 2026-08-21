@@ -7,6 +7,11 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.54`: after a scale set has proved
+  capacity-bound, only one concrete worker may consume the next domain retry
+  lease. Initial creates remain parallel and each completed deletion still
+  wakes one oldest domain, eliminating repeated provider-call herds without
+  reducing usable capacity.
 - Added an idempotent OpenObserve plan/apply/read-back reconciler. It blocks on
   a missing destination or metric stream, updates only the declared rules,
   deletes only obsolete `managed-by:gds` alerts, and preserves operator-owned

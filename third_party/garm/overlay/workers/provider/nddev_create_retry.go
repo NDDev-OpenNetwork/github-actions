@@ -116,6 +116,18 @@ func nddevBeforeProviderCreate(ctx context.Context, key string) error {
 			if domain.NextAllowedAt.After(now) {
 				return fmt.Errorf("provider create retry is deferred until %s", domain.NextAllowedAt.Format(time.RFC3339))
 			}
+			// The first attempt after a capacity backoff owns the retry domain
+			// until its provider call succeeds, fails, or the bounded attempt lease
+			// expires. Without this reservation every pending worker in the same
+			// scale set observes the expired backoff at once and all of them reach
+			// the provider, reproducing a create herd while capacity is unchanged.
+			// Initial unconstrained creates remain parallel; serialization begins
+			// only after the provider has proved this domain capacity-bound.
+			if domain.LastErrorClass == "capacity" {
+				domain.UpdatedAt = now
+				domain.NextAllowedAt = now.Add(nddevRetryAttemptLease)
+				journal.Records[domainKey] = domain
+			}
 		}
 		record := journal.Records[key]
 		if record.JobID != "" && record.JobID != key {
