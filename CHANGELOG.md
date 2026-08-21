@@ -7,6 +7,9 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.56`: authoritative cleanup of an
+  in-progress job now removes only its stale queued database duplicate and
+  preserves the running central admission intent.
 - Added GARM derivative `v0.2.1-nddev.55`: persistent capacity saturation now
   backs off to five minutes instead of probing every minute, while every proven
   provider deletion still wakes one oldest waiting domain immediately.

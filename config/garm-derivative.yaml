@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.55
+derivative_version: v0.2.1-nddev.56
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -76,6 +76,9 @@ patches:
   - path: third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch
     sha256: 45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8
     purpose: Defer an entity's authoritative job reads for fifteen minutes after GitHub returns 403 or 429 so missing permission or rate limiting remains fail-closed without consuming API budget once per stale row every minute.
+  - path: third_party/garm/patches/0024-preserve-running-queue-intent.patch
+    sha256: c62d6a919ddf56e46cd3ad7b780a208f76749dad3ed09c4db9c80c0392178161
+    purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 34ce9e9d5452d958ea56a73a46924133e03129fc10c34deab1f8ebb555d430fa
@@ -103,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 550c8b3e3170a21ee25b377393f00946e69bba04f02d35d13147c9aa04588cce
+  binary_sha256: 2f0683b243462f19282f8422533ff0fda6988acef4ce3e98483e456d5136117d
 runtime_contract:
   queue_intent_schema_version: 3
   event_driven_scale_set_wake: true
