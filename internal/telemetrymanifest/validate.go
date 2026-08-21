@@ -183,6 +183,35 @@ func validateTransport(add func(string, string), transport Transport) {
 	if !path.IsAbs(transport.QueueDirectory) || path.Clean(transport.QueueDirectory) != transport.QueueDirectory {
 		add("transport.queue_directory", "must be an absolute cleaned path")
 	}
+	validateDurability(add, transport.Durability)
+}
+
+func validateDurability(add func(string, string), durability Durability) {
+	if durability.RPO != "zero-record-loss-within-tested-outage-envelope" {
+		add("transport.durability.rpo", "must state the bounded zero-loss objective")
+	}
+	if durability.BackendOutageMinutes != 60 || durability.RecoveryRTOMinutes != 15 {
+		add("transport.durability", "must declare the tested 60-minute outage and 15-minute recovery envelope")
+	}
+	if durability.RetryMaxElapsedTime != "0s" || durability.QueueSizeBatchesPerSignal != 10000 ||
+		!durability.BlockOnOverflow || durability.PersistentStorage != "file_storage" {
+		add("transport.durability", "must use indefinite retry, bounded persistent queues and overflow backpressure")
+	}
+	if durability.AcceptedLossOutside != "none-silent" || strings.TrimSpace(durability.Note) == "" {
+		add("transport.durability.accepted_loss_outside_envelope", "must reject silent loss and document storage exhaustion")
+	}
+	wanted := []string{
+		"otelcol_exporter_enqueue_failed",
+		"otelcol_exporter_queue_capacity",
+		"otelcol_exporter_queue_size",
+		"otelcol_exporter_send_failed",
+		"otelcol_receiver_refused",
+	}
+	actual := append([]string(nil), durability.RequiredSelfMetrics...)
+	sort.Strings(actual)
+	if !slices.Equal(actual, wanted) {
+		add("transport.durability.required_self_metrics", "must contain the exact queue, failure and refusal signals")
+	}
 }
 
 func validateAsset(add func(string, string), field string, asset Asset, host, wantedPath, wantedName string) {

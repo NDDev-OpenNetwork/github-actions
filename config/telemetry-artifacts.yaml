@@ -74,3 +74,19 @@ transport:
   target_address: 10.200.0.7
   target_port: 5090
   queue_directory: /var/lib/otelcol-fleet/queue
+  durability:
+    rpo: zero-record-loss-within-tested-outage-envelope
+    backend_outage_minutes: 60
+    recovery_rto_minutes: 15
+    retry_max_elapsed_time: 0s
+    queue_size_batches_per_signal: 10000
+    block_on_overflow: true
+    persistent_storage: file_storage
+    accepted_loss_outside_envelope: none-silent
+    required_self_metrics:
+      - otelcol_exporter_queue_size
+      - otelcol_exporter_queue_capacity
+      - otelcol_exporter_enqueue_failed
+      - otelcol_exporter_send_failed
+      - otelcol_receiver_refused
+    note: Disk exhaustion or storage failure remains a separate fail-closed incident; persistent queueing is not an unlimited retention claim.
