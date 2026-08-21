@@ -1,6 +1,9 @@
 package observabilityrules
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRepositoryBundleIsValid(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
@@ -9,6 +12,30 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	}
 	if len(bundle.Rules) != 11 {
 		t.Fatalf("rules = %d, want 11", len(bundle.Rules))
+	}
+}
+
+func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := map[string]string{
+		"memory_psi_slow_burn": `window_seconds="10"`,
+		"queue_wait_slow_burn": `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
+	}
+	seen := make(map[string]bool, len(wanted))
+	for _, rule := range bundle.Rules {
+		fragment, exists := wanted[rule.ID]
+		if exists && !strings.Contains(rule.Query, fragment) {
+			t.Errorf("rule %s query %q does not contain current metric contract %q", rule.ID, rule.Query, fragment)
+		}
+		seen[rule.ID] = exists
+	}
+	for id := range wanted {
+		if !seen[id] {
+			t.Errorf("required semantic rule %s is missing", id)
+		}
 	}
 }
 
