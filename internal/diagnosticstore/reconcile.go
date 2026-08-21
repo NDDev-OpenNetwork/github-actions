@@ -207,8 +207,8 @@ func readCredential(config Config) (rustfscache.Credential, error) {
 		if err != nil {
 			return rustfscache.Credential{}, fmt.Errorf("inspect RustFS root %s: %w", label, err)
 		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
-			return rustfscache.Credential{}, fmt.Errorf("RustFS root %s must be a regular non-symlink file without group/world permissions", label)
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || !credentialModeAllowed(path, info.Mode().Perm()) {
+			return rustfscache.Credential{}, fmt.Errorf("RustFS root %s must be a regular non-symlink file with safe credential permissions", label)
 		}
 	}
 	access, err := os.ReadFile(config.RootAccessKeyFile)
@@ -227,6 +227,16 @@ func readCredential(config Config) (rustfscache.Credential, error) {
 		return rustfscache.Credential{}, fmt.Errorf("RustFS root credential is invalid")
 	}
 	return credential, nil
+}
+
+func credentialModeAllowed(path string, mode os.FileMode) bool {
+	if strings.HasPrefix(path, "/run/credentials/") {
+		// systemd LoadCredential uses 0440 inside its isolated, read-only service
+		// credential mount. Group read is intentional there; group write/execute
+		// and every world bit remain forbidden.
+		return mode&0o037 == 0 && mode&0o400 != 0
+	}
+	return mode&0o077 == 0 && mode&0o400 != 0
 }
 
 func requestError(operation string, response rustfscache.Response, err error) error {
