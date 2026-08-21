@@ -221,6 +221,7 @@ func sample(ctx context.Context, collector fleetobserve.Collector, state *fleeto
 					"collection_errors", len(snapshot.CollectionErrors),
 					"orphan_instances", snapshot.Incus.OrphanInstances,
 					"missing_instances", snapshot.Incus.MissingInstances,
+					"errors", snapshot.CollectionErrors,
 				)
 			}
 		}
@@ -228,14 +229,7 @@ func sample(ctx context.Context, collector fleetobserve.Collector, state *fleeto
 }
 
 func serviceState(ctx context.Context, name string) (string, error) {
-	allowed := false
-	for _, expected := range fleetobserve.ServiceNames() {
-		if name == expected {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !serviceNameAllowed(name) {
 		return "", fmt.Errorf("service %q is outside the fixed observer inventory", name)
 	}
 	output, err := exec.CommandContext(ctx, "systemctl", "is-active", systemdUnitName(name)).CombinedOutput()
@@ -249,6 +243,15 @@ func serviceState(ctx context.Context, name string) (string, error) {
 		}
 		return "", fmt.Errorf("service %s returned unknown state %q", name, state)
 	}
+}
+
+func serviceNameAllowed(name string) bool {
+	for _, expected := range fleetobserve.ServiceNames() {
+		if name == expected {
+			return true
+		}
+	}
+	return name == "gha-cache-broker"
 }
 
 func systemdUnitName(name string) string {
