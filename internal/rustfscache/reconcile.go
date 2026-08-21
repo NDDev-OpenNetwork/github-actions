@@ -28,7 +28,6 @@ const (
 	accessKeyPrefix        = "AKIA"
 	credentialFileMode     = 0o640
 	maximumCredentialBytes = 512
-	quotaReadyAttempts     = 180
 )
 
 type Options struct {
@@ -383,7 +382,7 @@ func (r Runner) inspectRemote(
 	resourcesManaged := false
 	if bucketPresent {
 		quotaResponse, err := r.Requester.Do(ctx, root, http.MethodGet,
-			"/rustfs/admin/v3/quota/"+config.Bucket, "", nil)
+			"/rustfs/admin/v3/get-bucket-quota?bucket="+url.QueryEscape(config.Bucket), "", nil)
 		if err != nil {
 			return "", fmt.Errorf("inspect RustFS cache quota: %w", err)
 		}
@@ -526,9 +525,6 @@ func (r Runner) applyRemote(ctx context.Context, root Credential, config Config,
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusConflict {
 		return responseError("create RustFS cache bucket", response)
 	}
-	if err := r.waitQuotaReady(ctx, root, config); err != nil {
-		return err
-	}
 	quota, _ := json.Marshal(map[string]any{"quota": config.QuotaBytes, "quota_type": "HARD"})
 	response, err = r.Requester.Do(ctx, root, http.MethodPut,
 		"/rustfs/admin/v3/quota/"+config.Bucket, "application/json", quota)
@@ -587,39 +583,6 @@ func (r Runner) applyRemote(ctx context.Context, root Credential, config Config,
 		}
 	}
 	return nil
-}
-
-func (r Runner) waitQuotaReady(ctx context.Context, root Credential, config Config) error {
-	sleep := r.Sleep
-	if sleep == nil {
-		sleep = func(ctx context.Context, duration time.Duration) error {
-			timer := time.NewTimer(duration)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-timer.C:
-				return nil
-			}
-		}
-	}
-	for attempt := 0; attempt < quotaReadyAttempts; attempt++ {
-		response, err := r.Requester.Do(ctx, root, http.MethodGet,
-			"/rustfs/admin/v3/quota-stats/"+config.Bucket, "", nil)
-		if err != nil {
-			return fmt.Errorf("check RustFS cache quota readiness: %w", err)
-		}
-		if response.StatusCode == http.StatusOK {
-			return nil
-		}
-		if response.StatusCode != http.StatusServiceUnavailable {
-			return responseError("check RustFS cache quota readiness", response)
-		}
-		if err := sleep(ctx, time.Second); err != nil {
-			return fmt.Errorf("wait for RustFS cache quota readiness: %w", err)
-		}
-	}
-	return fmt.Errorf("RustFS cache quota usage did not become authoritative")
 }
 
 func (r Runner) verifyEffectivePolicy(
