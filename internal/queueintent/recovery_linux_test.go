@@ -25,7 +25,7 @@ func TestRecoverUnboundRunningUsesExactCASAndGeneration(t *testing.T) {
 			Owner: "example-org", Repository: "example-org",
 			WorkflowRef: "unavailable-before-job-available", EventName: "unavailable-before-job-available",
 			QueueTime: updatedAt.Add(-time.Minute), State: StateRunning, Priority: 2,
-			UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(24 * time.Hour),
+			StateEnteredAt: updatedAt, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(24 * time.Hour),
 		}},
 		Repositories: map[string]RepositoryState{"example-org": {Repository: "example-org", Weight: 1}},
 	}
@@ -73,7 +73,7 @@ func TestRecoverUnboundRunningRejectsChangedPrecondition(t *testing.T) {
 		Key: key, ScaleSetID: 1, JobID: "bound-job", RunnerRequestID: 42,
 		ScaleSetName: "nddev-linux-standard", Owner: "example-org", Repository: "example-org/repository",
 		WorkflowRef: "workflow.yml@refs/heads/main", EventName: "push", QueueTime: updatedAt,
-		State: StateRunning, Priority: 2, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(24 * time.Hour),
+		State: StateRunning, Priority: 2, StateEnteredAt: updatedAt, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(24 * time.Hour),
 	}}, Repositories: map[string]RepositoryState{"example-org/repository": {Repository: "example-org/repository", Weight: 1}}}
 	content, _ := json.Marshal(journal)
 	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
@@ -100,7 +100,7 @@ func TestRecoverCanceledUnboundAcceptsOnlySparseQueuedOrAssigned(t *testing.T) {
 				Key: key, ScaleSetID: 6, JobID: "canceled-job", ScaleSetName: "nddev-linux-untrusted",
 				Owner: "example-org", Repository: "example-org",
 				WorkflowRef: "unavailable-before-job-available", EventName: "unavailable-before-job-available",
-				QueueTime: updatedAt, State: state, Priority: 2, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(time.Hour),
+				QueueTime: updatedAt, State: state, Priority: 2, StateEnteredAt: updatedAt, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(time.Hour),
 			}}, Repositories: map[string]RepositoryState{"example-org": {Repository: "example-org", Weight: 1}}}
 			content, _ := json.Marshal(journal)
 			if err := os.WriteFile(journalPath, content, 0o600); err != nil {

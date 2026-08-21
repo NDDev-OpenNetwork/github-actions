@@ -43,7 +43,7 @@ func jsonFieldNames(t *testing.T, value any) []string {
 // that decision -- internal/providerjournal already carries a worked example of
 // a version ladder that upgrades in memory.
 func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
-	if SchemaVersion != 2 {
+	if SchemaVersion != 3 {
 		t.Fatalf("SchemaVersion = %d; update the golden field sets below with it", SchemaVersion)
 	}
 	for _, testCase := range []struct {
@@ -64,7 +64,7 @@ func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
 			wanted: []string{
 				"key", "scale_set_id", "job_id", "runner_request_id", "scale_set_name",
 				"runner_name", "owner", "repository", "workflow_ref", "event_name", "queue_time",
-				"state", "priority", "updated_at", "expires_at",
+				"state", "priority", "state_entered_at", "updated_at", "expires_at",
 			},
 		},
 		{
@@ -106,6 +106,7 @@ func TestUnknownFieldRejectsTheWholeJournalRatherThanOneIntent(t *testing.T) {
 				"queue_time":        now,
 				"state":             string(StateRunning),
 				"priority":          1,
+				"state_entered_at":  now,
 				"updated_at":        now,
 				"expires_at":        now.Add(time.Hour),
 				// One field this reader has never heard of, exactly as `owner`

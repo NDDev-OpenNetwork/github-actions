@@ -141,6 +141,7 @@ func TestStartupPromotesDurableQueuedIntentWithoutWebhookRedelivery(t *testing.T
 	key := queueIntentKey(11, job.JobID)
 	intent := journal.Intents[key]
 	intent.State = queueStateQueued
+	intent.StateEnteredAt = now.Add(-time.Minute)
 	intent.UpdatedAt = now.Add(-time.Minute)
 	intent.ExpiresAt = now.Add(9 * time.Minute)
 	journal.Intents[key] = intent
@@ -293,6 +294,41 @@ func TestQueueCoordinatorDuplicateDeliveryCannotDowngradeAcquiredIntent(t *testi
 	if journal.Generation != before.Generation || journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)].ExpiresAt !=
 		before.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)].ExpiresAt {
 		t.Fatalf("redelivery refreshed durable state: before=%#v after=%#v", before, journal)
+	}
+}
+
+func TestQueueCoordinatorSameStateLeaseRefreshPreservesPhaseEntry(t *testing.T) {
+	now := time.Date(2026, 8, 21, 7, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	job := testQueueJob(101, "owner", "repo", now.Add(-time.Minute))
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSet, []params.ScaleSetJobMessage{job})
+	if err != nil || len(selected) != 1 {
+		t.Fatalf("selection=%v err=%v", selected, err)
+	}
+	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := before.Intents[key].StateEnteredAt
+	now = now.Add(time.Minute)
+	// An omitted ID is externally ambiguous, so CompleteAcquire refreshes the
+	// acquiring lease without changing phase. That lease refresh must not make
+	// the phase-age metric look one minute younger.
+	if err := coordinator.CompleteAcquire(scaleSet, selected, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := after.Intents[key]
+	if intent.State != queueStateAcquiring || !intent.StateEnteredAt.Equal(entered) || !intent.UpdatedAt.Equal(now) {
+		t.Fatalf("same-state refresh changed phase entry: before=%#v after=%#v", before.Intents[key], intent)
 	}
 }
 

@@ -468,10 +468,10 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			return QueueSummary{}, fmt.Errorf("active intent %q has a future queue timestamp", intent.Key)
 		}
 		summary.ByState[string(intent.State)]++
-		if intent.UpdatedAt.After(now.Add(time.Second)) {
+		if intent.StateEnteredAt.After(now.Add(time.Second)) {
 			return QueueSummary{}, fmt.Errorf("active intent %q has a future state timestamp", intent.Key)
 		}
-		stateAge := int64(now.Sub(intent.UpdatedAt).Seconds())
+		stateAge := int64(now.Sub(intent.StateEnteredAt).Seconds())
 		if stateAge > summary.OldestStateAgeSeconds[string(intent.State)] {
 			summary.OldestStateAgeSeconds[string(intent.State)] = stateAge
 		}
