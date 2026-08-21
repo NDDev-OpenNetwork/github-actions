@@ -70,7 +70,6 @@ func TestCollectorRejectsUntrustedOrIncoherentEvidence(t *testing.T) {
 		options fixtureOptions
 		want    string
 	}{
-		{name: "mixed cache result", options: fixtureOptions{mixedCacheHit: true}, want: "coherent sample"},
 		{name: "digest mismatch", options: fixtureOptions{digestMismatch: true}, want: "digest mismatch"},
 		{name: "extra archive entry", options: fixtureOptions{extraArchiveEntry: true}, want: "exactly one file"},
 		{name: "reused machine", options: fixtureOptions{reuseMachineID: true}, want: "reused a machine identity"},
@@ -91,6 +90,28 @@ func TestCollectorRejectsUntrustedOrIncoherentEvidence(t *testing.T) {
 				t.Fatalf("error = %v, want text %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCollectorPreservesMixedWorkloadCacheResults(t *testing.T) {
+	server := newFixtureServer(t, fixtureOptions{mixedCacheHit: true})
+	defer server.Close()
+	evidence, err := (Collector{
+		HTTPClient: server.Client(), APIBaseURL: server.URL, Token: "test-token",
+		allowInsecureForTests: true,
+	}).Collect(context.Background(), Options{Repository: "acme/repo", RunID: testRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Sample.CacheHit != "mixed" {
+		t.Fatalf("sample cache result = %q, want mixed", evidence.Sample.CacheHit)
+	}
+	hits := map[string]string{}
+	for _, job := range evidence.Jobs {
+		hits[job.Workload] = job.Metrics.CacheHit
+	}
+	if hits["go"] != "true" || hits["rust"] != "false" {
+		t.Fatalf("per-workload cache results were not preserved: %#v", hits)
 	}
 }
 
