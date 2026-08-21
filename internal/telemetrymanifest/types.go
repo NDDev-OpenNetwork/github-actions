@@ -71,11 +71,25 @@ type Store struct {
 // private cloud network, so telemetry never leaves it and the listener is
 // bound to that address rather than to every interface.
 type Transport struct {
-	Protocol       string `json:"protocol" yaml:"protocol"`
-	SourceAddress  string `json:"source_address" yaml:"source_address"`
-	TargetAddress  string `json:"target_address" yaml:"target_address"`
-	TargetPort     int    `json:"target_port" yaml:"target_port"`
-	QueueDirectory string `json:"queue_directory" yaml:"queue_directory"`
+	Protocol       string     `json:"protocol" yaml:"protocol"`
+	SourceAddress  string     `json:"source_address" yaml:"source_address"`
+	TargetAddress  string     `json:"target_address" yaml:"target_address"`
+	TargetPort     int        `json:"target_port" yaml:"target_port"`
+	QueueDirectory string     `json:"queue_directory" yaml:"queue_directory"`
+	Durability     Durability `json:"durability" yaml:"durability"`
+}
+
+type Durability struct {
+	RPO                       string   `json:"rpo" yaml:"rpo"`
+	BackendOutageMinutes      int      `json:"backend_outage_minutes" yaml:"backend_outage_minutes"`
+	RecoveryRTOMinutes        int      `json:"recovery_rto_minutes" yaml:"recovery_rto_minutes"`
+	RetryMaxElapsedTime       string   `json:"retry_max_elapsed_time" yaml:"retry_max_elapsed_time"`
+	QueueSizeBatchesPerSignal int      `json:"queue_size_batches_per_signal" yaml:"queue_size_batches_per_signal"`
+	BlockOnOverflow           bool     `json:"block_on_overflow" yaml:"block_on_overflow"`
+	PersistentStorage         string   `json:"persistent_storage" yaml:"persistent_storage"`
+	AcceptedLossOutside       string   `json:"accepted_loss_outside_envelope" yaml:"accepted_loss_outside_envelope"`
+	RequiredSelfMetrics       []string `json:"required_self_metrics" yaml:"required_self_metrics"`
+	Note                      string   `json:"note" yaml:"note"`
 }
 
 // FleetStreams are the streams the fleet owns in the store. Keeping them named

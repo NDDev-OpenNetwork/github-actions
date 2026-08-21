@@ -72,6 +72,9 @@ func TestValidationRejectsMutableUnsafeOrSharedInputs(t *testing.T) {
 		{"same host transport", func(m *Manifest) { m.Transport.TargetAddress = m.Transport.SourceAddress }, "transport"},
 		{"privileged port", func(m *Manifest) { m.Transport.TargetPort = 80 }, "transport.target_port"},
 		{"relative queue", func(m *Manifest) { m.Transport.QueueDirectory = "telemetry-queue" }, "transport.queue_directory"},
+		{"finite retry horizon", func(m *Manifest) { m.Transport.Durability.RetryMaxElapsedTime = "300s" }, "transport.durability"},
+		{"small outage envelope", func(m *Manifest) { m.Transport.Durability.BackendOutageMinutes = 5 }, "transport.durability"},
+		{"silent loss", func(m *Manifest) { m.Transport.Durability.AcceptedLossOutside = "drop" }, "accepted_loss"},
 	} {
 		mutated := base
 		mutated.Store.Streams = append([]string(nil), base.Store.Streams...)
