@@ -351,7 +351,7 @@ func baseEgressRejects(cfg config.Config, bridgeAddress string) []ACLRule {
 			Description:     "Block sensitive host bridge services",
 			Destination:     bridgeAddress + "/32",
 			Protocol:        "tcp",
-			DestinationPort: "22,80,443,8443,8444,9003",
+			DestinationPort: "22,80,443,8443,8444",
 		},
 	}
 }
@@ -380,7 +380,7 @@ func publicEgressACL(cfg config.Config, bridgeAddress string) ACL {
 				Description:     "Block sensitive host bridge services",
 				Destination:     bridgeAddress + "/32",
 				Protocol:        "tcp",
-				DestinationPort: "22,80,443,8443,8444,9003",
+				DestinationPort: "22,80,443,8443,8444",
 			},
 			{
 				Action:          "allow",
