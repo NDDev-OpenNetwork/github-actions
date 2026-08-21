@@ -267,12 +267,23 @@ func credentialSkeletons(config Config) []managedCredential {
 	for _, identity := range identities {
 		credentials = append(credentials, managedCredential{
 			identity:      identity,
-			accessKey:     accessKeyForRole(identity.Role),
+			accessKey:     accessKeyForIdentity(config, identity),
 			accessKeyFile: filepath.Join(config.CredentialsDirectory, "rustfs-"+identity.Role+"-access-key"),
 			secretKeyFile: filepath.Join(config.CredentialsDirectory, "rustfs-"+identity.Role+"-secret-key"),
 		})
 	}
 	return credentials
+}
+
+func accessKeyForIdentity(config Config, identity Identity) string {
+	material := "nddev-rustfs-cache-access-v2\x00" + config.Bucket + "\x00" + identity.Prefix + "\x00" + identity.Role
+	// Preserve the already-deployed user identities for the original bucket.
+	// Every additional bucket uses v2 and therefore cannot collide by role.
+	if config.Bucket == "github-actions-cache" {
+		return accessKeyForRole(identity.Role)
+	}
+	digest := sha256.Sum256([]byte(material))
+	return accessKeyPrefix + strings.ToUpper(hex.EncodeToString(digest[:8]))
 }
 
 func accessKeyForRole(role string) string {

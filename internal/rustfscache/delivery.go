@@ -67,7 +67,7 @@ func LoadDelivery(config Config, role string, credentialUID, credentialGID, caUI
 	if err != nil {
 		return Delivery{}, fmt.Errorf("read %s delivery access key: %w", role, err)
 	}
-	if string(access) != accessKeyForRole(role) {
+	if string(access) != accessKeyForIdentity(config, identity) {
 		clear(access)
 		return Delivery{}, fmt.Errorf("RustFS %s delivery access key drifted", role)
 	}
