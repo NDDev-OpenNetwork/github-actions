@@ -121,7 +121,12 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	repositoryConfig, identity, exists := h.Config.Delivery(claimRequest.Repository, claim.Role)
 	if !exists {
-		deny(logger, writer, request, http.StatusForbidden, "repository role not authorized")
+		if _, err := h.Store.Consume(ctx, claimRequest.InstanceName, token, claimRequest.Repository); err != nil {
+			deny(logger, writer, request, http.StatusConflict, "claim already bound")
+			return
+		}
+		logger.InfoContext(ctx, "cache claim bound without optional delivery", "instance", claim.InstanceName, "repository", claimRequest.Repository, "role", claim.Role)
+		writer.WriteHeader(http.StatusNoContent)
 		return
 	}
 	delivery, err := loadDelivery(h.Config, repositoryConfig.Bucket, identity, claimRequest.InstanceName)

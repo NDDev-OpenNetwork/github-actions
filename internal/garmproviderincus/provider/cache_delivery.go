@@ -424,6 +424,10 @@ if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
     curl --silent --show-error --fail --max-time 10 --cacert "${ca_path}" \
       --header 'Content-Type: application/json' --data-binary @- "${claim_endpoint}" >"${response}"
   unset claim_token
+  if [[ ! -s "${response}" ]]; then
+    printf 'repository-scoped compiler cache is not configured; continuing without cache\n'
+    exit 0
+  fi
   jq -e '.schema_version == 1' "${response}" >/dev/null
   install -o "$(id -u)" -g "$(id -g)" -m 0400 "${response}" "${assignment}"
 fi
