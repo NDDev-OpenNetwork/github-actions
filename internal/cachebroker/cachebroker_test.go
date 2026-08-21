@@ -169,9 +169,7 @@ func TestHandlerReturnsExactScopedDeliveryOnce(t *testing.T) {
 	}
 }
 
-func TestUnknownRepositoryDoesNotConsumeClaim(t *testing.T) {
-	// The repository registry is checked before Consume so a configuration
-	// repair can recover the same still-valid one-time claim.
+func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 	directory := t.TempDir()
 	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
 	token := bytes.Repeat([]byte{3}, ClaimTokenBytes)
@@ -182,10 +180,14 @@ func TestUnknownRepositoryDoesNotConsumeClaim(t *testing.T) {
 	body, _ := json.Marshal(ClaimRequest{InstanceName: "runner-three", RunnerName: "runner-three", Repository: "other/repo", Token: base64.RawURLEncoding.EncodeToString(token)})
 	response := httptest.NewRecorder()
 	Handler{Config: config, Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
-	if response.Code != http.StatusForbidden {
+	if response.Code != http.StatusNoContent {
 		t.Fatalf("status=%d", response.Code)
 	}
-	if _, err := store.Verify(context.Background(), "runner-three", token); err != nil {
-		t.Fatalf("claim consumed on denied repository: %v", err)
+	journal, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Claims["runner-three"].ClaimedRepository != "other/repo" {
+		t.Fatalf("optional miss did not bind exact repository: %+v", journal.Claims["runner-three"])
 	}
 }
