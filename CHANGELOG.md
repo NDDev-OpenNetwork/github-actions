@@ -79,6 +79,9 @@ Versioning.
   as a job failure. Such claims now bind the exact repository and return an
   explicit secret-free cache miss; invalid and cross-repository claims still
   fail closed.
+- Cut provider derivative `v0.1.5-nddev.56` for the blue-green distributed
+  cache endpoint. Cache TLS may move from standalone port 9002 to the exact
+  gateway port 9003 while diagnostic storage remains untouched on 9002.
 - Added GARM derivative `v0.2.1-nddev.51` and queue-admission schema v2. The
   central durable scheduler now reserves declared CPU units and hard memory
   before JIT/DB/provider creation, backfills smaller work into temporary holes,
