@@ -112,7 +112,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:3d29edfb4c37654e75ad9d4985d4c55e4a94575b2499bbc55bf69880329990b7" {
+	if first != "sha256:b7c154a10e54617f4fe3631a71dd07899cbe3dde7377d4224cb8dd61e9228a0b" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -281,6 +281,15 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 			t.Fatalf("provision script misses compiler-cache invariant %s", cacheInvariant)
 		}
 	}
+	for _, compatibilityInvariant := range []string{
+		"python3 -m pip --version", "/usr/local/bin/python", "/usr/local/bin/pip",
+		"/usr/local/bin/go", "/usr/local/bin/gofmt", "pnpm.cjs", "pnpx.cjs",
+		"yarn.js", "pnpm --version", "yarn --version",
+	} {
+		if !strings.Contains(provisionText, compatibilityInvariant) {
+			t.Fatalf("provision script misses compatibility invariant %s", compatibilityInvariant)
+		}
+	}
 	for _, name := range []string{"assets/sanitize.sh", "assets/smoke.sh"} {
 		content, _ := scripts.ReadFile(name)
 		for _, sshInvariant := range []string{"dpkg -s openssh-server", "ssh.socket", "sport = :22"} {
@@ -291,6 +300,11 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 	}
 	for _, name := range []string{"assets/smoke.sh", "assets/smoke-integration.sh"} {
 		content, _ := scripts.ReadFile(name)
+		for _, compatibilityInvariant := range []string{"python3 -m pip --version", "pip --version", "pnpm --version", "yarn --version", "go version"} {
+			if !strings.Contains(string(content), compatibilityInvariant) {
+				t.Fatalf("%s misses compatibility runtime invariant %s", name, compatibilityInvariant)
+			}
+		}
 		for _, cacheInvariant := range []string{"GHA_SCCACHE_VERSION", "GHA_SCCACHE_BINARY_SHA256", "sccache --version", "/usr/local/bin/sccache", "sha256sum --check --strict --status"} {
 			if !strings.Contains(string(content), cacheInvariant) {
 				t.Fatalf("%s misses compiler-cache runtime invariant %s", name, cacheInvariant)

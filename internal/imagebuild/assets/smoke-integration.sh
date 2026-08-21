@@ -66,7 +66,7 @@ runner_tool_cache="$(jq -er .runner_tool_cache /etc/nddev/image-build.json)"
 [[ "${runner_tool_cache}" == /home/runner/actions-runner/_work/_tool ]]
 smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
-[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,gh,go,node22,node24,node25,rust,uv ]]
+[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -85,6 +85,7 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       test -x "${go_root}/bin/go"
       [[ "$(stat --format='%U' -- "${go_root}/bin/go")" == runner ]]
       [[ "$("${go_root}/bin/go" version)" == "go version go${expected_version} linux/amd64" ]]
+		[[ "$(go version)" == "go version go${expected_version} linux/amd64" ]]
       ;;
     node22|node24|node25)
       node_root="${runner_tool_cache}/node/${expected_version}"
@@ -98,6 +99,7 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
         corepack --version >/dev/null
       fi
       ;;
+	pnpm) [[ "$(pnpm --version)" == "${expected_version}" ]] ;;
     rust)
       [[ "$(rustc --version)" == "rustc ${expected_version} "* ]]
       [[ "$(cargo --version)" == "cargo ${expected_version} "* ]]
@@ -106,8 +108,15 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       [[ "$(uv --version)" == "uv ${expected_version}"* ]]
       test -x /usr/local/bin/uvx
       ;;
+	yarn) [[ "$(yarn --version)" == "${expected_version}" ]] ;;
   esac
 done
+
+python --version >/dev/null
+python3 --version >/dev/null
+python3 -m pip --version >/dev/null
+pip --version >/dev/null
+pip3 --version >/dev/null
 
 for forbidden in \
   /run/incus/unix.socket \

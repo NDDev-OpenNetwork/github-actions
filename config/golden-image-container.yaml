@@ -69,6 +69,11 @@ toolchains:
     archive: node-v25.9.0-linux-x64.tar.xz
     download_url: https://nodejs.org/dist/v25.9.0/node-v25.9.0-linux-x64.tar.xz
     archive_sha256: 1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e
+  - name: pnpm
+    version: 11.22.0
+    archive: pnpm-11.22.0.tgz
+    download_url: https://registry.npmjs.org/pnpm/-/pnpm-11.22.0.tgz
+    archive_sha256: 57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc
   - name: rust
     version: 1.97.1
     archive: rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
@@ -79,6 +84,11 @@ toolchains:
     archive: uv-x86_64-unknown-linux-gnu.tar.gz
     download_url: https://github.com/astral-sh/uv/releases/download/0.11.30/uv-x86_64-unknown-linux-gnu.tar.gz
     archive_sha256: 04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68
+  - name: yarn
+    version: 4.18.0
+    archive: yarn-cli-dist-4.18.0.tgz
+    download_url: https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-4.18.0.tgz
+    archive_sha256: 606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497
 
 guest:
   builder_disk_gib: 12

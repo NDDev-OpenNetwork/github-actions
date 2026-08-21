@@ -36,7 +36,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:503bd38c0a03ca96922edbbdb4550890e37ffcce9c046625da6f6df7f6f5e93d" {
+	if fingerprint != "sha256:d83f03bde7193d0c04cb03ae4a3f0fb028b0fa96a0896e1cecc3dd786ff24ae1" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -70,8 +70,10 @@ func assertBakedToolchains(t *testing.T, manifest Manifest) {
 		"node22": {"22.23.2", "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"},
 		"node24": {"24.19.0", "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"},
 		"node25": {"25.9.0", "1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e"},
+		"pnpm":   {"11.22.0", "57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc"},
 		"rust":   {"1.97.1", "88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f"},
 		"uv":     {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
+		"yarn":   {"4.18.0", "606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497"},
 	}
 	if len(manifest.Toolchains) != len(wanted) {
 		t.Fatalf("toolchains = %d, want %d", len(manifest.Toolchains), len(wanted))

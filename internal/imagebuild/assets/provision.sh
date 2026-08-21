@@ -29,6 +29,16 @@ apt-get -y -o Dpkg::Options::=--force-confold dist-upgrade
 # shellcheck disable=SC2086
 apt-get install -y --no-install-recommends ${GHA_PACKAGES}
 
+# Projects legitimately use both the Python module entry points and their
+# conventional command names. Ubuntu deliberately has no `python` alias, so
+# provide deterministic links after proving the pinned packages exist.
+python3 -m pip --version >/dev/null
+ln -sfn /usr/bin/python3 /usr/local/bin/python
+ln -sfn /usr/bin/pip3 /usr/local/bin/pip
+ln -sfn /usr/bin/pip3 /usr/local/bin/pip3
+python --version >/dev/null
+pip --version >/dev/null
+
 systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
 git lfs install --system
 groupadd --force docker
@@ -179,7 +189,7 @@ toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
 toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-if [[ "${toolchain_set}" != bun,gh,go,rust,uv && "${toolchain_set}" != bun,gh,go,node22,node24,node25,rust,uv ]]; then
+if [[ "${toolchain_set}" != bun,gh,go,rust,uv && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -218,6 +228,9 @@ for toolchain_name in "${toolchain_names[@]}"; do
       install -o runner -g runner -m 0644 /dev/null \
         "${runner_tool_cache}/go/${toolchain_version}/x64.complete"
       [[ "$("${runner_tool_cache}/go/${toolchain_version}/x64/bin/go" version)" == "go version go${toolchain_version} linux/amd64" ]]
+		ln -sfn "${runner_tool_cache}/go/${toolchain_version}/x64/bin/go" /usr/local/bin/go
+		ln -sfn "${runner_tool_cache}/go/${toolchain_version}/x64/bin/gofmt" /usr/local/bin/gofmt
+		[[ "$(go version)" == "go version go${toolchain_version} linux/amd64" ]]
       ;;
     node22|node24|node25)
       tar --extract --xz --file "${toolchain_archive}" \
@@ -238,6 +251,17 @@ for toolchain_name in "${toolchain_names[@]}"; do
         corepack --version >/dev/null
       fi
       ;;
+	pnpm)
+		package_root="/usr/local/libexec/gha-toolchains/pnpm-${toolchain_version}"
+		install -d -o root -g root -m 0755 "${package_root}"
+		tar --extract --gzip --file "${toolchain_archive}" --directory "${package_root}" \
+			--strip-components=1 --no-same-owner --no-same-permissions
+		test -f "${package_root}/bin/pnpm.cjs"
+		test -f "${package_root}/bin/pnpx.cjs"
+		ln -sfn "${package_root}/bin/pnpm.cjs" /usr/local/bin/pnpm
+		ln -sfn "${package_root}/bin/pnpx.cjs" /usr/local/bin/pnpx
+		[[ "$(pnpm --version)" == "${toolchain_version}" ]]
+		;;
     rust)
       tar --extract --xz --file "${toolchain_archive}" \
         --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
@@ -256,6 +280,15 @@ for toolchain_name in "${toolchain_names[@]}"; do
         "${toolchain_scratch}/uv-x86_64-unknown-linux-gnu/uvx" /usr/local/bin/uvx
       [[ "$(uv --version)" == "uv ${toolchain_version}"* ]]
       ;;
+	yarn)
+		package_root="/usr/local/libexec/gha-toolchains/yarn-${toolchain_version}"
+		install -d -o root -g root -m 0755 "${package_root}"
+		tar --extract --gzip --file "${toolchain_archive}" --directory "${package_root}" \
+			--strip-components=1 --no-same-owner --no-same-permissions
+		test -f "${package_root}/bin/yarn.js"
+		ln -sfn "${package_root}/bin/yarn.js" /usr/local/bin/yarn
+		[[ "$(yarn --version)" == "${toolchain_version}" ]]
+		;;
   esac
   find "${toolchain_scratch}" -mindepth 1 -delete
   rmdir "${toolchain_scratch}"
@@ -303,5 +336,13 @@ test -x /usr/local/bin/uv
 test -x /usr/local/bin/uvx
 test -x /usr/local/bin/rustc
 test -x /usr/local/bin/cargo
+test -x /usr/local/bin/go
+test -x /usr/local/bin/gofmt
+test -x /usr/local/bin/node
+test -x /usr/local/bin/npm
+test -x /usr/local/bin/pnpm
+test -x /usr/local/bin/yarn
+test -x /usr/local/bin/python
+test -x /usr/local/bin/pip
 test "$(systemctl is-enabled gha-warm-agent.path)" = enabled
 test "$(systemctl is-enabled gha-warm-ready.service)" = enabled

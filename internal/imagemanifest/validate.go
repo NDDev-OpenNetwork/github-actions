@@ -73,6 +73,11 @@ var toolchainAssets = map[string]struct {
 			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
 		},
 	},
+	"pnpm": {
+		Host:    "registry.npmjs.org",
+		Archive: func(version string) string { return "pnpm-" + version + ".tgz" },
+		Path:    func(version string) string { return "/pnpm/-/pnpm-" + version + ".tgz" },
+	},
 	"rust": {
 		Host: "static.rust-lang.org",
 		Archive: func(version string) string {
@@ -88,6 +93,11 @@ var toolchainAssets = map[string]struct {
 		Path: func(version string) string {
 			return "/astral-sh/uv/releases/download/" + version + "/uv-x86_64-unknown-linux-gnu.tar.gz"
 		},
+	},
+	"yarn": {
+		Host:    "registry.npmjs.org",
+		Archive: func(version string) string { return "yarn-cli-dist-" + version + ".tgz" },
+		Path:    func(version string) string { return "/@yarnpkg/cli-dist/-/cli-dist-" + version + ".tgz" },
 	},
 }
 

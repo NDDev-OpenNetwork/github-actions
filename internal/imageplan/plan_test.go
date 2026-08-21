@@ -80,7 +80,7 @@ func TestBuildProducesDeterministicBoundedPlan(t *testing.T) {
 	for _, toolchain := range first.Toolchains {
 		names = append(names, toolchain.Name)
 	}
-	if !slices.Equal(names, []string{"bun", "gh", "go", "node22", "node24", "node25", "rust", "uv"}) {
+	if !slices.Equal(names, []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}) {
 		t.Fatalf("plan toolchains are not the canonical sorted baked set: %v", names)
 	}
 	if first.CompilerCache.Name != "sccache" || first.CompilerCache.Version != "v0.17.0" ||
