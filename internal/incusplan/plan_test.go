@@ -102,10 +102,10 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 	if plan.HostFirewall.Backend != "ufw" || plan.HostFirewall.RequiredStatus != "active" || plan.HostFirewall.RequiredDefault != "deny (incoming), allow (outgoing), deny (routed)" {
 		t.Fatalf("unsafe host firewall preconditions: %#v", plan.HostFirewall)
 	}
-	if len(plan.HostFirewall.Rules) != 11 {
+	if len(plan.HostFirewall.Rules) != 12 {
 		t.Fatalf("unexpected host firewall rules: %#v", plan.HostFirewall.Rules)
 	}
-	var dhcp, publicHTTP, publicHTTPS, rustfs, servicesRustFS, garmGateway, declaroSSH, almatyStagingSSH bool
+	var dhcp, publicHTTP, publicHTTPS, rustfs, cacheGateway, servicesRustFS, garmGateway, declaroSSH, almatyStagingSSH bool
 	for _, rule := range plan.HostFirewall.Rules {
 		command := strings.Join(rule.Args, " ")
 		switch rule.Name {
@@ -117,6 +117,8 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 			publicHTTPS = strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to any port 443 proto tcp")
 		case "rustfs":
 			rustfs = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9002 proto tcp")
+		case "cache-gateway":
+			cacheGateway = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9003 proto tcp")
 		case "services-rustfs-diagnostics":
 			servicesRustFS = strings.Contains(command, "allow in on eth1 from 10.200.0.7 to 198.51.100.1 port 9002 proto tcp")
 		case "garm-gateway":
@@ -126,7 +128,7 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 			almatyStagingSSH = almatyStagingSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.21/32 port 22 proto tcp")
 		}
 	}
-	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !servicesRustFS || !garmGateway || !declaroSSH || !almatyStagingSSH {
+	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !cacheGateway || !servicesRustFS || !garmGateway || !declaroSSH || !almatyStagingSSH {
 		t.Fatalf("host firewall invariants missing: %#v", plan.HostFirewall.Rules)
 	}
 
@@ -147,7 +149,7 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 		case "Block sensitive host bridge services":
 			hostServiceReject = rule.Action == "reject" && rule.Destination == "198.51.100.1/32" && strings.Contains(rule.DestinationPort, "8443")
 		case "Allow scoped local cache endpoints":
-			cacheAllow = rule.Action == "allow" && rule.Destination == "198.51.100.1/32" && rule.DestinationPort == "5001,9002"
+			cacheAllow = rule.Action == "allow" && rule.Destination == "198.51.100.1/32" && rule.DestinationPort == "5001,9002,9003"
 		case "Allow the restricted GARM worker gateway":
 			gatewayAllow = rule.Action == "allow" && rule.Destination == "198.51.100.1/32" && rule.DestinationPort == "9443"
 		}
@@ -178,7 +180,6 @@ func TestSelectedDistributedCachePortMovesFromRejectToAllow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Incus.RustFSPort = 9003
 	rejects := baseEgressRejects(cfg, "198.51.100.1")
 	for _, rule := range rejects {
 		if rule.Description == "Block sensitive host bridge services" && strings.Contains(rule.DestinationPort, "9003") {
@@ -188,7 +189,7 @@ func TestSelectedDistributedCachePortMovesFromRejectToAllow(t *testing.T) {
 	allows := localServiceAllows(cfg, "198.51.100.1", true)
 	found := false
 	for _, rule := range allows {
-		if rule.Description == "Allow scoped local cache endpoints" && rule.DestinationPort == "5001,9003" {
+		if rule.Description == "Allow scoped local cache endpoints" && rule.DestinationPort == "5001,9002,9003" {
 			found = true
 		}
 	}

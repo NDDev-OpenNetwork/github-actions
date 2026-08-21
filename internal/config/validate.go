@@ -332,6 +332,7 @@ func validateIncus(add func(string, string), incus Incus) {
 	}
 	validateServicePort(add, "incus.registry_port", incus.RegistryPort)
 	validateServicePort(add, "incus.rustfs_port", incus.RustFSPort)
+	validateServicePort(add, "incus.cache_gateway_port", incus.CacheGatewayPort)
 	validateServicePort(add, "incus.garm_gateway_port", incus.GARMGatewayPort)
 	ports := map[int]string{}
 	for _, service := range []struct {
@@ -340,6 +341,7 @@ func validateIncus(add func(string, string), incus Incus) {
 	}{
 		{"incus.registry_port", incus.RegistryPort},
 		{"incus.rustfs_port", incus.RustFSPort},
+		{"incus.cache_gateway_port", incus.CacheGatewayPort},
 		{"incus.garm_gateway_port", incus.GARMGatewayPort},
 	} {
 		if previous, exists := ports[service.port]; exists {
