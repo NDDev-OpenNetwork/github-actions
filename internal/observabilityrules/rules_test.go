@@ -27,8 +27,8 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {
 		fragment, exists := wanted[rule.ID]
-		if exists && !strings.Contains(rule.Query, fragment) {
-			t.Errorf("rule %s query %q does not contain current metric contract %q", rule.ID, rule.Query, fragment)
+		if exists && !strings.Contains(rule.Expression, fragment) {
+			t.Errorf("rule %s expression %q does not contain current metric contract %q", rule.ID, rule.Expression, fragment)
 		}
 		seen[rule.ID] = exists
 	}
@@ -49,6 +49,7 @@ func TestRulesRejectUnsafeOrUnactionableChanges(t *testing.T) {
 		"slow page":        func(r *Rule) { r.HoldSecs = 3600 },
 		"fast ticket":      func(r *Rule) { r.Severity, r.HoldSecs = "ticket", 60 },
 		"private runbook":  func(r *Rule) { r.Runbook = "https://example.invalid/private" },
+		"unknown operator": func(r *Rule) { r.Operator = "contains" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			mutated := bundle
@@ -58,5 +59,30 @@ func TestRulesRejectUnsafeOrUnactionableChanges(t *testing.T) {
 				t.Fatal("unsafe rule was accepted")
 			}
 		})
+	}
+}
+
+func TestRenderOpenObserveSeparatesExpressionAndThreshold(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rendered.Alerts) != len(bundle.Rules) {
+		t.Fatalf("alerts = %d, want %d", len(rendered.Alerts), len(bundle.Rules))
+	}
+	for index, alert := range rendered.Alerts {
+		rule := bundle.Rules[index]
+		if alert.Name != rule.ID || alert.StreamName != rule.StreamName || alert.QueryCondition.PromQL != rule.Expression ||
+			alert.QueryCondition.PromQLCondition.Operator != rule.Operator ||
+			alert.QueryCondition.PromQLCondition.Value != rule.Threshold || !alert.Enabled {
+			t.Fatalf("alert %s does not preserve rule semantics: %#v", rule.ID, alert)
+		}
+		if alert.TriggerCondition.Threshold != rule.RequiredEvaluations() {
+			t.Fatalf("alert %s evaluations = %d, want %d", rule.ID, alert.TriggerCondition.Threshold, rule.RequiredEvaluations())
+		}
 	}
 }
