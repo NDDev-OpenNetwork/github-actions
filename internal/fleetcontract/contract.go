@@ -239,6 +239,9 @@ func Build(sources Sources, commit string) (Contract, error) {
 	if err != nil {
 		return Contract{}, err
 	}
+	if err := validateQueueIntentSchemaPair(garm, provider); err != nil {
+		return Contract{}, err
+	}
 	merge, err := loadMerge(sources.path(branchProtectionPath))
 	if err != nil {
 		return Contract{}, err
@@ -297,6 +300,16 @@ func Build(sources Sources, commit string) (Contract, error) {
 		NotContractual: declaration.NotContractual,
 		OpenBlockers:   declaration.OpenBlockers,
 	}, nil
+}
+
+func validateQueueIntentSchemaPair(garm garmderivative.Manifest, provider providerrelease.Manifest) error {
+	if garm.RuntimeContract.QueueIntentSchemaVersion != provider.Runtime.QueueIntentSchemaVersion {
+		return fmt.Errorf(
+			"GARM queue-intent schema %d is incompatible with provider schema %d",
+			garm.RuntimeContract.QueueIntentSchemaVersion, provider.Runtime.QueueIntentSchemaVersion,
+		)
+	}
+	return nil
 }
 
 const branchProtectionPath = ".github/branch-protection.yaml"

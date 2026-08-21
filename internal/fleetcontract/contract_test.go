@@ -7,7 +7,21 @@ import (
 	"testing"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/garmderivative"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
 )
+
+func TestQueueIntentSchemaMustMoveAsOneControlPlaneContract(t *testing.T) {
+	garm := garmderivative.Manifest{RuntimeContract: garmderivative.RuntimeContract{QueueIntentSchemaVersion: 3}}
+	provider := providerrelease.Manifest{Runtime: providerrelease.Runtime{QueueIntentSchemaVersion: 2}}
+	if err := validateQueueIntentSchemaPair(garm, provider); err == nil || !strings.Contains(err.Error(), "incompatible") {
+		t.Fatalf("incompatible queue journal readers were accepted: %v", err)
+	}
+	provider.Runtime.QueueIntentSchemaVersion = 3
+	if err := validateQueueIntentSchemaPair(garm, provider); err != nil {
+		t.Fatalf("matching queue journal readers were rejected: %v", err)
+	}
+}
 
 func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 	contract, err := Build(Sources{Root: "../.."}, "0123456789abcdef0123456789abcdef01234567")

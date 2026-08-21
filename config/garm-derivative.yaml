@@ -105,6 +105,7 @@ build:
   maximum_required_glibc: "2.34"
   binary_sha256: 7fc32e6e7c72cde5a741270f432f5ff93d9e5d867d8111d7a20fe89737146b72
 runtime_contract:
+  queue_intent_schema_version: 3
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
   startup_states_protected_from_scale_down: true
