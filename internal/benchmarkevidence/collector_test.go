@@ -338,3 +338,28 @@ func writeFixtureJSON(t *testing.T, writer http.ResponseWriter, value any) {
 		t.Error(err)
 	}
 }
+
+func TestBenchmarkConditionalCacheSteps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		environment string
+		cacheMode   string
+		workload    string
+		step        string
+		want        bool
+	}{
+		{"nddev", "cold", "rust", "Restore dependency cache", true},
+		{"nddev", "cold", "rust", "Configure NDDev compiler cache", true},
+		{"nddev", "cold", "rust", "Inspect NDDev compiler cache", true},
+		{"nddev", "warm", "rust", "Restore dependency cache", true},
+		{"nddev", "warm", "rust", "Configure NDDev compiler cache", false},
+		{"github-hosted", "warm", "rust", "Configure NDDev compiler cache", true},
+		{"nddev", "warm", "go", "Restore dependency cache", false},
+		{"nddev", "cold", "go", "Restore dependency cache", true},
+	}
+	for _, test := range tests {
+		if got := benchmarkStepMaySkip(test.environment, test.cacheMode, test.workload, test.step); got != test.want {
+			t.Fatalf("benchmarkStepMaySkip(%q,%q,%q,%q)=%t, want %t", test.environment, test.cacheMode, test.workload, test.step, got, test.want)
+		}
+	}
+}
