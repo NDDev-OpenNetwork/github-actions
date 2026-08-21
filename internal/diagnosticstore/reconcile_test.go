@@ -14,6 +14,7 @@ import (
 type fakeRequester struct {
 	bucket    bool
 	quota     int64
+	usage     int64
 	lifecycle []byte
 }
 
@@ -29,6 +30,11 @@ func (f *fakeRequester) Do(_ context.Context, _ rustfscache.Credential, method, 
 		return rustfscache.Response{StatusCode: http.StatusOK}, nil
 	case method == http.MethodGet && path == "/rustfs/admin/v3/quota/example-diagnostics":
 		raw, _ := json.Marshal(quotaInfo{Quota: f.quota, QuotaType: "HARD"})
+		return rustfscache.Response{StatusCode: http.StatusOK, Body: raw}, nil
+	case method == http.MethodGet && path == "/rustfs/admin/v3/quota-stats/example-diagnostics":
+		raw, _ := json.Marshal(quotaStats{Bucket: "example-diagnostics", QuotaLimit: f.quota,
+			CurrentUsage: f.usage, RemainingQuota: f.quota - f.usage,
+			UsagePercentage: float64(f.usage) * 100 / float64(f.quota)})
 		return rustfscache.Response{StatusCode: http.StatusOK, Body: raw}, nil
 	case method == http.MethodPut && path == "/rustfs/admin/v3/quota/example-diagnostics":
 		var quota quotaInfo
@@ -48,7 +54,8 @@ func (f *fakeRequester) Do(_ context.Context, _ rustfscache.Credential, method, 
 	}
 }
 
-func TestPlanApplyAndReadBack(t *testing.T) {
+func diagnosticStoreFixture(t *testing.T) (Config, *fakeRequester) {
+	t.Helper()
 	directory := t.TempDir()
 	access := filepath.Join(directory, "access")
 	secret := filepath.Join(directory, "secret")
@@ -61,7 +68,11 @@ func TestPlanApplyAndReadBack(t *testing.T) {
 	config := Config{SchemaVersion: 1, Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", CAFile: "/tmp/ca.pem",
 		RootAccessKeyFile: access, RootSecretKeyFile: secret, Bucket: "example-diagnostics", Prefix: "diagnostics/v1",
 		QuotaBytes: 8 * 1024 * 1024 * 1024, RetentionDays: 7, MinimumHeadroom: 1024 * 1024 * 1024}
-	remote := &fakeRequester{}
+	return config, &fakeRequester{}
+}
+
+func TestPlanApplyAndReadBack(t *testing.T) {
+	config, remote := diagnosticStoreFixture(t)
 	plan, err := (Runner{Requester: remote}).Run(context.Background(), config, false)
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +93,23 @@ func TestPlanApplyAndReadBack(t *testing.T) {
 	}
 	if check.StateBefore != "managed" || len(check.Actions) != 0 {
 		t.Fatalf("unexpected check: %+v", check)
+	}
+	if check.HeadroomState != "sufficient" || check.RemainingQuotaBytes != config.QuotaBytes {
+		t.Fatalf("usage capacity was not reported: %+v", check)
+	}
+}
+
+func TestReportsLowRemoteHeadroom(t *testing.T) {
+	config, remote := diagnosticStoreFixture(t)
+	remote.bucket, remote.quota = true, config.QuotaBytes
+	remote.usage = config.QuotaBytes - config.MinimumHeadroom + 1
+	remote.lifecycle = lifecycleDocument(config)
+	result, err := (Runner{Requester: remote}).Run(context.Background(), config, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HeadroomState != "below-minimum" || len(result.Actions) != 1 || result.Actions[0] != "increase_quota_or_reduce_retention" {
+		t.Fatalf("low headroom was not actionable: %+v", result)
 	}
 }
 
