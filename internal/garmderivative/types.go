@@ -91,6 +91,8 @@ type RuntimeContract struct {
 	AuthoritativeIdleOfflineRunnerReaping    bool `json:"authoritative_idle_offline_runner_reaping" yaml:"authoritative_idle_offline_runner_reaping"`
 	AuthoritativeAccessRefusalBackoffSeconds int  `json:"authoritative_access_refusal_backoff_seconds" yaml:"authoritative_access_refusal_backoff_seconds"`
 	JobStartedRunnerIdentity                 bool `json:"job_started_runner_identity" yaml:"job_started_runner_identity"`
+	WeightedCPUMemoryAdmission               bool `json:"weighted_cpu_memory_admission" yaml:"weighted_cpu_memory_admission"`
+	PriorityZeroCapacityReservation          bool `json:"priority_zero_capacity_reservation" yaml:"priority_zero_capacity_reservation"`
 	JobReconciliationIntervalSeconds         int  `json:"job_reconciliation_interval_seconds" yaml:"job_reconciliation_interval_seconds"`
 	JobReconciliationBatchSize               int  `json:"job_reconciliation_batch_size" yaml:"job_reconciliation_batch_size"`
 	OfficialActionsRunnerUnchanged           bool `json:"official_actions_runner_unchanged" yaml:"official_actions_runner_unchanged"`

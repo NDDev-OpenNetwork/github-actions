@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -794,9 +795,10 @@ func TestQueueCoordinatorStillCapsOneRepositoryBelowItsWidth(t *testing.T) {
 // never keep, so it is refused at load rather than silently clamped.
 func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 1, MaxInFlight: 2, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 2, MaxInFlight: 2, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
+		Capacity: queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048}, ScaleSets: testQueueScaleSetResourceMap(),
 		Repositories: map[string]queueRepositoryPolicy{"owner/repo": {Weight: 1, MaxInFlight: 3}},
 	}
 	if err := config.Validate(); err == nil {
@@ -812,13 +814,59 @@ func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 // than every host together can hold.
 func TestQueueAdmissionConfigRefusesAnUnboundedWidth(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 1, MaxInFlight: queueMaxInFlightCeiling + 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 2, MaxInFlight: queueMaxInFlightCeiling + 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
+		Capacity: queueResourceBudget{CPUUnits: queueMaxInFlightCeiling, MemoryMiB: queueMaxInFlightCeiling * 1024}, ScaleSets: testQueueScaleSetResourceMap(),
 		Repositories: map[string]queueRepositoryPolicy{},
 	}
 	if err := config.Validate(); err == nil {
 		t.Fatalf("a width above the %d ceiling was accepted", queueMaxInFlightCeiling)
+	}
+}
+
+func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
+	now := time.Date(2026, 8, 20, 23, 0, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
+		ScaleSets: map[string]queueScaleSetResources{
+			"nddev-linux-standard":    {CPUUnits: 2, MemoryMiB: 2048},
+			"nddev-linux-integration": {CPUUnits: 4, MemoryMiB: 4096},
+			"nddev-linux-fast":        {CPUUnits: 2, MemoryMiB: 2048},
+		},
+		PriorityAgingSeconds: 300,
+	}
+	journal := queueIntentJournal{Intents: map[string]queueIntent{
+		"running": {State: queueStateRunning, ScaleSetName: "nddev-linux-standard"},
+	}}
+	heavy := queueIntent{Key: "heavy", State: queueStateQueued, ScaleSetName: "nddev-linux-integration", Priority: 2, QueueTime: now}
+	light := queueIntent{Key: "light", State: queueStateQueued, ScaleSetName: "nddev-linux-fast", Priority: 2, QueueTime: now.Add(time.Second)}
+	selected, exists := resourceFitCandidate(&journal, config, []queueIntent{heavy, light}, now)
+	if !exists || selected.Key != light.Key {
+		t.Fatalf("resource backfill selected %#v exists=%t, want light", selected, exists)
+	}
+	heavy.Priority = 0
+	if selected, exists := resourceFitCandidate(&journal, config, []queueIntent{heavy, light}, now); exists {
+		t.Fatalf("priority-zero reservation backfilled with %#v", selected)
+	}
+}
+
+func TestValidateQueueBudgetRejectsWeightedOvercommit(t *testing.T) {
+	config := queueAdmissionConfig{
+		MaxInFlight: 4, DefaultRepositoryLimit: 4, DefaultWeight: 1,
+		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
+		ScaleSets: map[string]queueScaleSetResources{
+			"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048},
+		},
+		Repositories: map[string]queueRepositoryPolicy{},
+	}
+	journal := queueIntentJournal{Intents: map[string]queueIntent{
+		"one":   {State: queueStateRunning, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+		"two":   {State: queueStateAssigned, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+		"three": {State: queueStateAcquiring, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+	}}
+	if err := validateQueueBudget(&journal, config); err == nil || !strings.Contains(err.Error(), "resource budget") {
+		t.Fatalf("weighted overcommit was accepted: %v", err)
 	}
 }
 
@@ -984,7 +1032,7 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		repositories = map[string]queueRepositoryPolicy{}
 	}
 	config := queueAdmissionConfig{
-		SchemaVersion:          1,
+		SchemaVersion:          2,
 		MaxInFlight:            maxInFlight,
 		DefaultRepositoryLimit: defaultRepositoryLimit,
 		DefaultWeight:          1,
@@ -993,6 +1041,8 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		AcquiredTTLSeconds:     600,
 		ExecutionTTLSeconds:    86400,
 		PriorityAgingSeconds:   300,
+		Capacity:               queueResourceBudget{CPUUnits: maxInFlight, MemoryMiB: maxInFlight * 1024},
+		ScaleSets:              testQueueScaleSetResourceMap(),
 		Repositories:           repositories,
 	}
 	data, err := json.Marshal(config)
@@ -1013,6 +1063,17 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		t.Fatal(err)
 	}
 	return coordinator
+}
+
+func testQueueScaleSetResourceMap() map[string]queueScaleSetResources {
+	resources := queueScaleSetResources{CPUUnits: 1, MemoryMiB: 1024}
+	return map[string]queueScaleSetResources{
+		"nddev-linux-fast":        resources,
+		"nddev-linux-integration": resources,
+		"nddev-linux-release":     resources,
+		"nddev-linux-standard":    resources,
+		"nddev-linux-untrusted":   resources,
+	}
 }
 
 func testQueueScaleSet(id int, name string) params.ScaleSet {

@@ -40,6 +40,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerrelease"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueadmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetrymanifest"
@@ -87,6 +88,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateDiagnosticExporter(args[1:], stdout, stderr)
 	case "validate-tenant-registry":
 		return runValidateTenantRegistry(args[1:], stdout, stderr)
+	case "validate-queue-admission":
+		return runValidateQueueAdmission(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -172,6 +175,35 @@ func runValidateTenantRegistry(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return writeJSONOrFail(stdout, stderr, registry)
+}
+
+func runValidateQueueAdmission(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-queue-admission", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	queuePath := flags.String("config", "", "strict queue admission JSON path")
+	platformPath := flags.String("platform-config", "", "fleet-member platform configuration")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *queuePath == "" || *platformPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: validate-queue-admission requires --config and --platform-config")
+		return 2
+	}
+	queue, err := queueadmission.Load(*queuePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	platform, err := config.Load(*platformPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: load platform config: %v\n", err)
+		return 1
+	}
+	if err := queue.ValidateAgainstPlatform(platform); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, queue)
 }
 
 func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
@@ -1448,5 +1480,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|validate-queue-admission|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }
