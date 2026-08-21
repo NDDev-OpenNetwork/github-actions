@@ -35,6 +35,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilityrules"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressurepublish"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
@@ -90,6 +91,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateTenantRegistry(args[1:], stdout, stderr)
 	case "validate-queue-admission":
 		return runValidateQueueAdmission(args[1:], stdout, stderr)
+	case "validate-observability-rules":
+		return runValidateObservabilityRules(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -204,6 +207,25 @@ func runValidateQueueAdmission(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return writeJSONOrFail(stdout, stderr, queue)
+}
+
+func runValidateObservabilityRules(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-observability-rules", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/observability-rules.yaml", "strict observability rules bundle")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: validate-observability-rules requires --config")
+		return 2
+	}
+	bundle, err := observabilityrules.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, bundle)
 }
 
 func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
@@ -1480,5 +1502,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|validate-queue-admission|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }
