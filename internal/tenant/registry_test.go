@@ -19,8 +19,8 @@ func TestPublicTenantRegistryIsStrictAndEquivalentToExampleFixture(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repository, ok := selected.RepositoryForScaleSet("nddev-almaty-standard"); !ok || repository != "example-org/example-library" {
-		t.Fatalf("Almaty binding=%q,%v", repository, ok)
+	if repository, ok := selected.RepositoryForScaleSet("nddev-priority-standard"); !ok || repository != "example-org/example-library" {
+		t.Fatalf("Priority binding=%q,%v", repository, ok)
 	}
 }
 

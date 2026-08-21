@@ -85,7 +85,7 @@ func TestStartupMigratesLegacyAssignedOwnershipAndPhaseTTLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index, job := range jobs {
-		intent, err := queueIntentFromJob(scaleSet, job, now.Add(-time.Hour), 24*time.Hour)
+		intent, err := queueIntentFromJob(queueAdmissionConfig{ScaleSets: testQueueScaleSetResourceMap()}, scaleSet, job, now.Add(-time.Hour), 24*time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,6 +196,32 @@ func TestQueueCoordinatorSelectsPriorityBeforeAcquireJobs(t *testing.T) {
 	selected, err = coordinator.SelectForAcquire(standard, []params.ScaleSetJobMessage{standardJob})
 	if err != nil || len(selected) != 1 || selected[0] != standardJob.RunnerRequestID {
 		t.Fatalf("standard selection after release = %v, %v", selected, err)
+	}
+}
+
+func TestQueuePriorityComesFromScaleSetPolicyAndHasThreeLevels(t *testing.T) {
+	config := queueAdmissionConfig{ScaleSets: map[string]queueScaleSetResources{
+		"example-high":       {CPUUnits: 1, MemoryMiB: 1024, Priority: 0},
+		"example-ordinary":   {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
+		"example-background": {CPUUnits: 1, MemoryMiB: 1024, Priority: 2},
+	}}
+	ordinary := params.ScaleSetJobMessage{EventName: "pull_request"}
+	scheduled := params.ScaleSetJobMessage{EventName: "schedule"}
+	for name, testCase := range map[string]struct {
+		scaleSet string
+		job      params.ScaleSetJobMessage
+		want     int
+	}{
+		"high remains high":                    {"example-high", scheduled, 0},
+		"ordinary pull request":                {"example-ordinary", ordinary, 1},
+		"scheduled ordinary is background":     {"example-ordinary", scheduled, 2},
+		"manual background remains background": {"example-background", ordinary, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := baseQueuePriority(config, testCase.scaleSet, testCase.job); got != testCase.want {
+				t.Fatalf("priority = %d, want %d", got, testCase.want)
+			}
+		})
 	}
 }
 
@@ -840,7 +866,7 @@ func TestQueueCoordinatorStillCapsOneRepositoryBelowItsWidth(t *testing.T) {
 // never keep, so it is refused at load rather than silently clamped.
 func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 2, MaxInFlight: 2, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 3, MaxInFlight: 2, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -859,7 +885,7 @@ func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 // than every host together can hold.
 func TestQueueAdmissionConfigRefusesAnUnboundedWidth(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 2, MaxInFlight: queueMaxInFlightCeiling + 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: 3, MaxInFlight: queueMaxInFlightCeiling + 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: queueMaxInFlightCeiling, MemoryMiB: queueMaxInFlightCeiling * 1024}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -875,9 +901,9 @@ func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	config := queueAdmissionConfig{
 		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
-			"nddev-linux-standard":    {CPUUnits: 2, MemoryMiB: 2048},
-			"nddev-linux-integration": {CPUUnits: 4, MemoryMiB: 4096},
-			"nddev-linux-fast":        {CPUUnits: 2, MemoryMiB: 2048},
+			"nddev-linux-standard":    {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
+			"nddev-linux-integration": {CPUUnits: 4, MemoryMiB: 4096, Priority: 1},
+			"nddev-linux-fast":        {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
 		},
 		PriorityAgingSeconds: 300,
 	}
@@ -901,7 +927,7 @@ func TestValidateQueueBudgetRejectsWeightedReservationOvercommit(t *testing.T) {
 		MaxInFlight: 4, DefaultRepositoryLimit: 4, DefaultWeight: 1,
 		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
-			"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048},
+			"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
 		},
 		Repositories: map[string]queueRepositoryPolicy{},
 	}
@@ -919,7 +945,7 @@ func TestValidateQueueBudgetRetainsAuthoritativeRunningOverage(t *testing.T) {
 	config := queueAdmissionConfig{
 		MaxInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
 		Capacity:     queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048},
-		ScaleSets:    map[string]queueScaleSetResources{"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048}},
+		ScaleSets:    map[string]queueScaleSetResources{"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048, Priority: 1}},
 		Repositories: map[string]queueRepositoryPolicy{},
 	}
 	journal := queueIntentJournal{Intents: map[string]queueIntent{
@@ -1096,7 +1122,7 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		repositories = map[string]queueRepositoryPolicy{}
 	}
 	config := queueAdmissionConfig{
-		SchemaVersion:          2,
+		SchemaVersion:          3,
 		MaxInFlight:            maxInFlight,
 		DefaultRepositoryLimit: defaultRepositoryLimit,
 		DefaultWeight:          1,
@@ -1130,13 +1156,12 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 }
 
 func testQueueScaleSetResourceMap() map[string]queueScaleSetResources {
-	resources := queueScaleSetResources{CPUUnits: 1, MemoryMiB: 1024}
 	return map[string]queueScaleSetResources{
-		"nddev-linux-fast":        resources,
-		"nddev-linux-integration": resources,
-		"nddev-linux-release":     resources,
-		"nddev-linux-standard":    resources,
-		"nddev-linux-untrusted":   resources,
+		"nddev-linux-fast":        {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
+		"nddev-linux-integration": {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
+		"nddev-linux-release":     {CPUUnits: 1, MemoryMiB: 1024, Priority: 0},
+		"nddev-linux-standard":    {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
+		"nddev-linux-untrusted":   {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
 	}
 }
 

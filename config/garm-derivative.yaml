@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.56
+derivative_version: v0.2.1-nddev.57
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -81,10 +81,10 @@ patches:
     purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 34ce9e9d5452d958ea56a73a46924133e03129fc10c34deab1f8ebb555d430fa
+    sha256: 58de58f98f3c23f85a57ccef6b38f538b416262368dd0fe1c2b5a8079a81c3f6
     purpose: Fsync-backed central queue admission where sparse JobAssigned owns a short provisional token, JobAvailable binds complete identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 71e6ac7a5d45fb4a2c08207df3b2dc61a032d30cda6d974c411af71c43c0a0d5
+    sha256: 13795f910c290864c638b3e70e1e7952133f5000828e4017806181ca4d19f6c8
     purpose: Deterministic provisional bootstrap, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 2f0683b243462f19282f8422533ff0fda6988acef4ce3e98483e456d5136117d
+  binary_sha256: af6f79e3292dc0e3060e2b0a258f1cf744348ef52b8fc2e750828eb79e683d8d
 runtime_contract:
   queue_intent_schema_version: 3
   event_driven_scale_set_wake: true

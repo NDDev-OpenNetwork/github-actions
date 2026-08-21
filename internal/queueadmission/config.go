@@ -11,7 +11,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 const maxConfigBytes = 64 * 1024
 
 type ResourceBudget struct {
@@ -22,6 +22,7 @@ type ResourceBudget struct {
 type ScaleSetResources struct {
 	CPUUnits  int `json:"cpu_units"`
 	MemoryMiB int `json:"memory_mib"`
+	Priority  int `json:"priority"`
 }
 
 type RepositoryPolicy struct {
@@ -83,7 +84,8 @@ func (c Config) Validate() error {
 	}
 	for name, resources := range c.ScaleSets {
 		if name == "" || resources.CPUUnits < 1 || resources.CPUUnits > c.Capacity.CPUUnits ||
-			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB {
+			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB ||
+			resources.Priority < 0 || resources.Priority > 2 {
 			return fmt.Errorf("queue admission scale-set resources %q are invalid", name)
 		}
 	}
@@ -108,8 +110,8 @@ func (c Config) ValidateAgainstPlatform(platform config.Config) error {
 		if !exists {
 			return fmt.Errorf("queue admission omits scale set %q", pool.ScaleSetName)
 		}
-		want := ScaleSetResources{CPUUnits: pool.Resources.VCPU, MemoryMiB: pool.Resources.MemoryMiB}
-		if declared != want {
+		want := ScaleSetResources{CPUUnits: pool.Resources.VCPU, MemoryMiB: pool.Resources.MemoryMiB, Priority: declared.Priority}
+		if declared.CPUUnits != want.CPUUnits || declared.MemoryMiB != want.MemoryMiB {
 			return fmt.Errorf("queue resources for %q are %#v, want %#v", pool.ScaleSetName, declared, want)
 		}
 		if previous, duplicate := seen[pool.ScaleSetName]; duplicate && previous != want {

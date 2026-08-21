@@ -86,9 +86,9 @@ var tenants = map[string]Tenant{
 		// and the other repositories owned by this account.
 		ServesWholeAccount: true,
 		ScaleSetRepositories: map[string]string{
-			"nddev-almaty-integration": "example-org/example-library",
-			"nddev-almaty-standard":    "example-org/example-library",
-			"nddev-almaty-untrusted":   "example-org/example-library",
+			"nddev-priority-integration": "example-org/example-library",
+			"nddev-priority-standard":    "example-org/example-library",
+			"nddev-priority-untrusted":   "example-org/example-library",
 		},
 	},
 	"example-guild": {

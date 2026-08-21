@@ -13,9 +13,9 @@ tenants:
     homepage_url: https://github.com/example-org/example-actions
     serves_whole_account: true
     scale_set_repositories:
-      nddev-almaty-integration: example-org/example-library
-      nddev-almaty-standard: example-org/example-library
-      nddev-almaty-untrusted: example-org/example-library
+      nddev-priority-integration: example-org/example-library
+      nddev-priority-standard: example-org/example-library
+      nddev-priority-untrusted: example-org/example-library
   - id: example-guild
     owner: example-guild
     repository: example-guild/example-project

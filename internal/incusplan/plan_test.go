@@ -105,7 +105,7 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 	if len(plan.HostFirewall.Rules) != 12 {
 		t.Fatalf("unexpected host firewall rules: %#v", plan.HostFirewall.Rules)
 	}
-	var dhcp, publicHTTP, publicHTTPS, rustfs, cacheGateway, servicesRustFS, garmGateway, declaroSSH, almatyStagingSSH bool
+	var dhcp, publicHTTP, publicHTTPS, rustfs, cacheGateway, servicesRustFS, garmGateway, declaroSSH, priorityStagingSSH bool
 	for _, rule := range plan.HostFirewall.Rules {
 		command := strings.Join(rule.Args, " ")
 		switch rule.Name {
@@ -125,10 +125,10 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 			garmGateway = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9443 proto tcp")
 		case "release-egress-1", "release-egress-2":
 			declaroSSH = declaroSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.20/32 port 22 proto tcp")
-			almatyStagingSSH = almatyStagingSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.21/32 port 22 proto tcp")
+			priorityStagingSSH = priorityStagingSSH || strings.Contains(command, "route allow in on gha0 from 198.51.100.0/24 to 203.0.113.21/32 port 22 proto tcp")
 		}
 	}
-	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !cacheGateway || !servicesRustFS || !garmGateway || !declaroSSH || !almatyStagingSSH {
+	if !dhcp || !publicHTTP || !publicHTTPS || !rustfs || !cacheGateway || !servicesRustFS || !garmGateway || !declaroSSH || !priorityStagingSSH {
 		t.Fatalf("host firewall invariants missing: %#v", plan.HostFirewall.Rules)
 	}
 

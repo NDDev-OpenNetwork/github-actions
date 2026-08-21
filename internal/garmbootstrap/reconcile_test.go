@@ -402,7 +402,7 @@ func TestReconcileRejectsUnknownScaleSetBeforeReadingSecrets(t *testing.T) {
 	}
 }
 
-func TestReconcileCreatesReviewedRepositoryScopedAlmatyScaleSet(t *testing.T) {
+func TestReconcileCreatesReviewedRepositoryScopedPriorityScaleSet(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 19, 15, 0, 0, 0, time.UTC)
 	adminPath, bundlePath, anchorPath := testFiles(t, now)
@@ -422,15 +422,15 @@ func TestReconcileCreatesReviewedRepositoryScopedAlmatyScaleSet(t *testing.T) {
 	state.mutex.Unlock()
 	options.AppBundleDirectory = ""
 	options.Repository = "example-org/example-library"
-	options.ScaleSetName = AlmatyStandardScaleSetName
+	options.ScaleSetName = PriorityStandardScaleSetName
 	created, err := runner.Run(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.Repository == nil || created.Repository.Name != options.Repository || created.ScaleSet == nil ||
-		created.ScaleSet.Name != AlmatyStandardScaleSetName || created.ScaleSet.Image != DefaultImage ||
-		created.ScaleSet.Flavor != AlmatyStandardFlavor {
-		t.Fatalf("unexpected Almaty repository reconciliation: %#v", created)
+		created.ScaleSet.Name != PriorityStandardScaleSetName || created.ScaleSet.Image != DefaultImage ||
+		created.ScaleSet.Flavor != PriorityStandardFlavor {
+		t.Fatalf("unexpected Priority repository reconciliation: %#v", created)
 	}
 }
 
