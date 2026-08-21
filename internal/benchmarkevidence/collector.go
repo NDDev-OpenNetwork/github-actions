@@ -354,7 +354,7 @@ func validateJobs(run runResponse, sample SampleEvidence, jobs []jobResponse) (m
 		if job.StartedAt.Before(run.CreatedAt) || job.CompletedAt.Before(job.StartedAt) || run.UpdatedAt.Before(job.CompletedAt) {
 			return nil, fmt.Errorf("workflow job %q has invalid timestamps", job.Name)
 		}
-		if err := validateSteps(sample.CacheMode, job); err != nil {
+		if err := validateSteps(sample.Environment, sample.CacheMode, workload, job); err != nil {
 			return nil, err
 		}
 		jobsByWorkload[workload] = job
@@ -369,7 +369,7 @@ func validateJobs(run runResponse, sample SampleEvidence, jobs []jobResponse) (m
 	return jobsByWorkload, nil
 }
 
-func validateSteps(cacheMode string, job jobResponse) error {
+func validateSteps(environment, cacheMode, workload string, job jobResponse) error {
 	stepsByName := make(map[string][]stepResponse, len(job.Steps))
 	previousNumber := 0
 	for _, step := range job.Steps {
@@ -377,7 +377,7 @@ func validateSteps(cacheMode string, job jobResponse) error {
 			return fmt.Errorf("workflow job %q has invalid step %q", job.Name, step.Name)
 		}
 		previousNumber = step.Number
-		allowedSkip := cacheMode == "cold" && step.Name == "Restore dependency cache" && step.Conclusion == "skipped"
+		allowedSkip := step.Conclusion == "skipped" && benchmarkStepMaySkip(environment, cacheMode, workload, step.Name)
 		if step.Conclusion != "success" && !allowedSkip {
 			return fmt.Errorf("workflow job %q step %q concluded %q", job.Name, step.Name, step.Conclusion)
 		}
@@ -389,13 +389,46 @@ func validateSteps(cacheMode string, job jobResponse) error {
 		}
 	}
 	restore := stepsByName["Restore dependency cache"][0]
+	localRustCache := environment == "nddev" && workload == "rust"
 	if cacheMode == "cold" && restore.Conclusion != "skipped" {
 		return fmt.Errorf("cold workflow job %q restored a cache", job.Name)
 	}
-	if cacheMode == "warm" && restore.Conclusion != "success" {
+	if cacheMode == "warm" && !localRustCache && restore.Conclusion != "success" {
 		return fmt.Errorf("warm workflow job %q did not run its cache phase", job.Name)
 	}
+	for _, phase := range []string{"Configure NDDev compiler cache", "Inspect NDDev compiler cache"} {
+		steps := stepsByName[phase]
+		if workload != "rust" {
+			continue
+		}
+		// Historical evidence predates the local-sccache phases. If the current
+		// workflow reports them, validate them exactly; absence remains readable
+		// so immutable old samples do not become unverifiable.
+		if len(steps) == 0 {
+			continue
+		}
+		if len(steps) != 1 {
+			return fmt.Errorf("workflow job %q must contain one %q phase", job.Name, phase)
+		}
+		want := "skipped"
+		if cacheMode == "warm" && localRustCache {
+			want = "success"
+		}
+		if steps[0].Conclusion != want {
+			return fmt.Errorf("workflow job %q phase %q concluded %q, want %q", job.Name, phase, steps[0].Conclusion, want)
+		}
+	}
 	return nil
+}
+
+func benchmarkStepMaySkip(environment, cacheMode, workload, name string) bool {
+	if name == "Restore dependency cache" {
+		return cacheMode == "cold" || (cacheMode == "warm" && environment == "nddev" && workload == "rust")
+	}
+	if workload == "rust" && (name == "Configure NDDev compiler cache" || name == "Inspect NDDev compiler cache") {
+		return !(environment == "nddev" && cacheMode == "warm")
+	}
+	return false
 }
 
 func workloadForJobName(name string) string {
