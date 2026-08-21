@@ -35,7 +35,7 @@ ref_class="$3"
 [[ "${SCCACHE_ENDPOINT}" == https://* ]]
 endpoint_authority="${SCCACHE_ENDPOINT#https://}"
 [[ -n "${endpoint_authority}" && "${endpoint_authority}" != *['/?#@ ']* ]]
-[[ "${endpoint_authority}" == *:9002 ]]
+[[ "${endpoint_authority}" == *:9002 || "${endpoint_authority}" == *:9003 ]]
 [[ "${SCCACHE_REGION}" =~ ^[a-z]{2}-[a-z]+-[1-9][0-9]*$ ]]
 [[ "${SCCACHE_S3_USE_SSL}" == true ]]
 [[ "$(command -v sccache)" == /usr/local/bin/sccache ]]
