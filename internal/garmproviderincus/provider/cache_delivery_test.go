@@ -331,6 +331,39 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	require.Equal(t, response.DeliveryID+"\n", string(consumed))
 }
 
+func TestJobStartedHookDegradesToUncachedWhenRepositoryClaimFails(t *testing.T) {
+	directory := t.TempDir()
+	assignmentPath := filepath.Join(directory, "assignment.json")
+	readyPath := filepath.Join(directory, "assignment.ready")
+	consumedPath := filepath.Join(directory, "assignment.consumed")
+	caPath := filepath.Join(directory, "ca.pem")
+	githubEnv := filepath.Join(directory, "github-env")
+	delivery := testCacheDelivery()
+	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	raw, _ := json.Marshal(assignment)
+	require.NoError(t, os.WriteFile(assignmentPath, raw, 0o400))
+	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))
+	require.NoError(t, os.WriteFile(caPath, delivery.CAPEM, 0o400))
+	require.NoError(t, os.WriteFile(githubEnv, nil, 0o600))
+	fakeCurl := filepath.Join(directory, "curl")
+	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'claim denied\\n' >&2\nexit 22\n"), 0o700))
+	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
+	command := exec.Command("bash", "-c", hook)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv, "GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	require.Contains(t, string(output), "continuing without cache")
+	environment, err := os.ReadFile(githubEnv)
+	require.NoError(t, err)
+	require.Empty(t, environment)
+	_, err = os.Lstat(assignmentPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Lstat(readyPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Lstat(consumedPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {
 	for name, script := range map[string]string{
 		"setup":  string(renderCacheSetupScript()),

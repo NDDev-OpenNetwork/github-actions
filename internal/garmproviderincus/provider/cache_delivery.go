@@ -418,11 +418,14 @@ if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
   response="$(mktemp /tmp/nddev-cache-claim.XXXXXXXXXX)"
   chmod 0600 "${response}"
   trap 'rm -f -- "${assignment}" "${ready}" "${response}"' EXIT
-  jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
-    --arg repository "${GITHUB_REPOSITORY}" --arg token "${claim_token}" \
-    '{instance_name:$instance,runner_name:$runner,repository:$repository,claim_token:$token}' |
-    curl --silent --show-error --fail --max-time 10 --cacert "${ca_path}" \
-      --header 'Content-Type: application/json' --data-binary @- "${claim_endpoint}" >"${response}"
+  if ! jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
+      --arg repository "${GITHUB_REPOSITORY}" --arg token "${claim_token}" \
+      '{instance_name:$instance,runner_name:$runner,repository:$repository,claim_token:$token}' |
+      curl --silent --show-error --fail --max-time 10 --cacert "${ca_path}" \
+        --header 'Content-Type: application/json' --data-binary @- "${claim_endpoint}" >"${response}"; then
+    printf 'repository-scoped compiler cache claim is unavailable; continuing without cache\n' >&2
+    exit 0
+  fi
   unset claim_token
   if [[ ! -s "${response}" ]]; then
     printf 'repository-scoped compiler cache is not configured; continuing without cache\n'
