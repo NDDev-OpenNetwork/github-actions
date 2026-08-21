@@ -22,6 +22,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/provider"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
@@ -164,6 +165,9 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		Host:   hostprobe.Collect,
 		Journal: func(ctx context.Context) (providerjournal.Journal, error) {
 			return journalStore.ReadOnly(ctx)
+		},
+		ProviderRetry: func(now time.Time) (providerretry.Snapshot, error) {
+			return providerretry.Inspect("/var/lib/gha-fleet/create-retries.json", now)
 		},
 		Queue: func(ctx context.Context) (queueintent.Snapshot, error) {
 			return (queueintent.Reader{Path: providerConfiguration.QueueIntentFile}).ReadActive(ctx)

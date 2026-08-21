@@ -106,6 +106,19 @@ rules:
     summary: Sustained memory pressure is consuming useful throughput.
     action: Create a capacity ticket with class mix, RSS and queue percentile evidence.
     recovery: Memory PSI remains below five percent for the hold window.
+  - id: provider_terminal_circuit
+    severity: page
+    query_language: promql
+    query: max(gha_fleet_provider_terminal_circuits) > 0
+    evaluation_seconds: 30
+    hold_seconds: 60
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A durable provider-create circuit is blocking an entire scale set.
+    action: Preserve the retry journal, fix and verify the provider cause, then use exact CAS recovery while GARM is stopped.
+    recovery: Terminal circuit count remains zero and a fresh job reaches provider create and runner online.
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql
