@@ -7,6 +7,9 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.55`: persistent capacity saturation now
+  backs off to five minutes instead of probing every minute, while every proven
+  provider deletion still wakes one oldest waiting domain immediately.
 - Added GARM derivative `v0.2.1-nddev.54`: after a scale set has proved
   capacity-bound, only one concrete worker may consume the next domain retry
   lease. Initial creates remain parallel and each completed deletion still

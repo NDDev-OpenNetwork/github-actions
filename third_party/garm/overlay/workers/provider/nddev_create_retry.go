@@ -27,7 +27,7 @@ const (
 	nddevRetryStaleTTL      = time.Hour
 	nddevRetryBase          = 5 * time.Second
 	nddevRetryCap           = 5 * time.Minute
-	nddevCapacityRetryCap   = time.Minute
+	nddevCapacityRetryCap   = 5 * time.Minute
 	nddevRetryFileEnv       = "GARM_NDDEV_CREATE_RETRY_FILE"
 	nddevRetryLockEnv       = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
 )

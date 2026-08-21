@@ -170,6 +170,41 @@ func TestNDDevProviderCapacityBackpressureNeverOpensCircuit(t *testing.T) {
 	}
 }
 
+func TestNDDevCapacityFallbackReachesFiveMinutesWhileDeleteWakeRemainsImmediate(t *testing.T) {
+	key := "scale-set:entity-one:17"
+	if delay := nddevCapacityRetryDelay(key, nddevRetryMaximum); delay <= time.Minute || delay > 5*time.Minute {
+		t.Fatalf("saturated fallback delay = %s, want (1m,5m]", delay)
+	}
+
+	now := time.Date(2026, 8, 21, 14, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	concrete := key + ":instance:waiting"
+	if err := nddevBeforeProviderCreate(context.Background(), concrete); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), concrete, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	if err := NDDevProviderCapacityReleased(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Records[key]; exists {
+		t.Fatal("completed deletion did not bypass the fallback for the waiting domain")
+	}
+	if _, exists := journal.Records[concrete]; exists {
+		t.Fatal("completed deletion retained the concrete fallback")
+	}
+}
+
 func TestNDDevCapacityReleaseGrantsOneOldestCapacityDomain(t *testing.T) {
 	now := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow

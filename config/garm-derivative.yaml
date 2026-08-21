@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.54
+derivative_version: v0.2.1-nddev.55
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -84,11 +84,11 @@ overlays:
     sha256: 71e6ac7a5d45fb4a2c08207df3b2dc61a032d30cda6d974c411af71c43c0a0d5
     purpose: Deterministic provisional bootstrap, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: 397d931367c92528e2ab99694fc5a42e4ca5e4297b362bcf8fdfe0dc2bbfdbaf
-    purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, one domain retry lease after proven saturation, bounded provider-failure circuits, one-grant-per-deletion capacity wake and one-hour garbage collection of expired non-terminal records.
+    sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
+    purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, one domain retry lease after proven saturation, five-minute fallback with immediate deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: 49f936441cbf2be5a7f7d809b5ca8cbbc8ee5ae1bdf01d3254318bdb0524a73d
-    purpose: Prove attempts survive process recreation, concurrent failures saturate without corrupting the journal, every admission/storage pressure reason remains capacity, one eligible retry leases its entire saturated domain, one resource release wakes exactly one oldest domain, stale non-terminal state is collected and success clears durable state.
+    sha256: 85b405e38f8b343d25f060f1f9dbc60cffa5a89676e3856fda1e620e997c86e9
+    purpose: Prove attempts survive process recreation, concurrent failures saturate without corrupting the journal, every admission/storage pressure reason remains capacity, one eligible retry leases its saturated domain, five-minute fallback remains bounded, one resource release wakes exactly one oldest domain, stale state is collected and success clears durable state.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -103,7 +103,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 441188455944f8111a095a9a79bb7d2bb68564fed9e9c0e29abc0fb7bda06d54
+  binary_sha256: 550c8b3e3170a21ee25b377393f00946e69bba04f02d35d13147c9aa04588cce
 runtime_contract:
   queue_intent_schema_version: 3
   event_driven_scale_set_wake: true
@@ -125,7 +125,7 @@ runtime_contract:
   durable_provider_retry: true
   provider_retry_maximum_attempts: 8
   provider_retry_backoff_cap_seconds: 300
-  capacity_retry_backoff_cap_seconds: 60
+  capacity_retry_backoff_cap_seconds: 300
   capacity_retry_wake_after_delete: true
   capacity_retry_single_domain_lease: true
   bounded_scale_up_capacity_probe: true
