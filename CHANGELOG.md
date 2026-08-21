@@ -75,6 +75,13 @@ Versioning.
   before JIT/DB/provider creation, backfills smaller work into temporary holes,
   and stops backfilling once an aged or release candidate reaches priority zero.
   Provider admission remains the per-member/PSI authority and final safety net.
+- Added GARM derivative `v0.2.1-nddev.52`. Provisional JobAssigned ownership
+  now uses the measured ten-minute pre-start horizon instead of expiring during
+  a valid 150-second cold registration. If an authoritative JobStarted still
+  arrives without an intent, its exact running identity is rehydrated so real
+  CPU/memory cannot disappear from central accounting; an observed running
+  overage is retained as truth and prevents further admission rather than
+  poisoning lifecycle delivery.
 - Restored the generic representative benchmark harness omitted by the public
   export: frozen workload fixtures now have their metrics/toolchain/sccache
   scripts and a workflow-dispatch-only private-estate template. The public
