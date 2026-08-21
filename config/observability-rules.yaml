@@ -96,7 +96,7 @@ rules:
   - id: memory_psi_slow_burn
     severity: ticket
     query_language: promql
-    query: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window="avg10"}) > 5
+    query: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window_seconds="10"}) > 5
     evaluation_seconds: 300
     hold_seconds: 1800
     destination_ref: fleet_oncall
@@ -122,7 +122,7 @@ rules:
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql
-    query: max(gha_fleet_queue_oldest_age_seconds) > 120
+    query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) > 120
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
