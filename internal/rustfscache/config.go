@@ -194,14 +194,14 @@ func validateClaimEndpoint(value string) error {
 func ValidateEndpoint(value string) error {
 	endpoint, err := url.ParseRequestURI(value)
 	if err != nil {
-		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and port 9002")
+		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and approved port 9002 or 9003")
 	}
 	host, port, splitErr := net.SplitHostPort(endpoint.Host)
 	address := net.ParseIP(host)
-	if endpoint.Scheme != "https" || splitErr != nil || address == nil || port != "9002" ||
+	if endpoint.Scheme != "https" || splitErr != nil || address == nil || (port != "9002" && port != "9003") ||
 		address.IsUnspecified() || address.IsMulticast() || endpoint.Path != "" ||
 		endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.User != nil {
-		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and port 9002")
+		return fmt.Errorf("endpoint must be an HTTPS origin using a literal unicast IP and approved port 9002 or 9003")
 	}
 	return nil
 }

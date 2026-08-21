@@ -333,7 +333,7 @@ jq -e '
   if .schema_version == 1 then
     (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
     (.delivery_id | test("^[0-9a-f]{64}$")) and
-    (.endpoint | startswith("https://") and endswith(":9002")) and
+    (.endpoint | startswith("https://") and (endswith(":9002") or endswith(":9003"))) and
     .region == "us-east-1" and
     (.bucket | test("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$")) and
     (.access_key | test("^AKIA[0-9A-F]{16}$")) and
@@ -436,7 +436,7 @@ jq -e '
   (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
-  (.endpoint | startswith("https://") and endswith(":9002")) and
+  (.endpoint | startswith("https://") and (endswith(":9002") or endswith(":9003"))) and
   .region == "us-east-1" and
   (.bucket | test("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$")) and
   (.access_key | test("^AKIA[0-9A-F]{16}$")) and
