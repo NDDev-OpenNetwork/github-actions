@@ -50,7 +50,7 @@ jobs:
           provider=false
           while IFS= read -r changed; do
             case "${changed}" in
-              config/garm-derivative.yaml|scripts/build-garm-nddev.sh|third_party/garm/*|internal/garmderivative/*|cmd/gha-fleet/main.go|go.mod|go.sum)
+              config/garm-derivative.yaml|scripts/build-garm-nddev.sh|third_party/garm/*|internal/garmderivative/*|go.mod|go.sum)
                 garm=true
                 ;;
             esac

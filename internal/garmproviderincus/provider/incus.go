@@ -19,6 +19,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -196,6 +197,8 @@ func NewIncusProvider(configFile, controllerID string) (*Incus, error) {
 	provider.diagnostics = newProviderDiagnostics(cfg, provider.platform.ControlPlane.RunnerVersion)
 	provider.cacheDelivery = productionCacheDelivery
 	provider.cacheRepository = productionCacheRepository
+	provider.cacheClaim = productionCacheClaim
+	provider.cacheClaimRandom = rand.Reader
 
 	return provider, nil
 }
@@ -720,7 +723,9 @@ type Incus struct {
 	cacheDelivery cacheDeliveryLoader
 	// cacheRepository reads only the public shape/private identity configuration
 	// before any trust-scoped credential is opened.
-	cacheRepository cacheRepositoryLoader
+	cacheRepository  cacheRepositoryLoader
+	cacheClaim       cacheClaimLoader
+	cacheClaimRandom io.Reader
 	// placementLockPath serializes only the Incus placement request across
 	// short-lived provider processes. Guest boot remains fully parallel.
 	placementLockPath string

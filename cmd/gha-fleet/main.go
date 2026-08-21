@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachemanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
@@ -82,6 +83,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReconcileImage(args[1:], stdout, stderr)
 	case "validate-cache":
 		return runValidateCache(args[1:], stdout, stderr)
+	case "validate-cache-broker":
+		return runValidateCacheBroker(args[1:], stdout, stderr)
 	case "validate-telemetry":
 		return runValidateTelemetry(args[1:], stdout, stderr)
 	case "validate-rustfs-cache":
@@ -493,6 +496,29 @@ func runValidateRustFSCache(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := config.ValidateProductionPaths(); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, config); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runValidateCacheBroker(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-cache-broker", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", cachebroker.DefaultConfigPath, "cache broker configuration path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "gha-fleet: validate-cache-broker accepts no positional arguments")
+		return 2
+	}
+	config, err := cachebroker.Load(*configPath)
+	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
 	}
@@ -1572,5 +1598,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

@@ -7,6 +7,9 @@ root_secret_key_file: /etc/gha-fleet/secrets/rustfs-secret-key
 credentials_directory: /etc/garm/cache
 bucket: github-actions-cache
 quota_bytes: 68719476736
+claim_endpoint: https://198.51.100.1:9443/api/v1/cache/claim
+claim_journal_file: /var/lib/gha-cache-broker/claims.json
+claim_journal_lock_file: /var/lib/gha-cache-broker/claims.lock
 
 identities:
   - role: trusted-writer

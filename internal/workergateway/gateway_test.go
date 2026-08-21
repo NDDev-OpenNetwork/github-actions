@@ -8,7 +8,37 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 )
+
+func TestCacheClaimUsesOnlyDedicatedUpstream(t *testing.T) {
+	cache := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != cachebroker.ClaimPath || request.Method != http.MethodPost {
+			t.Fatalf("cache request=%s %s", request.Method, request.URL.Path)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer cache.Close()
+	garmURL, _ := url.Parse(uncalledUpstream(t))
+	cacheURL, _ := url.Parse(cache.URL)
+	gateway, err := NewWithCache(garmURL, cacheURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://gateway.invalid"+cachebroker.ClaimPath, strings.NewReader(`{"claim":"example"}`))
+	response := httptest.NewRecorder()
+	gateway.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "https://gateway.invalid"+cachebroker.ClaimPath, nil)
+	response = httptest.NewRecorder()
+	gateway.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET status=%d", response.Code)
+	}
+}
 
 func TestWorkerRoutesAreProxied(t *testing.T) {
 	t.Parallel()

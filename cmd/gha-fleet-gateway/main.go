@@ -37,6 +37,7 @@ func main() {
 		"upstream", workergateway.ExpectedUpstreamURL,
 		"GARM origin this gateway forwards to, as a literal IP and port",
 	)
+	cacheUpstreamURL := flag.String("cache-upstream", "", "optional private HTTP cache broker origin")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	flag.Parse()
 	if *showVersion {
@@ -57,7 +58,15 @@ func main() {
 		logger.Error("invalid upstream", "upstream", *upstreamURL, "error", err)
 		os.Exit(1)
 	}
-	gateway, err := workergateway.New(upstream, logger)
+	var cacheUpstream *url.URL
+	if *cacheUpstreamURL != "" {
+		cacheUpstream, err = url.Parse(*cacheUpstreamURL)
+		if err != nil {
+			logger.Error("invalid cache upstream", "error", err)
+			os.Exit(1)
+		}
+	}
+	gateway, err := workergateway.NewWithCache(upstream, cacheUpstream, logger)
 	if err != nil {
 		logger.Error("initialize worker gateway", "error", err)
 		os.Exit(1)
