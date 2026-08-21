@@ -74,6 +74,11 @@ Versioning.
   organization bootstrap receives only a random short-lived claim; no cache
   credential is opened until the synchronous hook binds the exact GitHub
   repository to the server-owned pool role and private estate allowlist.
+- Cut provider derivative `v0.1.5-nddev.55` after the first broker canary
+  proved a valid claim for an unconfigured repository was incorrectly treated
+  as a job failure. Such claims now bind the exact repository and return an
+  explicit secret-free cache miss; invalid and cross-repository claims still
+  fail closed.
 - Added GARM derivative `v0.2.1-nddev.51` and queue-admission schema v2. The
   central durable scheduler now reserves declared CPU units and hard memory
   before JIT/DB/provider creation, backfills smaller work into temporary holes,
