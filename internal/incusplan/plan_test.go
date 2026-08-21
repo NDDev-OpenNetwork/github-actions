@@ -120,7 +120,7 @@ func TestStandardPilotPlanHasBoundedIsolation(t *testing.T) {
 		case "cache-gateway":
 			cacheGateway = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9003 proto tcp")
 		case "services-rustfs-diagnostics":
-			servicesRustFS = strings.Contains(command, "allow in on eth1 from 10.200.0.7 to 198.51.100.1 port 9002 proto tcp")
+			servicesRustFS = strings.Contains(command, "allow in on eth1 from 10.200.0.7 to 198.51.100.1 port 9002 proto tcp comment gha-fleet-services-rustfs-diagnostics-v1")
 		case "garm-gateway":
 			garmGateway = strings.Contains(command, "allow in on gha0 to 198.51.100.1 port 9443 proto tcp")
 		case "release-egress-1", "release-egress-2":
