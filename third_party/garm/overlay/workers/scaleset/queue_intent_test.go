@@ -111,10 +111,10 @@ func TestStartupMigratesLegacyAssignedOwnershipAndPhaseTTLs(t *testing.T) {
 	observed := migrated.Intents[queueIntentKey(11, jobs[0].JobID)]
 	reserved := migrated.Intents[queueIntentKey(11, jobs[1].JobID)]
 	acquired := migrated.Intents[queueIntentKey(11, jobs[2].JobID)]
-	if observed.State != queueStateAssigned || observed.ExpiresAt.After(now.Add(2*time.Minute)) {
+	if observed.State != queueStateAssigned || observed.ExpiresAt.After(now.Add(10*time.Minute)) {
 		t.Fatalf("legacy observation = %#v", observed)
 	}
-	if reserved.State != queueStateAssigned || reserved.ExpiresAt.After(now.Add(2*time.Minute)) {
+	if reserved.State != queueStateAssigned || reserved.ExpiresAt.After(now.Add(10*time.Minute)) {
 		t.Fatalf("legacy reservation = %#v", reserved)
 	}
 	if acquired.State != queueStateAcquired || acquired.ExpiresAt.After(now.Add(10*time.Minute)) {
@@ -155,7 +155,7 @@ func TestStartupPromotesDurableQueuedIntentWithoutWebhookRedelivery(t *testing.T
 		t.Fatal(err)
 	}
 	if got := recovered.Intents[key]; got.State != queueStateAssigned ||
-		got.ExpiresAt.After(now.Add(2*time.Minute)) {
+		got.ExpiresAt.After(now.Add(10*time.Minute)) {
 		t.Fatalf("restart recovery did not promote bounded provisional ownership: %#v", got)
 	}
 }
@@ -531,7 +531,7 @@ func TestQueueCoordinatorCompletionPromotesQueuedIntentWithoutRedelivery(t *test
 // was missing because the scale set had been recreated and its identifier
 // moved, so keys built from the current identifier could not match entries
 // written under the previous one.
-func TestQueueCoordinatorAcknowledgesAStartedJobWithNoIntent(t *testing.T) {
+func TestQueueCoordinatorTracksAStartedJobWithNoIntent(t *testing.T) {
 	now := time.Date(2026, 8, 9, 14, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
 	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
@@ -542,6 +542,14 @@ func TestQueueCoordinatorAcknowledgesAStartedJobWithNoIntent(t *testing.T) {
 		scaleSet, testQueueEntityForJob(orphan), nil, []params.ScaleSetJobMessage{orphan}, nil,
 	); err != nil {
 		t.Fatalf("a started job with no intent was refused, which poisons the queue: %v", err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, exists := journal.Intents[queueIntentKey(11, orphan.JobID)]
+	if !exists || intent.State != queueStateRunning || intent.RunnerName != orphan.RunnerName {
+		t.Fatalf("authoritative started job was not tracked: %#v", intent)
 	}
 }
 
@@ -618,7 +626,7 @@ func TestQueueCoordinatorRehydratesOnlyAnAuthoritativeCurrentScaleSetJob(t *test
 	}
 }
 
-func TestQueueCoordinatorDoesNotRecreateAnOrphanStartedIntentFromSameBatch(t *testing.T) {
+func TestQueueCoordinatorRehydratesAStartedIntentFromSameBatch(t *testing.T) {
 	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
 	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
@@ -643,8 +651,9 @@ func TestQueueCoordinatorDoesNotRecreateAnOrphanStartedIntentFromSameBatch(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := journal.Intents[queueIntentKey(11, job.JobID)]; exists {
-		t.Fatal("orphan started event recreated a phantom running intent")
+	intent, exists := journal.Intents[queueIntentKey(11, job.JobID)]
+	if !exists || intent.State != queueStateRunning || intent.RunnerName != started.RunnerName {
+		t.Fatalf("authoritative started event was not retained: %#v", intent)
 	}
 }
 
@@ -851,7 +860,7 @@ func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	}
 }
 
-func TestValidateQueueBudgetRejectsWeightedOvercommit(t *testing.T) {
+func TestValidateQueueBudgetRejectsWeightedReservationOvercommit(t *testing.T) {
 	config := queueAdmissionConfig{
 		MaxInFlight: 4, DefaultRepositoryLimit: 4, DefaultWeight: 1,
 		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
@@ -861,12 +870,31 @@ func TestValidateQueueBudgetRejectsWeightedOvercommit(t *testing.T) {
 		Repositories: map[string]queueRepositoryPolicy{},
 	}
 	journal := queueIntentJournal{Intents: map[string]queueIntent{
-		"one":   {State: queueStateRunning, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+		"one":   {State: queueStateAssigned, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
 		"two":   {State: queueStateAssigned, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
 		"three": {State: queueStateAcquiring, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
 	}}
 	if err := validateQueueBudget(&journal, config); err == nil || !strings.Contains(err.Error(), "resource budget") {
 		t.Fatalf("weighted overcommit was accepted: %v", err)
+	}
+}
+
+func TestValidateQueueBudgetRetainsAuthoritativeRunningOverage(t *testing.T) {
+	config := queueAdmissionConfig{
+		MaxInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		Capacity:     queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048},
+		ScaleSets:    map[string]queueScaleSetResources{"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048}},
+		Repositories: map[string]queueRepositoryPolicy{},
+	}
+	journal := queueIntentJournal{Intents: map[string]queueIntent{
+		"one": {State: queueStateRunning, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+		"two": {State: queueStateRunning, ScaleSetName: "nddev-linux-standard", Repository: "owner/repo"},
+	}}
+	if err := validateQueueBudget(&journal, config); err != nil {
+		t.Fatalf("authoritative running overage was hidden instead of recorded: %v", err)
+	}
+	if selected, exists := resourceFitCandidate(&journal, config, []queueIntent{{Key: "next", State: queueStateQueued, ScaleSetName: "nddev-linux-standard"}}, time.Now()); exists {
+		t.Fatalf("running overage still admitted another job: %#v", selected)
 	}
 }
 
@@ -1241,11 +1269,11 @@ func TestOnlyRunningIntentsUseTheExecutionHorizon(t *testing.T) {
 	assigned := expiryForState(config, queueStateAssigned, now)
 	acquired := expiryForState(config, queueStateAcquired, now)
 	running := expiryForState(config, queueStateRunning, now)
-	if !assigned.Before(acquired) || !acquired.Before(running) {
+	if !assigned.Equal(acquired) || !acquired.Before(running) {
 		t.Fatalf("lifecycle expiries are not phase-specific: assigned=%s acquired=%s running=%s", assigned, acquired, running)
 	}
-	if got := assigned.Sub(now); got != time.Duration(config.AcquiringTTLSeconds)*time.Second {
-		t.Fatalf("assigned reservation lifetime=%s, want acquiring TTL", got)
+	if got := assigned.Sub(now); got != time.Duration(config.AcquiredTTLSeconds)*time.Second {
+		t.Fatalf("assigned reservation lifetime=%s, want bounded pre-start TTL", got)
 	}
 	if got := acquired.Sub(now); got != time.Duration(config.AcquiredTTLSeconds)*time.Second {
 		t.Fatalf("acquired lifetime=%s, want acquired TTL", got)

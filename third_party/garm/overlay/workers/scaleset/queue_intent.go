@@ -539,7 +539,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			// one. That is a real condition to survive, not an invariant to
 			// assert: a scale set may be recreated at any time, and this
 			// journal is not the authority on what GitHub has already started.
-			if !exists || queueStateRank(intent.State) < queueStateRank(queueStateAssigned) {
+			if !exists {
 				fromJobID, transferred, transferErr := transferAssignedReservation(
 					journal, config, scaleSet, entity, job, now,
 				)
@@ -550,7 +550,25 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 					reservationTransfers = append(reservationTransfers, [2]string{fromJobID, job.JobID})
 					continue
 				}
-				orphanedStarts = append(orphanedStarts, key)
+				// JobStarted plus its exact runner identity is authoritative
+				// execution state even when the provisional intent expired or a
+				// scale-set generation changed. Acknowledging it without tracking it
+				// makes the provider lease look covered-but-idle forever and removes
+				// real CPU/memory from central admission. Rehydrate the running intent
+				// after the fact; the job already exists, so an over-budget result is
+				// an observable fact, not a reason to poison lifecycle delivery.
+				replacement, replacementErr := queueIntentFromLifecycle(
+					scaleSet, entity, job, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
+				)
+				if replacementErr != nil {
+					orphanedStarts = append(orphanedStarts, key)
+					continue
+				}
+				replacement.State = queueStateRunning
+				replacement.UpdatedAt = now
+				replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
+				journal.Intents[key] = replacement
+				ensureRepositoryState(journal, config, replacement.Repository)
 				continue
 			}
 			intent.State = queueStateRunning
@@ -1088,25 +1106,43 @@ func resourceFitCandidate(journal *queueIntentJournal, config queueAdmissionConf
 }
 
 func validateQueueBudget(journal *queueIntentJournal, config queueAdmissionConfig) error {
-	total, byRepository := queueInFlight(journal)
-	if total > config.MaxInFlight {
-		return fmt.Errorf("queue journal exceeds global in-flight budget: %d > %d", total, config.MaxInFlight)
+	// Budgets constrain reservations we still control. GitHub JobStarted is
+	// authoritative state that may arrive after a provisional intent expired or
+	// after a configuration reduction. Refusing to persist that fact does not
+	// stop the job; it only blinds admission and lease correlation. Validate the
+	// controllable pre-execution reservations here, while resourceFitCandidate
+	// continues to count both reservations and running truth before admitting
+	// any additional work.
+	reserved := 0
+	reservedByRepository := map[string]int{}
+	reservedResources := queueResourceUsage{}
+	for _, intent := range journal.Intents {
+		if intent.State == queueStateQueued || intent.State == queueStateRunning {
+			continue
+		}
+		reserved++
+		reservedByRepository[intent.Repository]++
+		resources, exists := config.ScaleSets[intent.ScaleSetName]
+		if !exists {
+			return fmt.Errorf("queue journal contains a reservation without a resource contract")
+		}
+		reservedResources.CPUUnits += resources.CPUUnits
+		reservedResources.MemoryMiB += resources.MemoryMiB
 	}
-	for repository, count := range byRepository {
+	if reserved > config.MaxInFlight {
+		return fmt.Errorf("queue journal exceeds global reservation budget: %d > %d", reserved, config.MaxInFlight)
+	}
+	for repository, count := range reservedByRepository {
 		limit := repositoryPolicy(config, repository).MaxInFlight
 		if count > limit {
-			return fmt.Errorf("queue journal exceeds repository %q in-flight budget: %d > %d", repository, count, limit)
+			return fmt.Errorf("queue journal exceeds repository %q reservation budget: %d > %d", repository, count, limit)
 		}
 	}
-	resources, valid := queueResourcesInFlight(journal, config)
-	if !valid {
-		return fmt.Errorf("queue journal contains an in-flight scale set without a resource contract")
-	}
-	if resources.CPUUnits > config.Capacity.CPUUnits || resources.MemoryMiB > config.Capacity.MemoryMiB {
+	if reservedResources.CPUUnits > config.Capacity.CPUUnits || reservedResources.MemoryMiB > config.Capacity.MemoryMiB {
 		return fmt.Errorf(
-			"queue journal exceeds resource budget: cpu=%d/%d memory_mib=%d/%d",
-			resources.CPUUnits, config.Capacity.CPUUnits,
-			resources.MemoryMiB, config.Capacity.MemoryMiB,
+			"queue journal exceeds reservation resource budget: cpu=%d/%d memory_mib=%d/%d",
+			reservedResources.CPUUnits, config.Capacity.CPUUnits,
+			reservedResources.MemoryMiB, config.Capacity.MemoryMiB,
 		)
 	}
 	return nil
@@ -1149,10 +1185,12 @@ func expiryForState(config queueAdmissionConfig, state queueIntentState, now tim
 		// provider/JIT/registration stalls to their explicit phase horizon.
 		seconds = config.AcquiredTTLSeconds
 	case queueStateAssigned:
-		// Assigned now means a complete JobAvailable identity reserved central
-		// capacity but not yet sent to AcquireJobs. It owns no GitHub job or
-		// provider resource and must not retain a slot for an execution horizon.
-		seconds = config.AcquiringTTLSeconds
+		// JobAssigned is the provisional token that bootstraps an empty scale
+		// set. It can own a real cold provider create before JobAvailable exists;
+		// measured release/container registration crossed 150 seconds, so the
+		// 120-second API-call horizon expired valid ownership and hid running
+		// work. Use the bounded pre-start horizon, never the execution horizon.
+		seconds = config.AcquiredTTLSeconds
 	case queueStateRunning:
 		// Running is the one state that legitimately lasts as long as a job.
 		seconds = config.ExecutionTTLSeconds
