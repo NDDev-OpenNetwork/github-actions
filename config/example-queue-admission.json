@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "max_in_flight": 16,
   "default_repository_limit": 12,
   "default_weight": 1,
@@ -10,16 +10,16 @@
   "priority_aging_seconds": 300,
   "capacity": {"cpu_units": 40, "memory_mib": 57344},
   "scale_sets": {
-    "nddev-almaty-integration": {"cpu_units": 4, "memory_mib": 6144},
-    "nddev-almaty-standard": {"cpu_units": 2, "memory_mib": 4096},
-    "nddev-almaty-untrusted": {"cpu_units": 4, "memory_mib": 6144},
-    "nddev-linux-container-canary": {"cpu_units": 2, "memory_mib": 2048},
-    "nddev-linux-docker-container-canary": {"cpu_units": 2, "memory_mib": 4096},
-    "nddev-linux-fast": {"cpu_units": 2, "memory_mib": 3072},
-    "nddev-linux-integration": {"cpu_units": 4, "memory_mib": 6144},
-    "nddev-linux-release": {"cpu_units": 4, "memory_mib": 6144},
-    "nddev-linux-standard": {"cpu_units": 2, "memory_mib": 4096},
-    "nddev-linux-untrusted": {"cpu_units": 4, "memory_mib": 6144}
+    "nddev-priority-integration": {"cpu_units": 4, "memory_mib": 6144, "priority": 0},
+    "nddev-priority-standard": {"cpu_units": 2, "memory_mib": 4096, "priority": 0},
+    "nddev-priority-untrusted": {"cpu_units": 4, "memory_mib": 6144, "priority": 0},
+    "nddev-linux-container-canary": {"cpu_units": 2, "memory_mib": 2048, "priority": 1},
+    "nddev-linux-docker-container-canary": {"cpu_units": 2, "memory_mib": 4096, "priority": 1},
+    "nddev-linux-fast": {"cpu_units": 2, "memory_mib": 3072, "priority": 1},
+    "nddev-linux-integration": {"cpu_units": 4, "memory_mib": 6144, "priority": 1},
+    "nddev-linux-release": {"cpu_units": 4, "memory_mib": 6144, "priority": 1},
+    "nddev-linux-standard": {"cpu_units": 2, "memory_mib": 4096, "priority": 1},
+    "nddev-linux-untrusted": {"cpu_units": 4, "memory_mib": 6144, "priority": 1}
   },
   "repositories": {
     "example-org/example-actions": {"weight": 1, "max_in_flight": 6}

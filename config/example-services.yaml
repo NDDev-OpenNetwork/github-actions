@@ -24,7 +24,7 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.56
+  manager_version: v0.2.1-nddev.57
   scheduling_mode: scale-set
   provider: incus
   provider_version: v0.1.5-nddev.59
@@ -305,17 +305,17 @@ pools:
           protocol: tcp
           ports: "22"
           purpose: >-
-            SSH ProxyJump for the Almaty server staging deployment. The jump
+            SSH ProxyJump for the Priority server staging deployment. The jump
             host alone reaches the internal 10.200.99.19 target.
 
-  # Repository-scoped aliases for the priority Almaty development lane. They
+  # Repository-scoped aliases for the priority Priority development lane. They
   # share the same hosts, images and global admission ledger as the generic
   # classes; distinct names make repository identity available at JobAssigned.
-  # Cache delivery stays disabled until Almaty has its own reviewed RustFS
+  # Cache delivery stays disabled until Priority has its own reviewed RustFS
   # namespace and credentials.
-  - name: nddev-almaty-standard
+  - name: nddev-priority-standard
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-standard
+    scale_set_name: nddev-priority-standard
     trust: trusted
     resources:
       vcpu: 2
@@ -331,9 +331,9 @@ pools:
       network_policy: public-internet
       cache_write_scope: none
 
-  - name: nddev-almaty-integration
+  - name: nddev-priority-integration
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-integration
+    scale_set_name: nddev-priority-integration
     trust: trusted
     resources:
       vcpu: 4
@@ -349,9 +349,9 @@ pools:
       network_policy: public-internet
       cache_write_scope: none
 
-  - name: nddev-almaty-untrusted
+  - name: nddev-priority-untrusted
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-untrusted
+    scale_set_name: nddev-priority-untrusted
     trust: untrusted
     resources:
       vcpu: 4

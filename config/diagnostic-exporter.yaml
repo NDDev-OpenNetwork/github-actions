@@ -8,7 +8,7 @@ region: us-east-1
 bucket: gha-diagnostics-canary
 prefix: diagnostics/v1
 repositories:
-  - example-org/almaty-libraries
+  - example-org/priority-library
   - NDDev-OpenNetwork/github-actions
   - example-guild/ai_stp
 account_scopes:
@@ -16,9 +16,9 @@ account_scopes:
   - example-org
   - example-guild
 pools:
-  - nddev-almaty-integration
-  - nddev-almaty-standard
-  - nddev-almaty-untrusted
+  - nddev-priority-integration
+  - nddev-priority-standard
+  - nddev-priority-untrusted
   - nddev-linux-container-canary
   - nddev-linux-docker-container-canary
   - nddev-linux-fast

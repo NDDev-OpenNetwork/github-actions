@@ -30,9 +30,9 @@ const (
 	ReleaseScaleSetName               = "nddev-linux-release"
 	ContainerCanaryScaleSetName       = "nddev-linux-container-canary"
 	DockerContainerCanaryScaleSetName = "nddev-linux-docker-container-canary"
-	AlmatyStandardScaleSetName        = "nddev-almaty-standard"
-	AlmatyIntegrationScaleSetName     = "nddev-almaty-integration"
-	AlmatyUntrustedScaleSetName       = "nddev-almaty-untrusted"
+	PriorityStandardScaleSetName      = "nddev-priority-standard"
+	PriorityIntegrationScaleSetName   = "nddev-priority-integration"
+	PriorityUntrustedScaleSetName     = "nddev-priority-untrusted"
 	DefaultPoolBalancerType           = "roundrobin"
 	DefaultProviderName               = "nddev-incus"
 	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
@@ -52,9 +52,9 @@ const (
 	ReleaseFlavor               = "nddev-linux-release"
 	ContainerCanaryFlavor       = "nddev-linux-container-canary"
 	DockerContainerCanaryFlavor = "nddev-linux-docker-container-canary"
-	AlmatyStandardFlavor        = "nddev-almaty-standard"
-	AlmatyIntegrationFlavor     = "nddev-almaty-integration"
-	AlmatyUntrustedFlavor       = "nddev-almaty-untrusted"
+	PriorityStandardFlavor      = "nddev-priority-standard"
+	PriorityIntegrationFlavor   = "nddev-priority-integration"
+	PriorityUntrustedFlavor     = "nddev-priority-untrusted"
 	DefaultRunnerPrefix         = "nddev"
 	DefaultBootstrapTimeoutMins = uint(5)
 	// Mirrors githubappbootstrap. Duplicated rather than imported because the
@@ -104,9 +104,9 @@ func PublishedScaleSets() []ScaleSetClass {
 		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, false),
 		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, false),
 		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, 2, 4096, 30, false),
-		class(AlmatyStandardScaleSetName, DefaultImage, AlmatyStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
-		class(AlmatyIntegrationScaleSetName, IntegrationImage, AlmatyIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
-		class(AlmatyUntrustedScaleSetName, UntrustedImage, AlmatyUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, true),
+		class(PriorityStandardScaleSetName, DefaultImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
+		class(PriorityIntegrationScaleSetName, IntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
+		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, true),
 	}
 }
 

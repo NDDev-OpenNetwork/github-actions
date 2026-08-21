@@ -6,7 +6,7 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.56
+  manager_version: v0.2.1-nddev.57
   scheduling_mode: scale-set
   provider: incus
   provider_version: v0.1.5-nddev.59
@@ -290,28 +290,28 @@ pools:
           protocol: tcp
           ports: "22"
           purpose: >-
-            SSH ProxyJump for the Almaty server staging deployment. The jump
+            SSH ProxyJump for the Priority server staging deployment. The jump
             host alone reaches the internal 10.200.99.19 target.
 
-  - name: nddev-almaty-standard
+  - name: nddev-priority-standard
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-standard
+    scale_set_name: nddev-priority-standard
     trust: trusted
     resources: {vcpu: 2, memory_mib: 4096, disk_gib: 30}
     max_running: 3
     warm: {target_ready: 0, max_ready: 0}
     capabilities: {docker: false, credentials: repository, network_policy: public-internet, cache_write_scope: none}
-  - name: nddev-almaty-integration
+  - name: nddev-priority-integration
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-integration
+    scale_set_name: nddev-priority-integration
     trust: trusted
     resources: {vcpu: 4, memory_mib: 6144, disk_gib: 50}
     max_running: 8
     warm: {target_ready: 0, max_ready: 0}
     capabilities: {docker: true, credentials: repository, network_policy: public-internet, cache_write_scope: none}
-  - name: nddev-almaty-untrusted
+  - name: nddev-priority-untrusted
     backend: linux-amd64-incus-container
-    scale_set_name: nddev-almaty-untrusted
+    scale_set_name: nddev-priority-untrusted
     trust: untrusted
     resources: {vcpu: 4, memory_mib: 6144, disk_gib: 50}
     max_running: 8

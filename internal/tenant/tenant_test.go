@@ -61,16 +61,16 @@ func TestRepositoryEntitySelectionIsClosedAndExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	almaty, err := WithRepository(selected, "example-org/example-library")
+	priority, err := WithRepository(selected, "example-org/example-library")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if almaty.Repository != "example-org/example-library" || selected.Repository != "example-org/example-actions" {
-		t.Fatalf("repository selection mutated the registry or chose the wrong target: selected=%q almaty=%q", selected.Repository, almaty.Repository)
+	if priority.Repository != "example-org/example-library" || selected.Repository != "example-org/example-actions" {
+		t.Fatalf("repository selection mutated the registry or chose the wrong target: selected=%q priority=%q", selected.Repository, priority.Repository)
 	}
 	for _, repository := range []string{
 		"example-org/public-repository",
-		"another-owner/almaty-libraries",
+		"another-owner/priority-library",
 		"example-org/example-library/extra",
 	} {
 		if _, err := WithRepository(selected, repository); err == nil {

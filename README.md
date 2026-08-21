@@ -9,6 +9,10 @@ This repository contains only product code and synthetic examples. Real
 tenants, repositories, hosts, networks, credentials, deployment values and
 runtime evidence belong in the consuming private estate.
 
+The [Drakkars product contract](docs/drakkars-product-contract.md) defines the
+portable outcome, three-level priority model, technology compatibility and
+whole-pipeline performance standard implemented by this engine.
+
 ## Properties
 
 - GitHub `JobAssigned` is observation-only; complete `JobAvailable` identity is

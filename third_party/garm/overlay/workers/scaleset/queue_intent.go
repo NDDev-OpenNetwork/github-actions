@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	queueAdmissionSchemaVersion      = 2
+	queueAdmissionSchemaVersion      = 3
 	queueIntentLegacySchemaVersion   = 1
 	queueIntentPreviousSchemaVersion = 2
 	queueIntentSchemaVersion         = 3
@@ -56,6 +56,7 @@ type queueResourceBudget struct {
 type queueScaleSetResources struct {
 	CPUUnits  int `json:"cpu_units"`
 	MemoryMiB int `json:"memory_mib"`
+	Priority  int `json:"priority"`
 }
 
 // queueMaxInFlightCeiling bounds how wide this queue may be configured. The
@@ -218,7 +219,7 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
 			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
 			QueueTime: queueTime, State: queueStateQueued,
-			Priority:       baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
+			Priority:       baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
 			StateEnteredAt: now, UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
 		}
 		ensureRepositoryState(journal, config, repository)
@@ -263,7 +264,7 @@ func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs
 	}
 	return c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		for _, job := range jobs {
-			intent, err := queueIntentFromJob(scaleSet, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
+			intent, err := queueIntentFromJob(config, scaleSet, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
 			if err != nil {
 				return err
 			}
@@ -563,7 +564,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				// after the fact; the job already exists, so an over-budget result is
 				// an observable fact, not a reason to poison lifecycle delivery.
 				replacement, replacementErr := queueIntentFromLifecycle(
-					scaleSet, entity, job, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
+					config, scaleSet, entity, job, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
 				)
 				if replacementErr != nil {
 					orphanedStarts = append(orphanedStarts, key)
@@ -589,7 +590,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			journal.Intents[key] = intent
 		}
 		for _, job := range assigned {
-			intent, err := queueIntentFromLifecycle(scaleSet, entity, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
+			intent, err := queueIntentFromLifecycle(config, scaleSet, entity, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
 			if err != nil {
 				return err
 			}
@@ -675,7 +676,7 @@ func transferAssignedReservation(
 		return candidates[left].Key < candidates[right].Key
 	})
 	replacement, err := queueIntentFromLifecycle(
-		scaleSet, entity, started, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
+		config, scaleSet, entity, started, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
 	)
 	if err != nil {
 		return "", false, err
@@ -886,7 +887,8 @@ func (c queueAdmissionConfig) Validate() error {
 	}
 	for name, resources := range c.ScaleSets {
 		if !validQueueText(name) || resources.CPUUnits < 1 || resources.CPUUnits > c.Capacity.CPUUnits ||
-			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB {
+			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB ||
+			resources.Priority < 0 || resources.Priority > 2 {
 			return fmt.Errorf("queue admission scale-set resources %q are invalid", name)
 		}
 	}
@@ -935,7 +937,7 @@ func (j queueIntentJournal) Validate() error {
 	return nil
 }
 
-func queueIntentFromJob(scaleSet params.ScaleSet, job params.ScaleSetJobMessage, now time.Time, ttl time.Duration) (queueIntent, error) {
+func queueIntentFromJob(config queueAdmissionConfig, scaleSet params.ScaleSet, job params.ScaleSetJobMessage, now time.Time, ttl time.Duration) (queueIntent, error) {
 	repository := job.OwnerName + "/" + job.RepositoryName
 	if scaleSet.ScaleSetID <= 0 || scaleSet.MaxRunners < 1 || !validQueueText(scaleSet.Name) || !validQueueText(job.JobID) || job.RunnerRequestID <= 0 || !validRepository(repository) ||
 		job.QueueTime.IsZero() || job.QueueTime.After(now.Add(time.Minute)) || !validQueueText(job.JobWorkflowRef) || !validQueueText(job.EventName) {
@@ -953,14 +955,14 @@ func queueIntentFromJob(scaleSet params.ScaleSet, job params.ScaleSetJobMessage,
 		EventName:       job.EventName,
 		QueueTime:       job.QueueTime.UTC(),
 		State:           queueStateQueued,
-		Priority:        baseQueuePriority(scaleSet.Name, job),
+		Priority:        baseQueuePriority(config, scaleSet.Name, job),
 		StateEnteredAt:  now,
 		UpdatedAt:       now,
 		ExpiresAt:       now.Add(ttl),
 	}, nil
 }
 
-func queueIntentFromLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntity, job params.ScaleSetJobMessage, now time.Time, ttl time.Duration) (queueIntent, error) {
+func queueIntentFromLifecycle(config queueAdmissionConfig, scaleSet params.ScaleSet, entity params.ForgeEntity, job params.ScaleSetJobMessage, now time.Time, ttl time.Duration) (queueIntent, error) {
 	// A live JobAssigned message carries the job ID and nothing else -- no
 	// owner, no repository, no workflow ref, no queue time. The entity is
 	// therefore the only identity available here. A repository entity is one,
@@ -1003,24 +1005,30 @@ func queueIntentFromLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntit
 		EventName:       "unavailable-before-job-available",
 		QueueTime:       now,
 		State:           queueStateQueued,
-		Priority:        baseQueuePriority(scaleSet.Name, params.ScaleSetJobMessage{}),
+		Priority:        baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{}),
 		StateEnteredAt:  now,
 		UpdatedAt:       now,
 		ExpiresAt:       now.Add(ttl),
 	}, nil
 }
 
-func baseQueuePriority(scaleSetName string, job params.ScaleSetJobMessage) int {
-	switch {
-	case strings.HasSuffix(scaleSetName, "-release"):
-		return 0
-	case job.EventName == "merge_group", strings.Contains(job.JobWorkflowRef, "@refs/heads/main"):
+func baseQueuePriority(config queueAdmissionConfig, scaleSetName string, job params.ScaleSetJobMessage) int {
+	resources, exists := config.ScaleSets[scaleSetName]
+	if !exists {
 		return 1
-	case job.EventName == "schedule":
-		return 3
-	default:
+	}
+	// High priority is an owner decision expressed by private scale-set policy.
+	// The public engine never contains a tenant or repository identity.
+	if resources.Priority == 0 {
+		return 0
+	}
+	// Scheduled work is background even on an ordinary capability class. A
+	// dedicated background scale set also remains background for manual runs,
+	// whose sparse JobAssigned event carries no workflow metadata yet.
+	if job.EventName == "schedule" || resources.Priority == 2 {
 		return 2
 	}
+	return 1
 }
 
 func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
