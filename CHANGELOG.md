@@ -75,6 +75,10 @@ Versioning.
   before JIT/DB/provider creation, backfills smaller work into temporary holes,
   and stops backfilling once an aged or release candidate reaches priority zero.
   Provider admission remains the per-member/PSI authority and final safety net.
+- Restored the generic representative benchmark harness omitted by the public
+  export: frozen workload fixtures now have their metrics/toolchain/sccache
+  scripts and a workflow-dispatch-only private-estate template. The public
+  repository still executes only GitHub-hosted CI.
 
 ## [0.1.1] - 2026-08-16
 

@@ -1,0 +1,538 @@
+name: Representative runner benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Runner environment to measure
+        required: true
+        default: nddev
+        type: choice
+        options:
+          - nddev
+      cache_mode:
+        description: Dependency and build cache condition
+        required: true
+        default: cold
+        type: choice
+        options:
+          - cold
+          - warm
+      iteration:
+        description: Stable sample identifier (for example cold-01)
+        required: true
+        default: pilot-01
+        type: string
+      workload:
+        description: Representative workload to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - go
+          - rust
+          - python-uv
+          - bun-next
+          - docker
+
+permissions:
+  contents: read
+
+concurrency:
+  group: representative-benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}
+  cancel-in-progress: false
+
+jobs:
+  go:
+    name: Go build and test
+    if: ${{ inputs.workload == 'all' || inputs.workload == 'go' }}
+    runs-on: nddev-linux-standard
+    timeout-minutes: 30
+    env:
+      NDDEV_BENCHMARK_WORKLOAD: go
+      NDDEV_BENCHMARK_ENVIRONMENT: ${{ inputs.environment }}
+      NDDEV_BENCHMARK_CACHE_MODE: ${{ inputs.cache_mode }}
+      NDDEV_BENCHMARK_ITERATION: ${{ inputs.iteration }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Start benchmark metrics
+        id: start
+        run: |
+          set -euo pipefail
+          modules/github-actions/scripts/benchmark-metrics.sh start
+          printf 'GOMODCACHE=%s/nddev-benchmark-cache/go-mod\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+          printf 'GOCACHE=%s/nddev-benchmark-cache/go-build\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+
+      - name: Install toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.6
+          cache: false
+
+      - name: Restore dependency cache
+        if: ${{ inputs.cache_mode == 'warm' }}
+        id: dependency-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/nddev-benchmark-cache/go-mod
+            ${{ runner.temp }}/nddev-benchmark-cache/go-build
+          key: representative-v1-${{ inputs.environment }}-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/github-actions/go.sum') }}
+
+      - name: Resolve dependencies
+        working-directory: modules/github-actions
+        run: go mod download
+
+      - name: Build workload
+        working-directory: modules/github-actions
+        run: go build ./...
+
+      - name: Test workload
+        working-directory: modules/github-actions
+        run: go test ./...
+
+      - name: Finish benchmark metrics
+        if: ${{ always() && steps.start.outcome == 'success' }}
+        id: finish
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_hit="${DEPENDENCY_CACHE_HIT:-false}"
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == cold ]]; then
+            cache_hit=disabled
+          fi
+          export NDDEV_BENCHMARK_CACHE_HIT="${cache_hit}"
+          toolchain="$(go version 2>/dev/null || printf unavailable)"
+          export NDDEV_BENCHMARK_TOOLCHAIN="${toolchain}"
+          modules/github-actions/scripts/benchmark-metrics.sh finish
+
+      - name: Upload benchmark record
+        if: ${{ always() && steps.finish.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}-go
+          path: ${{ runner.temp }}/nddev-benchmark-go/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  rust:
+    name: Rust build and test
+    if: ${{ inputs.workload == 'all' || inputs.workload == 'rust' }}
+    runs-on: nddev-linux-standard
+    timeout-minutes: 30
+    env:
+      NDDEV_BENCHMARK_WORKLOAD: rust
+      NDDEV_BENCHMARK_ENVIRONMENT: ${{ inputs.environment }}
+      NDDEV_BENCHMARK_CACHE_MODE: ${{ inputs.cache_mode }}
+      NDDEV_BENCHMARK_ITERATION: ${{ inputs.iteration }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Start benchmark metrics
+        id: start
+        run: |
+          set -euo pipefail
+          modules/github-actions/scripts/benchmark-metrics.sh start
+          printf 'CARGO_HOME=%s/nddev-benchmark-cache/rust-cargo\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+          printf 'CARGO_TARGET_DIR=%s/nddev-benchmark-cache/rust-target\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+
+      - name: Install toolchain
+        run: modules/github-actions/scripts/install-benchmark-toolchain.sh rust
+
+      - name: Configure NDDev compiler cache
+        id: configure-compiler-cache
+        if: ${{ inputs.environment == 'nddev' && inputs.cache_mode == 'warm' }}
+        run: modules/github-actions/scripts/configure-sccache.sh modules/github-actions/benchmark/rust/Cargo.lock rustc-1.97.1 benchmark
+
+      - name: Restore dependency cache
+        if: ${{ inputs.environment == 'github-hosted' && inputs.cache_mode == 'warm' }}
+        id: dependency-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/nddev-benchmark-cache/rust-cargo/registry
+            ${{ runner.temp }}/nddev-benchmark-cache/rust-cargo/git
+            ${{ runner.temp }}/nddev-benchmark-cache/rust-target
+          key: representative-v1-${{ inputs.environment }}-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/github-actions/benchmark/rust/Cargo.lock') }}
+
+      - name: Resolve dependencies
+        working-directory: modules/github-actions/benchmark/rust
+        run: cargo fetch --locked
+
+      - name: Build workload
+        working-directory: modules/github-actions/benchmark/rust
+        run: cargo build --release --locked
+
+      - name: Test workload
+        working-directory: modules/github-actions/benchmark/rust
+        run: cargo test --locked
+
+      - name: Inspect NDDev compiler cache
+        id: compiler-cache
+        if: ${{ always() && steps.configure-compiler-cache.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          stats="${RUNNER_TEMP}/nddev-benchmark-rust/sccache-stats.json"
+          install -d -m 0700 -- "${stats%/*}"
+          sccache --show-stats --stats-format json >"${stats}"
+          chmod 0600 -- "${stats}"
+          hits="$(jq -er '[.stats.cache_hits.counts[]] | add // 0' "${stats}")"
+          misses="$(jq -er '[.stats.cache_misses.counts[]] | add // 0' "${stats}")"
+          errors="$(jq -er '[.stats.cache_errors.counts[]] | add // 0' "${stats}")"
+          [[ "${hits}" =~ ^[0-9]+$ && "${misses}" =~ ^[0-9]+$ && "${errors}" == 0 ]]
+          if (( hits > 0 )); then cache_hit=true; else cache_hit=false; fi
+          printf 'cache-hit=%s\n' "${cache_hit}" >>"${GITHUB_OUTPUT}"
+          printf 'sccache hits=%s misses=%s\n' "${hits}" "${misses}"
+          sccache --stop-server
+
+      - name: Finish benchmark metrics
+        if: ${{ always() && steps.start.outcome == 'success' }}
+        id: finish
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+          LOCAL_CACHE_HIT: ${{ steps.compiler-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_hit="${DEPENDENCY_CACHE_HIT:-false}"
+          if [[ "${NDDEV_BENCHMARK_ENVIRONMENT}" == nddev && "${NDDEV_BENCHMARK_CACHE_MODE}" == warm ]]; then
+            cache_hit="${LOCAL_CACHE_HIT:-false}"
+          fi
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == cold ]]; then
+            cache_hit=disabled
+          fi
+          export NDDEV_BENCHMARK_CACHE_HIT="${cache_hit}"
+          toolchain="$(rustc --version 2>/dev/null || printf unavailable); $(cargo --version 2>/dev/null || printf unavailable)"
+          export NDDEV_BENCHMARK_TOOLCHAIN="${toolchain}"
+          modules/github-actions/scripts/benchmark-metrics.sh finish
+
+      - name: Upload benchmark record
+        if: ${{ always() && steps.finish.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}-rust
+          path: ${{ runner.temp }}/nddev-benchmark-rust/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  python-uv:
+    name: Python and uv build and test
+    if: ${{ inputs.workload == 'all' || inputs.workload == 'python-uv' }}
+    runs-on: nddev-linux-standard
+    timeout-minutes: 30
+    env:
+      NDDEV_BENCHMARK_WORKLOAD: python-uv
+      NDDEV_BENCHMARK_ENVIRONMENT: ${{ inputs.environment }}
+      NDDEV_BENCHMARK_CACHE_MODE: ${{ inputs.cache_mode }}
+      NDDEV_BENCHMARK_ITERATION: ${{ inputs.iteration }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Start benchmark metrics
+        id: start
+        run: |
+          set -euo pipefail
+          modules/github-actions/scripts/benchmark-metrics.sh start
+          printf 'UV_CACHE_DIR=%s/nddev-benchmark-cache/uv\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.14.4
+
+      - name: Install uv
+        run: modules/github-actions/scripts/install-benchmark-toolchain.sh uv
+
+      - name: Restore dependency cache
+        if: ${{ inputs.cache_mode == 'warm' }}
+        id: dependency-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/nddev-benchmark-cache/uv
+          key: representative-v1-${{ inputs.environment }}-python-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/github-actions/benchmark/python/uv.lock') }}
+
+      - name: Resolve dependencies
+        working-directory: modules/github-actions/benchmark/python
+        run: uv sync --frozen --all-groups
+
+      - name: Build workload
+        working-directory: modules/github-actions/benchmark/python
+        run: uv build
+
+      - name: Test workload
+        working-directory: modules/github-actions/benchmark/python
+        run: uv run --frozen pytest
+
+      - name: Finish benchmark metrics
+        if: ${{ always() && steps.start.outcome == 'success' }}
+        id: finish
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_hit="${DEPENDENCY_CACHE_HIT:-false}"
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == cold ]]; then
+            cache_hit=disabled
+          fi
+          export NDDEV_BENCHMARK_CACHE_HIT="${cache_hit}"
+          toolchain="$(python --version 2>&1 || printf unavailable); $(uv --version 2>/dev/null || printf unavailable)"
+          export NDDEV_BENCHMARK_TOOLCHAIN="${toolchain}"
+          modules/github-actions/scripts/benchmark-metrics.sh finish
+
+      - name: Upload benchmark record
+        if: ${{ always() && steps.finish.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}-python-uv
+          path: ${{ runner.temp }}/nddev-benchmark-python-uv/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  bun-next:
+    name: Bun and Next build and test
+    if: ${{ inputs.workload == 'all' || inputs.workload == 'bun-next' }}
+    runs-on: nddev-linux-standard
+    timeout-minutes: 30
+    env:
+      NDDEV_BENCHMARK_WORKLOAD: bun-next
+      NDDEV_BENCHMARK_ENVIRONMENT: ${{ inputs.environment }}
+      NDDEV_BENCHMARK_CACHE_MODE: ${{ inputs.cache_mode }}
+      NDDEV_BENCHMARK_ITERATION: ${{ inputs.iteration }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Start benchmark metrics
+        id: start
+        run: |
+          set -euo pipefail
+          modules/github-actions/scripts/benchmark-metrics.sh start
+          printf 'BUN_INSTALL_CACHE_DIR=%s/nddev-benchmark-cache/bun\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+
+      - name: Install toolchain
+        run: modules/github-actions/scripts/install-benchmark-toolchain.sh bun
+
+      - name: Restore dependency cache
+        if: ${{ inputs.cache_mode == 'warm' }}
+        id: dependency-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/nddev-benchmark-cache/bun
+            modules/github-actions/benchmark/bun-next/.next/cache
+          key: representative-v1-${{ inputs.environment }}-bun-next-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/github-actions/benchmark/bun-next/bun.lock') }}
+
+      - name: Resolve dependencies
+        working-directory: modules/github-actions/benchmark/bun-next
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build workload
+        working-directory: modules/github-actions/benchmark/bun-next
+        run: bun run build
+
+      - name: Test workload
+        working-directory: modules/github-actions/benchmark/bun-next
+        run: bun test
+
+      - name: Finish benchmark metrics
+        if: ${{ always() && steps.start.outcome == 'success' }}
+        id: finish
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_hit="${DEPENDENCY_CACHE_HIT:-false}"
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == cold ]]; then
+            cache_hit=disabled
+          fi
+          export NDDEV_BENCHMARK_CACHE_HIT="${cache_hit}"
+          toolchain="$(bun --version 2>/dev/null || printf unavailable)"
+          export NDDEV_BENCHMARK_TOOLCHAIN="${toolchain}"
+          modules/github-actions/scripts/benchmark-metrics.sh finish
+
+      - name: Upload benchmark record
+        if: ${{ always() && steps.finish.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}-bun-next
+          path: ${{ runner.temp }}/nddev-benchmark-bun-next/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  docker:
+    name: Docker and Compose integration
+    if: ${{ inputs.workload == 'all' || inputs.workload == 'docker' }}
+    runs-on: nddev-linux-integration
+    timeout-minutes: 30
+    env:
+      NDDEV_BENCHMARK_WORKLOAD: docker
+      NDDEV_BENCHMARK_ENVIRONMENT: ${{ inputs.environment }}
+      NDDEV_BENCHMARK_CACHE_MODE: ${{ inputs.cache_mode }}
+      NDDEV_BENCHMARK_ITERATION: ${{ inputs.iteration }}
+      BUILDKIT_PROGRESS: plain
+      BENCHMARK_IMAGE: nddev-runner-benchmark:${{ github.run_id }}-${{ github.run_attempt }}
+      BENCHMARK_CACHE_IMAGE: nddev-runner-benchmark:cache-v2
+      COMPOSE_PROJECT_NAME: nddev-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Start benchmark metrics
+        id: start
+        run: |
+          set -euo pipefail
+          modules/github-actions/scripts/benchmark-metrics.sh start
+          printf 'BUILDKIT_CACHE_FILE=%s/nddev-benchmark-cache/docker-image.tar\n' "${RUNNER_TEMP}" >>"${GITHUB_ENV}"
+
+      - name: Inspect toolchain
+        run: |
+          set -euo pipefail
+          docker version
+          docker buildx version
+          docker compose version
+
+      - name: Restore dependency cache
+        if: ${{ inputs.cache_mode == 'warm' }}
+        id: dependency-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/nddev-benchmark-cache/docker-image.tar
+          key: representative-v2-${{ inputs.environment }}-docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/github-actions/benchmark/docker/Dockerfile', 'modules/github-actions/benchmark/docker/entrypoint.sh') }}
+
+      - name: Resolve dependencies
+        run: |
+          set -euo pipefail
+          docker pull ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+          docker pull nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+
+      - name: Build workload
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_root="${RUNNER_TEMP}/nddev-benchmark-cache"
+          cache_next="${BUILDKIT_CACHE_FILE}.next"
+          case "${BUILDKIT_CACHE_FILE}" in
+            "${RUNNER_TEMP}"/nddev-benchmark-cache/*) ;;
+            *) printf 'unsafe Docker cache path\n' >&2; exit 1 ;;
+          esac
+          if [[ -L "${cache_root}" || ( -e "${cache_root}" && ! -d "${cache_root}" ) ]]; then
+            printf 'Docker cache root is not a safe directory\n' >&2
+            exit 1
+          fi
+          install -d -m 0700 -- "${cache_root}"
+          if [[ -L "${BUILDKIT_CACHE_FILE}" || ( -e "${BUILDKIT_CACHE_FILE}" && ! -f "${BUILDKIT_CACHE_FILE}" ) ]]; then
+            printf 'Docker cache path is not a safe regular file\n' >&2
+            exit 1
+          fi
+          if [[ -e "${cache_next}" || -L "${cache_next}" ]]; then
+            printf 'unexpected next Docker cache path already exists\n' >&2
+            exit 1
+          fi
+
+          cache_from=()
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == warm ]]; then
+            case "${DEPENDENCY_CACHE_HIT:-false}" in
+              true)
+                if [[ ! -f "${BUILDKIT_CACHE_FILE}" || -L "${BUILDKIT_CACHE_FILE}" ]]; then
+                  printf 'Docker cache hit did not restore a safe image archive\n' >&2
+                  exit 1
+                fi
+                docker load --input "${BUILDKIT_CACHE_FILE}"
+                docker image inspect "${BENCHMARK_CACHE_IMAGE}" >/dev/null
+                cache_from=(--cache-from "${BENCHMARK_CACHE_IMAGE}")
+                ;;
+              false|'')
+                if [[ -e "${BUILDKIT_CACHE_FILE}" || -L "${BUILDKIT_CACHE_FILE}" ]]; then
+                  printf 'Docker cache miss unexpectedly restored a path\n' >&2
+                  exit 1
+                fi
+                ;;
+              *)
+                printf 'invalid Docker cache result: %s\n' "${DEPENDENCY_CACHE_HIT}" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          docker buildx build \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --file modules/github-actions/benchmark/docker/Dockerfile \
+            --load \
+            --tag "${BENCHMARK_IMAGE}" \
+            "${cache_from[@]}" \
+            modules/github-actions/benchmark/docker
+          docker tag "${BENCHMARK_IMAGE}" "${BENCHMARK_CACHE_IMAGE}"
+          docker save --output "${cache_next}" "${BENCHMARK_CACHE_IMAGE}"
+          if [[ ! -f "${cache_next}" || -L "${cache_next}" ]]; then
+            printf 'Docker cache export is not a safe regular file\n' >&2
+            exit 1
+          fi
+          chmod 0600 -- "${cache_next}"
+          mv -- "${cache_next}" "${BUILDKIT_CACHE_FILE}"
+
+      - name: Test workload
+        run: |
+          set -euo pipefail
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+            "${BENCHMARK_IMAGE}"
+          cleanup() {
+            docker compose --file modules/github-actions/benchmark/docker/compose.yml down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+          docker compose --file modules/github-actions/benchmark/docker/compose.yml up --detach --wait --wait-timeout 60
+          docker compose --file modules/github-actions/benchmark/docker/compose.yml exec --no-TTY web \
+            wget --quiet --output-document=- http://127.0.0.1/ >/dev/null
+
+      - name: Finish benchmark metrics
+        if: ${{ always() && steps.start.outcome == 'success' }}
+        id: finish
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          cache_hit="${DEPENDENCY_CACHE_HIT:-false}"
+          if [[ "${NDDEV_BENCHMARK_CACHE_MODE}" == cold ]]; then
+            cache_hit=disabled
+          fi
+          docker_version="$(docker version --format '{{.Client.Version}}' 2>/dev/null || printf unavailable)"
+          buildx_version="$(docker buildx version 2>/dev/null | awk '{print $2}' || printf unavailable)"
+          compose_version="$(docker compose version --short 2>/dev/null || printf unavailable)"
+          export NDDEV_BENCHMARK_CACHE_HIT="${cache_hit}"
+          export NDDEV_BENCHMARK_TOOLCHAIN="docker=${docker_version}; buildx=${buildx_version}; compose=${compose_version}"
+          modules/github-actions/scripts/benchmark-metrics.sh finish
+
+      - name: Upload benchmark record
+        if: ${{ always() && steps.finish.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ inputs.environment }}-${{ inputs.cache_mode }}-${{ inputs.iteration }}-docker
+          path: ${{ runner.temp }}/nddev-benchmark-docker/result.json
+          if-no-files-found: error
+          retention-days: 1
