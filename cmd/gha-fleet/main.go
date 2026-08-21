@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -101,6 +102,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateObservabilityRules(args[1:], stdout, stderr)
 	case "render-openobserve-alerts":
 		return runRenderOpenObserveAlerts(args[1:], stdout, stderr)
+	case "reconcile-openobserve-alerts":
+		return runReconcileOpenObserveAlerts(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -262,6 +265,85 @@ func runRenderOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return writeJSONOrFail(stdout, stderr, rendered)
+}
+
+func runReconcileOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("reconcile-openobserve-alerts", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/observability-rules.yaml", "strict observability rules bundle")
+	destination := flags.String("destination", "fleet_oncall", "exact reviewed OpenObserve destination")
+	endpoint := flags.String("endpoint", "", "OpenObserve HTTP(S) origin")
+	usernameFile := flags.String("username-file", "", "absolute file containing only the OpenObserve username")
+	passwordFile := flags.String("password-file", "", "absolute file containing only the OpenObserve password")
+	enable := flags.Bool("enable", false, "manage alerts enabled after destination acceptance")
+	apply := flags.Bool("apply", false, "apply the exact current plan and verify read-back")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" || *destination == "" || *endpoint == "" || *usernameFile == "" || *passwordFile == "" {
+		fmt.Fprintln(stderr, "gha-fleet: reconcile-openobserve-alerts requires --config, --destination, --endpoint, --username-file, and --password-file")
+		return 2
+	}
+	bundle, err := observabilityrules.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	desired, err := observabilityrules.RenderOpenObserve(bundle, *destination, *enable)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	username, err := readOpenObserveCredential(*usernameFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve username: %v\n", err)
+		return 1
+	}
+	password, err := readOpenObserveCredential(*passwordFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve password: %v\n", err)
+		return 1
+	}
+	client, err := observabilityrules.NewOpenObserveClient(*endpoint, username, password)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var plan observabilityrules.ReconcilePlan
+	if *apply {
+		plan, err = client.Apply(ctx, desired)
+	} else {
+		plan, err = client.Plan(ctx, desired)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, plan)
+}
+
+func readOpenObserveCredential(filename string) (string, error) {
+	if !filepath.IsAbs(filename) {
+		return "", errors.New("credential path must be absolute")
+	}
+	info, err := os.Lstat(filename)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0o077 != 0 || info.Size() < 1 || info.Size() > 4096 {
+		return "", errors.New("credential must be a bounded private regular file")
+	}
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSuffix(string(content), "\n")
+	if value == "" || strings.ContainsAny(value, "\r\n\x00") {
+		return "", errors.New("credential must contain one non-empty line")
+	}
+	return value, nil
 }
 
 func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
@@ -1634,5 +1716,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render-openobserve-alerts|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render-openobserve-alerts|reconcile-openobserve-alerts|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }

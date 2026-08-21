@@ -19,6 +19,22 @@ has passed an independent delivery-and-recovery test. A missing, synthetic or
 silent destination is not an acceptable reason to enable rules. The renderer's
 stream names must all exist in the target metrics inventory before apply.
 
+Use `reconcile-openobserve-alerts` for deployment. The default invocation is a
+read-only plan; `--apply` performs the listed create/update/delete operations
+and then requires an empty read-back plan. Credentials are accepted only from
+private absolute one-line files, never command arguments. The reconciler may
+delete an obsolete alert only when its live tags contain `managed-by:gds`; all
+other live alerts are outside its ownership.
+
+```bash
+gha-fleet reconcile-openobserve-alerts \
+  --config config/observability-rules.yaml \
+  --destination fleet_oncall \
+  --endpoint https://openobserve.example.invalid \
+  --username-file /run/credentials/openobserve-username \
+  --password-file /run/credentials/openobserve-password
+```
+
 - Platform, lifecycle or diagnostics pages: stop promotion work, preserve
   journals and diagnostic bundles, identify the oldest exact identity, and use
   only the bounded recovery operation that matches authoritative evidence.
