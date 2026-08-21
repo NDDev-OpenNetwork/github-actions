@@ -19,6 +19,22 @@ func TestLoadCanonicalConfig(t *testing.T) {
 	}
 }
 
+func TestAccessKeysAreRepositoryScopedOutsideLegacyBucket(t *testing.T) {
+	left := testConfig(t, t.TempDir())
+	right := left
+	right.Bucket = "example-estate-cache"
+	right.Identities = append([]Identity(nil), left.Identities...)
+	for index := range right.Identities {
+		right.Identities[index].Prefix = strings.Replace(right.Identities[index].Prefix, "example-org/example-actions/", "example-org/example-estate/", 1)
+		right.Identities[index].Policy = strings.Replace(right.Identities[index].Policy, "gha-cache-github-actions-", "gha-cache-example-estate-", 1)
+	}
+	legacy := credentialSkeletons(left)
+	scoped := credentialSkeletons(right)
+	if legacy[0].accessKey == scoped[0].accessKey {
+		t.Fatal("second repository reused legacy role-only access key")
+	}
+}
+
 func TestValidateAcceptsDeploymentIdentityAndLiteralEndpoint(t *testing.T) {
 	config, err := Load(filepath.Join("..", "..", "config", "rustfs-cache-identities.yaml"))
 	if err != nil {
