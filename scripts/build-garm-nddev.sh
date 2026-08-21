@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.55"
+readonly derivative_version="v0.2.1-nddev.56"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="550c8b3e3170a21ee25b377393f00946e69bba04f02d35d13147c9aa04588cce"
+readonly expected_binary_sha256="2f0683b243462f19282f8422533ff0fda6988acef4ce3e98483e456d5136117d"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -57,6 +57,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0021-reap-idle-offline-jit-runner.patch"
   "third_party/garm/patches/0022-bound-capacity-probe-burst.patch"
   "third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch"
+  "third_party/garm/patches/0024-preserve-running-queue-intent.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -82,6 +83,7 @@ readonly patch_sha256s=(
   "cb072aeacbbfa2761dc9fb9ec0799e9e2116135bdaf70372ed388205f89868f2"
   "d4a4f73c5a45708149edc9782c2772cede3c1bc9fcb523be07d4f9c98f51fc4b"
   "45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8"
+  "c62d6a919ddf56e46cd3ad7b780a208f76749dad3ed09c4db9c80c0392178161"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
