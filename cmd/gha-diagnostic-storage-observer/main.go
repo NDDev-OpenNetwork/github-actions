@@ -24,6 +24,7 @@ var commit = "unknown"
 
 func main() {
 	configPath := flag.String("config", diagnosticstore.DefaultConfigPath, "diagnostic storage configuration")
+	credentialDirectory := flag.String("credential-directory", "", "systemd credential directory override")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
 	if flag.NArg() != 0 {
@@ -38,6 +39,13 @@ func main() {
 	if err != nil {
 		slog.Error("load diagnostic storage observer config", "error", err)
 		os.Exit(1)
+	}
+	if *credentialDirectory != "" {
+		config, err = diagnosticstore.WithCredentialDirectory(config, *credentialDirectory)
+		if err != nil {
+			slog.Error("bind diagnostic storage credentials", "error", err)
+			os.Exit(1)
+		}
 	}
 	requester, err := rustfscache.NewHTTPRequester(rustfscache.Config{Endpoint: config.Endpoint, Region: config.Region, CAFile: config.CAFile})
 	if err != nil {

@@ -40,6 +40,22 @@ type Config struct {
 	MinimumHeadroom   int64  `yaml:"minimum_headroom_bytes" json:"minimum_headroom_bytes"`
 }
 
+// WithCredentialDirectory binds the two root credential paths to a systemd
+// credential directory supplied by the unit's %d specifier. The public config
+// remains secret-free and shared by observer and reconciler even though each
+// service receives an isolated /run/credentials/<unit> mount.
+func WithCredentialDirectory(config Config, directory string) (Config, error) {
+	if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory || directory == "/" {
+		return Config{}, errors.New("credential directory must be an absolute clean non-root path")
+	}
+	config.RootAccessKeyFile = filepath.Join(directory, "rustfs-access-key")
+	config.RootSecretKeyFile = filepath.Join(directory, "rustfs-secret-key")
+	if err := config.Validate(); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
 func Load(path string) (Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

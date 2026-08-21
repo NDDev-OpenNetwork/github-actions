@@ -418,6 +418,7 @@ func runReconcileDiagnosticStorage(args []string, stdout, stderr io.Writer) int 
 	flags := flag.NewFlagSet("reconcile-diagnostic-storage", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", diagnosticstore.DefaultConfigPath, "diagnostic storage configuration path")
+	credentialDirectory := flags.String("credential-directory", "", "systemd credential directory override")
 	apply := flags.Bool("apply", false, "create or repair the exact diagnostic bucket capacity and lifecycle")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -434,6 +435,13 @@ func runReconcileDiagnosticStorage(args []string, stdout, stderr io.Writer) int 
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
+	}
+	if *credentialDirectory != "" {
+		config, err = diagnosticstore.WithCredentialDirectory(config, *credentialDirectory)
+		if err != nil {
+			fmt.Fprintf(stderr, "gha-fleet: bind diagnostic storage credentials: %v\n", err)
+			return 1
+		}
 	}
 	requester, err := rustfscache.NewHTTPRequester(rustfscache.Config{
 		Endpoint: config.Endpoint, Region: config.Region, CAFile: config.CAFile,

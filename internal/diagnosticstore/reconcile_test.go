@@ -131,3 +131,21 @@ func TestCanonicalExampleLoads(t *testing.T) {
 		t.Fatalf("unexpected config: %+v", config)
 	}
 }
+
+func TestCredentialDirectoryOverrideIsExactAndValidated(t *testing.T) {
+	config, err := Load(filepath.Join("..", "..", "config", "diagnostic-storage.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overridden, err := WithCredentialDirectory(config, "/run/credentials/gha-diagnostic-storage-observer.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overridden.RootAccessKeyFile != "/run/credentials/gha-diagnostic-storage-observer.service/rustfs-access-key" ||
+		overridden.RootSecretKeyFile != "/run/credentials/gha-diagnostic-storage-observer.service/rustfs-secret-key" {
+		t.Fatalf("unexpected credential override: %+v", overridden)
+	}
+	if _, err := WithCredentialDirectory(config, "relative"); err == nil {
+		t.Fatal("relative credential directory was accepted")
+	}
+}
