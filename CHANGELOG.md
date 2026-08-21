@@ -7,6 +7,10 @@ Versioning.
 
 ### Changed
 
+- Added an idempotent OpenObserve plan/apply/read-back reconciler. It blocks on
+  a missing destination or metric stream, updates only the declared rules,
+  deletes only obsolete `managed-by:gds` alerts, and preserves operator-owned
+  alerts.
 - Upgraded the OpenObserve rules contract to keep the metric stream, PromQL
   expression, comparison operator and threshold as separate typed fields, and
   added deterministic v0.92 alert payload rendering with explicit disabled or
