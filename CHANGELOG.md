@@ -7,6 +7,10 @@ Versioning.
 
 ### Added
 
+- Added real queue-phase duration spans emitted from durable journal
+  transitions. Every GitHub job UUID receives a stable trace identity; spans
+  carry repository, scale set, workflow run, runner request, numeric runner and
+  exact provider instance correlation without creating synthetic work.
 - Added queue journal schema v4 correlation fields for GitHub workflow run,
   runner request, job display name and numeric runner identity. JobAvailable and
   JobStarted enrich the original durable JobAssigned UUID in place; observer
