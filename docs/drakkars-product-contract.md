@@ -132,6 +132,13 @@ resolution, cache, build, tests, services, artifacts, networking and failure
 diagnostics. An unsupported tool is a compatibility defect, not a product test
 failure or an infinite retry condition.
 
+Every promoted image exposes conventional default commands (`node`, `npm`,
+`pnpm`, `yarn`, `bun`, `python`, `python3`, `pip`, `pip3`, `uv`, `uvx`, `go`,
+`gofmt`, `rustc`, `cargo` and, for Docker-capable classes, `docker`, `buildx`
+and `compose`). Version-selecting setup actions may still choose another pinned
+project version; the baked defaults guarantee that a workflow does not fail
+merely because its valid package-manager executable is absent.
+
 ## Cache behavior
 
 Ordinary CI degrades to uncached execution when an optional cache is

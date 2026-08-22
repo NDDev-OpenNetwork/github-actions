@@ -7,6 +7,11 @@ Versioning.
 
 ### Changed
 
+- Expanded every worker image compatibility contract with pinned pnpm and Yarn
+  distributions, conventional Python/pip entry points, and default Go/gofmt
+  links. Standard and integration variants now share Python, Java, Maven,
+  CMake and Ninja prerequisites, and image smoke tests execute each command so
+  missing package-manager support fails at build time instead of in project CI.
 - Made the cluster-wide Incus placement scriptlet typed public desired state.
   Eligible workers now use hard-memory best-fit packing after pressure and disk
   admission, preserving contiguous capacity for larger jobs instead of

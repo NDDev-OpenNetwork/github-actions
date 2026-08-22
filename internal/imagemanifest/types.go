@@ -84,7 +84,7 @@ type Toolchain struct {
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
 // so a complete set turns per-job toolchain installation into a no-op.
 func BakedToolchains() []string {
-	return []string{"bun", "gh", "go", "node22", "node24", "node25", "rust", "uv"}
+	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}
 }
 
 type Guest struct {
