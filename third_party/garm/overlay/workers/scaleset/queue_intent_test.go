@@ -1014,12 +1014,13 @@ func TestCompetingRepositoryRetainsTwentyFivePercentOfResourceBudget(t *testing.
 		MaxRepositorySharePercent: 75, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: 40, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
-			"measured": {CPUUnits: 4, MemoryMiB: 4096, ReservationCPUUnits: 1, ReservationMemoryMiB: 1536, Priority: 0},
+			"measured": {CPUUnits: 4, MemoryMiB: 4096, ReservationCPUUnits: 1, ReservationMemoryMiB: 1024, Priority: 0},
 		},
 	}
 	journal := queueIntentJournal{Intents: map[string]queueIntent{
 		"one":      {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
 		"two":      {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
+		"three":    {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
 		"priority": {Key: "priority", State: queueStateQueued, Repository: "owner/priority", ScaleSetName: "measured", QueueTime: now, Priority: 0},
 		"ordinary": {Key: "ordinary", State: queueStateQueued, Repository: "owner/ordinary", ScaleSetName: "measured", QueueTime: now.Add(time.Second), Priority: 1},
 	}}

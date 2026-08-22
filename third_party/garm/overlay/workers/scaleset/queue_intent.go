@@ -1067,7 +1067,7 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 	for _, intent := range journal.Intents {
 		limit := repositoryPolicy(config, intent.Repository).MaxInFlight
 		if queueHasCompetingRepository(journal, intent.Repository) {
-			limit = min(limit, config.MaxInFlight*config.MaxRepositorySharePercent/100)
+			limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
 		}
 		if intent.State != queueStateQueued ||
 			inFlight[intent.Repository] >= limit ||
@@ -1093,6 +1093,10 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		return candidates[left].Key < candidates[right].Key
 	})
 	return candidates
+}
+
+func percentageCeiling(total, percent int) int {
+	return (total*percent + 99) / 100
 }
 
 func queueHasCompetingRepository(journal *queueIntentJournal, repository string) bool {
@@ -1182,8 +1186,11 @@ func resourceFitCandidate(journal *queueIntentJournal, config queueAdmissionConf
 		repository := byRepository[candidate.Repository]
 		fitsRepository := true
 		if queueHasCompetingRepository(journal, candidate.Repository) {
-			cpuLimit := config.Capacity.CPUUnits * config.MaxRepositorySharePercent / 100
-			memoryLimit := config.Capacity.MemoryMiB * config.MaxRepositorySharePercent / 100
+			// Capacity is discrete. A percentage smaller than one job must still
+			// admit that job; otherwise a one-slot fixture or a future very large
+			// class would deadlock every repository under contention.
+			cpuLimit := max(reservation.CPUUnits, percentageCeiling(config.Capacity.CPUUnits, config.MaxRepositorySharePercent))
+			memoryLimit := max(reservation.MemoryMiB, percentageCeiling(config.Capacity.MemoryMiB, config.MaxRepositorySharePercent))
 			fitsRepository = repository.CPUUnits+reservation.CPUUnits <= cpuLimit &&
 				repository.MemoryMiB+reservation.MemoryMiB <= memoryLimit
 		}
