@@ -15,6 +15,10 @@ Versioning.
 
 ### Changed
 
+- Added provider derivative `v0.1.5-nddev.61` and the bounded
+  `reconcile-maintenance` command. It plans by default and, under `--apply`,
+  removes only expired-plus-grace, absent, unclaimed exact image-builder/smoke
+  leases under the journal lock; ordinary runner ownership is never eligible.
 - Separated exact visible image-builder/smoke inventory from orphan GitHub job
   runners in observer schema v11. Maintenance remains measurable without
   making the production platform unhealthy, while malformed lookalike names
