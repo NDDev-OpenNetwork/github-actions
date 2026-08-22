@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -131,6 +131,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -144,6 +145,24 @@ jobs:
             printf 'source_commit=%s\n' "$(go run ./cmd/gha-fleet provider-release --field source_commit)"
             printf 'binary_sha256=%s\n' "$(go run ./cmd/gha-fleet provider-release --field binary_sha256)"
           } >>"${GITHUB_OUTPUT}"
+      - name: Refuse provider source drift after the release commit
+        env:
+          SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
+          HEAD_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "${SOURCE_COMMIT}" "${HEAD_COMMIT}"
+          drift=false
+          while IFS= read -r changed; do
+            case "${changed}" in
+              *_test.go) ;;
+              go.mod|go.sum|cmd/garm-provider-incus-nddev/*.go|internal/cachenamespace/*.go|internal/config/*.go|internal/garmproviderincus/*.go|internal/garmproviderincus/*/*.go|internal/provideradmission/*.go|internal/providerjournal/*.go|internal/providerrelease/*.go|internal/providerretry/*.go|internal/rustfscache/*.go)
+                printf 'provider release source drift: %s\n' "${changed}" >&2
+                drift=true
+                ;;
+            esac
+          done < <(git diff --name-only --diff-filter=ACMRT "${SOURCE_COMMIT}" "${HEAD_COMMIT}")
+          [[ "${drift}" == false ]]
       - name: Checkout exact provider source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

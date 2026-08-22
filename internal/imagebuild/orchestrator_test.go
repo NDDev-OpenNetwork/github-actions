@@ -112,7 +112,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:19905fdc7ce023bfbeaf29da16fc6b1f0f5a5ea376fc66edfb2539762b3f47d0" {
+	if first != "sha256:015597ce44ef82558b368ae421663974d130848162f67ab8843cae05185f3983" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -248,20 +248,13 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 		}
 	}
 	provisionText := string(provision)
-	for _, warmupInvariant := range []string{
-		"/home/runner/actions-runner/bin/Runner.Listener warmup",
-		"runuser --user runner",
-		"registration state appeared while preparing the warm filesystem",
-		"ready-unregistered-v1",
+	for _, retiredWarmBehavior := range []string{
+		"systemctl enable gha-warm", "ready-unregistered-v1",
+		"Runner.Listener warmup", "PathExistsGlob=/run/gha-warm",
 	} {
-		if !strings.Contains(provisionText, warmupInvariant) {
-			t.Fatalf("provision script misses official-runner warmup invariant %s", warmupInvariant)
+		if strings.Contains(provisionText, retiredWarmBehavior) {
+			t.Fatalf("cold-only provision script retained warm startup behavior %s", retiredWarmBehavior)
 		}
-	}
-	warmupIndex := strings.Index(provisionText, "/home/runner/actions-runner/bin/Runner.Listener warmup")
-	readyIndex := strings.Index(provisionText, `printf "ready-unregistered-v1\n"`)
-	if warmupIndex < 0 || readyIndex <= warmupIndex || strings.Count(provisionText[warmupIndex:readyIndex], ".credentials_rsaparams") != 1 {
-		t.Fatal("warm readiness must be published only after official warmup and a second registration-state check")
 	}
 	installerIndex := strings.Index(provisionText, `"${version_root}/bin/installdependencies.sh"`)
 	finalStopIndex := strings.Index(provisionText, `systemctl stop "${unit}"`)

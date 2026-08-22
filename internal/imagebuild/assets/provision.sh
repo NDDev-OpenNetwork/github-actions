@@ -14,7 +14,6 @@ fi
 : "${GHA_RECIPE_FINGERPRINT:?}"
 : "${GHA_SOURCE_RELEASE_ID:?}"
 : "${GHA_SOURCE_ARTIFACT_SHA256:?}"
-: "${GHA_WARM_AGENT_B64:?}"
 : "${GHA_SCCACHE_VERSION:?}"
 : "${GHA_SCCACHE_ARCHIVE:?}"
 : "${GHA_SCCACHE_ARCHIVE_SHA256:?}"
@@ -54,55 +53,6 @@ visudo --check --file=/etc/sudoers.d/90-nddev-runner
 
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -d -o runner -g runner -m 0700 /home/runner/.gha-cache
-printf '%s' "${GHA_WARM_AGENT_B64}" | base64 --decode >/usr/local/libexec/gha-warm-agent
-chown root:root /usr/local/libexec/gha-warm-agent
-chmod 0755 /usr/local/libexec/gha-warm-agent
-install -d -o root -g root -m 0700 /var/lib/gha-warm/claims /run/gha-warm/assignments
-cat >/etc/tmpfiles.d/gha-warm.conf <<'EOF'
-d /run/gha-warm 0700 root root -
-d /run/gha-warm/assignments 0700 root root -
-EOF
-cat >/etc/systemd/system/gha-warm-agent.service <<'UNIT'
-[Unit]
-Description=Consume exactly one NDDev warm-runner assignment
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/libexec/gha-warm-agent
-PrivateTmp=false
-ProtectSystem=strict
-ReadWritePaths=/run/gha-warm /run/lock /var/lib/gha-warm /home/runner /tmp /etc/systemd/system /usr/local/share/ca-certificates /etc/ssl/certs
-NoNewPrivileges=false
-UNIT
-cat >/etc/systemd/system/gha-warm-agent.path <<'UNIT'
-[Unit]
-Description=Watch for an NDDev warm-runner assignment
-
-[Path]
-PathExistsGlob=/run/gha-warm/assignments/*.sh
-Unit=gha-warm-agent.service
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-cat >/etc/systemd/system/gha-warm-ready.service <<'UNIT'
-[Unit]
-Description=Attest that the NDDev worker is warm and unregistered
-After=gha-warm-agent.path network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'systemctl is-active --quiet gha-warm-agent.path; ! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; runuser --user runner -- /home/runner/actions-runner/bin/Runner.Listener warmup >/dev/null; ! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; printf "ready-unregistered-v1\n" >/run/gha-warm/ready'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl enable gha-warm-agent.path
-systemctl enable gha-warm-ready.service
 
 echo "${GHA_RUNNER_SHA256}  ${GHA_RUNNER_ARCHIVE}" | sha256sum --check --strict
 runner_version="${GHA_RUNNER_VERSION#v}"
@@ -172,7 +122,7 @@ install -d -o runner -g runner -m 0755 /home/runner/actions-runner
 cp -a --reflink=auto "${latest_root}/." /home/runner/actions-runner/
 chown -R runner:runner /home/runner/actions-runner
 if find /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; then
-  echo "runner registration state appeared while preparing the warm filesystem" >&2
+    echo "runner registration state appeared while preparing the cold worker image" >&2
   exit 1
 fi
 
@@ -329,7 +279,6 @@ if find "${cache_root}" -type f \( -name .runner -o -name .credentials -o -name 
   echo "runner registration state found in cache" >&2
   exit 1
 fi
-test -x /usr/local/libexec/gha-warm-agent
 test "$(stat --format='%U:%G:%a:%F' /home/runner/.gha-cache)" = 'runner:runner:700:directory'
 test -x /usr/local/bin/sccache
 test -x /usr/local/bin/bun
@@ -346,5 +295,6 @@ test -x /usr/local/bin/pnpm
 test -x /usr/local/bin/yarn
 test -x /usr/local/bin/python
 test -x /usr/local/bin/pip
-test "$(systemctl is-enabled gha-warm-agent.path)" = enabled
-test "$(systemctl is-enabled gha-warm-ready.service)" = enabled
+test ! -e /etc/systemd/system/gha-warm-agent.service
+test ! -e /etc/systemd/system/gha-warm-agent.path
+test ! -e /etc/systemd/system/gha-warm-ready.service
