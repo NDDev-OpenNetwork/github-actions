@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.63
+derivative_version: v0.2.1-nddev.64
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -77,8 +77,8 @@ patches:
     sha256: 45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8
     purpose: Defer an entity's authoritative job reads for fifteen minutes after GitHub returns 403 or 429 so missing permission or rate limiting remains fail-closed without consuming API budget once per stale row every minute.
   - path: third_party/garm/patches/0024-preserve-running-queue-intent.patch
-    sha256: c62d6a919ddf56e46cd3ad7b780a208f76749dad3ed09c4db9c80c0392178161
-    purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
+    sha256: 7af194cfa81d35f9778830c8772d3bf49c465920c4cb7d04f204ea21a25ebe6c
+    purpose: Bind authoritative repository identity before deleting a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; binding failures retain the row for retry, while terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: e1b24a6d350c399531fa7fb0f3bfc2e9157f65a7860d154417342a69ab15b849
+  binary_sha256: ef31b1e8065d7624daa34f8f48f5f6c907c00e6cdbdd39faa6be63fc42fbb3e5
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
@@ -138,6 +138,7 @@ runtime_contract:
   authoritative_job_reconciliation: true
   authoritative_queue_intent_reconciliation: true
   authoritative_repository_binding: true
+  authoritative_running_repository_binding: true
   authoritative_idle_offline_runner_reaping: true
   authoritative_access_refusal_backoff_seconds: 900
   job_started_runner_identity: true
