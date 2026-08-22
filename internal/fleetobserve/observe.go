@@ -152,9 +152,10 @@ type QueueSummary struct {
 }
 
 type IncusSummary struct {
-	VisibleInstances int `json:"visible_instances"`
-	OrphanInstances  int `json:"orphan_instances"`
-	MissingInstances int `json:"missing_instances"`
+	VisibleInstances            int `json:"visible_instances"`
+	OrphanInstances             int `json:"orphan_instances"`
+	MissingInstances            int `json:"missing_instances"`
+	MissingMaintenanceInstances int `json:"missing_maintenance_instances"`
 }
 
 type ServiceStatus struct {
@@ -264,6 +265,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 
 	coveredNames := make(map[string]struct{})
 	expectedNames := make(map[string]struct{})
+	expectedMaintenanceNames := make(map[string]struct{})
 	if journalErr != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("journal", journalErr))
 	} else {
@@ -278,7 +280,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			if lease.State == providerjournal.StateCreated || lease.State == providerjournal.StateDeleting ||
 				lease.State == providerjournal.StateWarmReady || lease.State == providerjournal.StateWarmClaimed {
 				coveredNames[name] = struct{}{}
-				expectedNames[name] = struct{}{}
+				if strings.HasPrefix(lease.PoolID, "image-maintenance/") {
+					expectedMaintenanceNames[name] = struct{}{}
+				} else {
+					expectedNames[name] = struct{}{}
+				}
 			}
 		}
 	}
@@ -318,6 +324,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				for name := range expectedNames {
 					if _, exists := visibleNames[name]; !exists {
 						snapshot.Incus.MissingInstances++
+					}
+				}
+				for name := range expectedMaintenanceNames {
+					if _, exists := visibleNames[name]; !exists {
+						snapshot.Incus.MissingMaintenanceInstances++
 					}
 				}
 			}
@@ -405,6 +416,13 @@ func summarizeExecutionCorrelation(journal providerjournal.Journal, queue queuei
 	}
 	for name, lease := range journal.Leases {
 		if lease.State != providerjournal.StateCreated {
+			continue
+		}
+		// Image builders and smoke instances are maintenance capacity, not
+		// GitHub job runners. Direct Incus teardown can precede the next
+		// provider reconciliation while the fleet is idle. Keep that gap
+		// observable without reporting a job with a missing run identity.
+		if strings.HasPrefix(lease.PoolID, "image-maintenance/") {
 			continue
 		}
 		if _, covered := runningNames[name]; covered {
