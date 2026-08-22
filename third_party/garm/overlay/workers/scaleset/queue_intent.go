@@ -243,6 +243,9 @@ func (c *queueIntentCoordinator) Validate() error {
 }
 
 func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs []params.ScaleSetJobMessage) error {
+	if !scaleSet.Enabled {
+		return nil
+	}
 	config, err := c.loadConfig()
 	if err != nil {
 		return err
@@ -369,6 +372,9 @@ func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet
 // a time did not enforce a limit -- it just made the queue drain one job per
 // round trip to GitHub no matter how much capacity the fleet had free.
 func (c *queueIntentCoordinator) SelectForAcquire(scaleSet params.ScaleSet, jobs []params.ScaleSetJobMessage) ([]int64, error) {
+	if !scaleSet.Enabled {
+		return []int64{}, nil
+	}
 	config, err := c.loadConfig()
 	if err != nil {
 		return nil, err
@@ -490,6 +496,9 @@ func (c *queueIntentCoordinator) FailAcquire(scaleSet params.ScaleSet, selected 
 // runner. JobAvailable binds the complete identity before AcquireJobs, while
 // the short assigned TTL bounds a missing follow-up event.
 func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, entity params.ForgeEntity, assigned, started, completed []params.ScaleSetJobMessage) (bool, error) {
+	if !scaleSet.Enabled {
+		return false, nil
+	}
 	config, err := c.loadConfig()
 	if err != nil {
 		return false, err
