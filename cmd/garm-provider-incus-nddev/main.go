@@ -50,6 +50,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		})
 	case "probe":
 		return runProbe(args[1:], stdout, stderr)
+	case "reconcile-maintenance":
+		return runReconcileMaintenance(args[1:], stdout, stderr)
 	case "warm-pool":
 		return runWarmPool(args[1:], stdout, stderr)
 	case "warm-drain":
@@ -222,6 +224,38 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	return writeJSON(stdout, stderr, result)
 }
 
+func runReconcileMaintenance(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("reconcile-maintenance", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configFile := flags.String("config", "/etc/garm/provider-incus.toml", "provider configuration path")
+	apply := flags.Bool("apply", false, "remove only expired absent image-maintenance leases")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "garm-provider-incus-nddev: reconcile-maintenance accepts no positional arguments")
+		return 2
+	}
+	if err := refuseRoot("reconcile-maintenance", stderr); err != nil {
+		return 1
+	}
+	provider.Version = version
+	provider.Commit = commit
+	incusProvider, err := provider.NewIncusProvider(*configFile, "nddev-maintenance-reconciler")
+	if err != nil {
+		fmt.Fprintf(stderr, "garm-provider-incus-nddev: initialize maintenance reconciler: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := incusProvider.ReconcileMaintenanceLeases(ctx, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "garm-provider-incus-nddev: reconcile maintenance leases: %v\n", err)
+		return 1
+	}
+	return writeJSON(stdout, stderr, result)
+}
+
 func writeJSON(stdout, stderr io.Writer, value any) int {
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
@@ -233,5 +267,5 @@ func writeJSON(stdout, stderr io.Writer, value any) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: garm-provider-incus-nddev [version|probe [flags]|warm-pool [flags]|warm-drain [flags]]")
+	fmt.Fprintln(writer, "usage: garm-provider-incus-nddev [version|probe [flags]|reconcile-maintenance [flags]|warm-pool [flags]|warm-drain [flags]]")
 }

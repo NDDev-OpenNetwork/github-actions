@@ -320,7 +320,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			if journalErr == nil {
 				for name := range visibleNames {
 					if _, exists := coveredNames[name]; !exists {
-						if isImageMaintenanceInstance(name) {
+						if providerjournal.IsImageMaintenanceInstance(name) {
 							snapshot.Incus.VisibleMaintenanceInstances++
 						} else {
 							snapshot.Incus.OrphanInstances++
@@ -399,21 +399,6 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Pools[index].ContainerAdmissionReady = exists && backend.Implementation == "incus-container" && snapshot.Healthy
 	}
 	return snapshot
-}
-
-func isImageMaintenanceInstance(name string) bool {
-	for _, prefix := range []string{"gha-image-builder-", "gha-image-smoke-"} {
-		suffix, found := strings.CutPrefix(name, prefix)
-		if !found || len(suffix) != 12 {
-			continue
-		}
-		if strings.IndexFunc(suffix, func(character rune) bool {
-			return (character < '0' || character > '9') && (character < 'a' || character > 'f')
-		}) == -1 {
-			return true
-		}
-	}
-	return false
 }
 
 type executionCorrelation struct {
