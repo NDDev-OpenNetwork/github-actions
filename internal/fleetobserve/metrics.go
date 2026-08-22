@@ -175,6 +175,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
 	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without an admitted, created, deleting or warm journal lease.", float64(snapshot.Incus.OrphanInstances))
 	gauge(&output, "gha_fleet_journal_missing_instances", "Created or deleting journal leases without a visible Incus instance.", float64(snapshot.Incus.MissingInstances))
+	gauge(&output, "gha_fleet_journal_missing_maintenance_instances", "Completed image-maintenance leases awaiting the next provider inventory reconciliation.", float64(snapshot.Incus.MissingMaintenanceInstances))
 	gauge(&output, "gha_fleet_provider_created_without_running_identity", "Created provider leases not named by an active running queue intent; alert only after bounded pre-start or teardown grace.", float64(snapshot.Journal.CreatedWithoutRunningIdentity))
 	gauge(&output, "gha_fleet_provider_created_without_running_identity_oldest_age_seconds", "Age from admission of the oldest created provider lease not named by an active running queue intent.", float64(snapshot.Journal.OldestCreatedWithoutRunningIdentityAgeSeconds))
 
