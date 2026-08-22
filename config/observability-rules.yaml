@@ -130,6 +130,22 @@ rules:
     summary: Sustained memory pressure is consuming useful throughput.
     action: Create a capacity ticket with class mix, RSS and queue percentile evidence.
     recovery: Memory PSI remains below five percent for the hold window.
+  - id: provider_retry_error_persistent
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_provider_retry_deferred_records_by_error_class
+    expression: sum(gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"})
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 30
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A non-capacity provider-create error remains actively deferred for five minutes.
+    action: Correlate the bounded error class with the exact private retry journal and repair identity, intent, provider or timeout ownership without deleting history.
+    recovery: All non-capacity deferred retry classes remain zero and affected real jobs reach provider create.
   - id: provider_terminal_circuit
     severity: page
     query_language: promql
