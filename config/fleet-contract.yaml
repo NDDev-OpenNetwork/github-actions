@@ -77,7 +77,8 @@ observability:
 guarantees:
   - subject: runner-classes
     promise: >-
-      A published runner class keeps its label and its capability shape. A class
+      A published runner class keeps its label and its capability shape,
+      including its bounded CPU tuning envelope. A class
       is withdrawn only by a contract_version bump, and never silently: a label
       that stops being served would leave a consumer's jobs queued forever
       rather than failing.

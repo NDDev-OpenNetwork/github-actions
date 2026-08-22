@@ -39,7 +39,8 @@ func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 	}
 	for _, class := range contract.RunnerClasses {
 		if class.WorkerKind != "incus-container" || !class.Ephemeral || class.JobsPerWorker != 1 || class.Warm.Supported ||
-			class.Resources.VCPU < 1 || class.Resources.MemoryMiB < 1024 || class.Resources.DiskGiB < 10 {
+			class.Resources.VCPU < 1 || class.Resources.VCPUMin < 1 || class.Resources.VCPUMax != class.Resources.VCPU ||
+			class.Resources.VCPUMin > class.Resources.VCPUMax || class.Resources.MemoryMiB < 1024 || class.Resources.DiskGiB < 10 {
 			t.Fatalf("runner class is not a complete cold container contract: %#v", class)
 		}
 	}
@@ -100,6 +101,39 @@ func TestDeploymentOverlayCannotWeakenContract(t *testing.T) {
 				t.Fatal("weakened overlay was accepted")
 			}
 		})
+	}
+}
+
+func TestDeploymentOverlayMayTuneCPUInsidePublishedEnvelope(t *testing.T) {
+	contract, err := Build(Sources{Root: "../.."}, "0123456789abcdef0123456789abcdef01234567")
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform, err := config.Load(filepath.Join("..", "..", "config", "example-services.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := -1
+	for candidate := range platform.Pools {
+		if platform.Pools[candidate].ScaleSetName == "nddev-priority-integration" {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatal("portable priority integration pool is missing")
+	}
+	platform.Pools[index].Resources.VCPU = 2
+	if err := ValidateConfig(contract, platform); err != nil {
+		t.Fatalf("safe CPU tuning was rejected: %v", err)
+	}
+	platform.Pools[index].Resources.VCPU = 1
+	if err := ValidateConfig(contract, platform); err == nil {
+		t.Fatal("CPU below the published envelope was accepted")
+	}
+	platform.Pools[index].Resources.VCPU = 5
+	if err := ValidateConfig(contract, platform); err == nil {
+		t.Fatal("CPU above the published envelope was accepted")
 	}
 }
 
