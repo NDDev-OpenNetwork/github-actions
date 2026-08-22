@@ -18,14 +18,16 @@ import (
 )
 
 const (
-	// 11 separates exact image builder/smoke inventory from orphan job runners.
+	// 12 separates bounded successful-delete convergence from persistent missing
+	// runner ownership. 11 separated exact image builder/smoke inventory from orphan job runners.
 	// 9 added exact JobStarted runner correlation and symmetric created-without-
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 11
+	SchemaVersion                   = 12
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
+	deletingVisibilityGrace         = 30 * time.Second
 )
 
 const (
@@ -157,6 +159,7 @@ type IncusSummary struct {
 	VisibleMaintenanceInstances int `json:"visible_maintenance_instances"`
 	OrphanInstances             int `json:"orphan_instances"`
 	MissingInstances            int `json:"missing_instances"`
+	MissingDeletingWithinGrace  int `json:"missing_deleting_within_grace"`
 	MissingMaintenanceInstances int `json:"missing_maintenance_instances"`
 }
 
@@ -266,7 +269,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	}
 
 	coveredNames := make(map[string]struct{})
-	expectedNames := make(map[string]struct{})
+	expectedNames := make(map[string]providerjournal.Lease)
 	expectedMaintenanceNames := make(map[string]struct{})
 	if journalErr != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("journal", journalErr))
@@ -285,7 +288,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				if strings.HasPrefix(lease.PoolID, "image-maintenance/") {
 					expectedMaintenanceNames[name] = struct{}{}
 				} else {
-					expectedNames[name] = struct{}{}
+					expectedNames[name] = lease
 				}
 			}
 		}
@@ -327,9 +330,14 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 						}
 					}
 				}
-				for name := range expectedNames {
+				for name, lease := range expectedNames {
 					if _, exists := visibleNames[name]; !exists {
-						snapshot.Incus.MissingInstances++
+						age := now.Sub(lease.UpdatedAt)
+						if lease.State == providerjournal.StateDeleting && age >= 0 && age <= deletingVisibilityGrace {
+							snapshot.Incus.MissingDeletingWithinGrace++
+						} else {
+							snapshot.Incus.MissingInstances++
+						}
 					}
 				}
 				for name := range expectedMaintenanceNames {

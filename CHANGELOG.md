@@ -15,6 +15,10 @@ Versioning.
 
 ### Changed
 
+- Added observer schema v12 with a 30-second deleting-visibility convergence
+  counter. A runner already absent from Incus while its lease is two seconds
+  into normal teardown no longer causes a transient platform outage; the same
+  missing ownership after the bounded grace remains a strict blocker.
 - Added provider derivative `v0.1.5-nddev.61` and the bounded
   `reconcile-maintenance` command. It plans by default and, under `--apply`,
   removes only expired-plus-grace, absent, unclaimed exact image-builder/smoke

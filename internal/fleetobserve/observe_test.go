@@ -426,6 +426,33 @@ func TestCollectorReportsExactOrphanAndMissingCounts(t *testing.T) {
 	}
 }
 
+func TestCollectorKeepsBoundedDeletingVisibilityConvergenceHealthy(t *testing.T) {
+	collector := healthyCollector(t)
+	journal, err := collector.Journal(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := journal.Leases["runner-one"]
+	lease.State = providerjournal.StateDeleting
+	lease.UpdatedAt = observationTime.Add(-2 * time.Second)
+	lease.ExpiresAt = observationTime.Add(5 * time.Minute)
+	journal.Leases["runner-one"] = lease
+	collector.Journal = func(context.Context) (providerjournal.Journal, error) { return journal, nil }
+	collector.Instances = func(context.Context) ([]string, error) { return nil, nil }
+
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.MissingInstances != 0 || snapshot.Incus.MissingDeletingWithinGrace != 1 {
+		t.Fatalf("bounded delete convergence poisoned fleet health: %#v", snapshot)
+	}
+
+	lease.UpdatedAt = observationTime.Add(-deletingVisibilityGrace - time.Second)
+	journal.Leases["runner-one"] = lease
+	snapshot = collector.Collect(context.Background())
+	if snapshot.Healthy || snapshot.Incus.MissingInstances != 1 || snapshot.Incus.MissingDeletingWithinGrace != 0 {
+		t.Fatalf("persistent missing delete escaped health blocker: %#v", snapshot)
+	}
+}
+
 func TestCollectorObservesMissingImageMaintenanceWithoutFailingFleetHealth(t *testing.T) {
 	collector := healthyCollector(t)
 	journal, err := collector.Journal(context.Background())
