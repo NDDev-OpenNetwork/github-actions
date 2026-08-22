@@ -896,6 +896,33 @@ func TestQueueAdmissionConfigRefusesAnUnboundedWidth(t *testing.T) {
 	}
 }
 
+func TestLegacyAssignedMigrationDoesNotRefreshCurrentAssignedTTL(t *testing.T) {
+	now := time.Date(2026, 8, 22, 2, 35, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
+		ExecutionTTLSeconds: 86400,
+	}
+	currentExpiry := now.Add(540 * time.Second)
+	journal := queueIntentJournal{Intents: map[string]queueIntent{
+		"current": {
+			Key: "current", State: queueStateAssigned, RunnerRequestID: 0,
+			ExpiresAt: currentExpiry,
+		},
+		"legacy": {
+			Key: "legacy", State: queueStateAssigned, RunnerRequestID: 0,
+			ExpiresAt: now.Add(23 * time.Hour),
+		},
+	}}
+	migrateLegacyQueueIntentOwnership(&journal, config, now)
+	if current := journal.Intents["current"]; current.State != queueStateAssigned || !current.ExpiresAt.Equal(currentExpiry) {
+		t.Fatalf("current assigned intent was refreshed or downgraded: %#v", current)
+	}
+	legacy := journal.Intents["legacy"]
+	if legacy.State != queueStateQueued || !legacy.ExpiresAt.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("legacy execution-horizon intent was not migrated once: %#v", legacy)
+	}
+}
+
 func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	now := time.Date(2026, 8, 20, 23, 0, 0, 0, time.UTC)
 	config := queueAdmissionConfig{

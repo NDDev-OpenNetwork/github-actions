@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.58
+derivative_version: v0.2.1-nddev.59
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -81,11 +81,11 @@ patches:
     purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: c8fb6fb9898a972dd8fab1fa8135d512425d68ef748e4b059406afaf698a0633
-    purpose: Fsync-backed central queue admission where sparse JobAssigned owns a short provisional token, JobAvailable binds complete identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
+    sha256: c136079950ded528343d967c57467a41b3fd8798257501b232929ad223b40397
+    purpose: Fsync-backed central queue admission where sparse JobAssigned owns a bounded provisional token without refreshing its TTL on unrelated queue transactions, JobAvailable binds complete identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: c5f334a6bd10fdf384f44cf2a198f4c6d4c596960ca439f4784b25ec195033bc
-    purpose: Deterministic provisional bootstrap, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
+    sha256: 76a1ef7a1f84fab7f89060a0f7b145c2191a0dc40cead65a1eeb5f375f58d1fd
+    purpose: Deterministic provisional bootstrap, one-time legacy horizon migration, non-refreshing assigned expiry, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
     purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, one domain retry lease after proven saturation, five-minute fallback with immediate deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 12ae7db38c4573e89605a43f94f1df1e671b4aa78c19014512bc10f342764949
+  binary_sha256: c58baf134dca94f6fedbdd8320c9fd3b43117c03d14cc5f96a0fde44ac92f1b1
 runtime_contract:
   queue_intent_schema_version: 3
   event_driven_scale_set_wake: true
