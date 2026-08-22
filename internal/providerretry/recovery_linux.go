@@ -85,12 +85,16 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 			class = "unknown"
 		}
 		result.ByErrorClass[class]++
-		deferred := retry.NextAllowedAt.After(now) || retry.TerminalUntil.After(now)
+		// A concrete create writes a short-lived duplicate-suppression guard
+		// before provider execution. It has no error class and may remain while
+		// the successful create is being consolidated; it is not a retry failure.
+		deferred := strings.TrimSpace(retry.LastErrorClass) != "" &&
+			(retry.NextAllowedAt.After(now) || retry.TerminalUntil.After(now))
 		if deferred {
 			result.DeferredRecords++
 			result.DeferredByErrorClass[class]++
 		}
-		if retry.NextAllowedAt.After(now) {
+		if deferred && retry.NextAllowedAt.After(now) {
 			delay := int64(retry.NextAllowedAt.Sub(now) / time.Second)
 			if result.NextRetryDelaySeconds == 0 || delay < result.NextRetryDelaySeconds {
 				result.NextRetryDelaySeconds = delay

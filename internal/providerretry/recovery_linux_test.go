@@ -113,6 +113,10 @@ func TestInspectCountsOnlyTerminalFailureDomains(t *testing.T) {
 			JobID: "scale-set:entity-one:4", Attempts: 2, LastErrorClass: "capacity",
 			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(30 * time.Second),
 		},
+		"scale-set:entity-one:4:instance:create-in-progress": {
+			JobID: "scale-set:entity-one:4:instance:create-in-progress", Attempts: 1,
+			UpdatedAt: now, NextAllowedAt: now.Add(2 * time.Minute),
+		},
 	}}
 	content, _ := json.Marshal(state)
 	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
@@ -122,10 +126,10 @@ func TestInspectCountsOnlyTerminalFailureDomains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Generation != 42 || snapshot.Records != 3 || snapshot.TerminalCircuits != 1 ||
+	if snapshot.Generation != 42 || snapshot.Records != 4 || snapshot.TerminalCircuits != 1 ||
 		snapshot.DeferredRecords != 2 || snapshot.DeferredByErrorClass["provider"] != 1 || snapshot.DeferredByErrorClass["capacity"] != 1 ||
 		snapshot.OldestTerminalAgeSeconds != 600 || snapshot.NextRetryDelaySeconds != 30 ||
-		snapshot.ByErrorClass["provider"] != 2 || snapshot.ByErrorClass["capacity"] != 1 {
+		snapshot.ByErrorClass["provider"] != 2 || snapshot.ByErrorClass["capacity"] != 1 || snapshot.ByErrorClass["unknown"] != 1 {
 		t.Fatalf("unexpected retry snapshot: %#v", snapshot)
 	}
 }
