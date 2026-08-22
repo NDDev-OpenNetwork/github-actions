@@ -629,6 +629,7 @@ func TestQueueCoordinatorTracksAStartedJobWithNoIntent(t *testing.T) {
 
 	orphan := testQueueJob(999, "owner", "gone", now.Add(-time.Hour))
 	orphan.MessageType = params.MessageTypeJobStarted
+	orphan.RunnerID = 2999
 	if _, err := coordinator.ObserveLifecycle(
 		scaleSet, testQueueEntityForJob(orphan), nil, []params.ScaleSetJobMessage{orphan}, nil,
 	); err != nil {
@@ -639,7 +640,8 @@ func TestQueueCoordinatorTracksAStartedJobWithNoIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent, exists := journal.Intents[queueIntentKey(11, orphan.JobID)]
-	if !exists || intent.State != queueStateRunning || intent.RunnerName != orphan.RunnerName {
+	if !exists || intent.State != queueStateRunning || intent.RunnerName != orphan.RunnerName ||
+		intent.WorkflowRunID != orphan.WorkflowRunID || intent.JobDisplayName != orphan.JobDisplayName || intent.GitHubRunnerID != orphan.RunnerID {
 		t.Fatalf("authoritative started job was not tracked: %#v", intent)
 	}
 }
@@ -729,6 +731,7 @@ func TestQueueCoordinatorRehydratesAStartedIntentFromSameBatch(t *testing.T) {
 	assigned.RepositoryName = ""
 	started := assigned
 	started.MessageType = params.MessageTypeJobStarted
+	started.RunnerID = 2999
 
 	for range 2 {
 		if _, err := coordinator.ObserveLifecycle(
@@ -743,7 +746,8 @@ func TestQueueCoordinatorRehydratesAStartedIntentFromSameBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent, exists := journal.Intents[queueIntentKey(11, job.JobID)]
-	if !exists || intent.State != queueStateRunning || intent.RunnerName != started.RunnerName {
+	if !exists || intent.State != queueStateRunning || intent.RunnerName != started.RunnerName ||
+		intent.WorkflowRunID != started.WorkflowRunID || intent.JobDisplayName != started.JobDisplayName || intent.GitHubRunnerID != started.RunnerID {
 		t.Fatalf("authoritative started event was not retained: %#v", intent)
 	}
 }
@@ -1248,6 +1252,7 @@ func TestQueueCoordinatorAdmitsLiveAssignedUUIDWithoutRunnerRequestID(t *testing
 	}
 	intent = journal.Intents[key]
 	if intent.RunnerRequestID != available.RunnerRequestID || intent.WorkflowRef != available.JobWorkflowRef ||
+		intent.WorkflowRunID != available.WorkflowRunID || intent.JobDisplayName != available.JobDisplayName ||
 		intent.EventName != available.EventName || !intent.QueueTime.Equal(available.QueueTime) {
 		t.Fatalf("available job did not enrich assigned intent: %#v", intent)
 	}
@@ -1342,6 +1347,8 @@ func testQueueJob(id int64, owner, repository string, queuedAt time.Time) params
 		MessageType:     params.MessageTypeJobAvailable,
 		JobID:           fmt.Sprintf("00000000-0000-4000-8000-%012d", id),
 		RunnerRequestID: id,
+		WorkflowRunID:   1000 + id,
+		JobDisplayName:  fmt.Sprintf("job-%d", id),
 		RunnerName:      fmt.Sprintf("runner-%d", id),
 		RepositoryName:  repository,
 		OwnerName:       owner,

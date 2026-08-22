@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.61
+derivative_version: v0.2.1-nddev.62
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -81,10 +81,10 @@ patches:
     purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 65bef736c97705575525286b15b5392bcaaae918c7bf7d315dc2c73beccd1c86
+    sha256: ffd5a41411c7867a96997d1d808867c5726de6839aa0488f45a9eb72deddde0c
     purpose: Fsync-backed central queue admission where disabled scale sets cannot record or acquire work, sparse JobAssigned owns a bounded provisional token without refreshing its TTL on unrelated queue transactions, JobAvailable binds complete identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 353726e97b54ff7dcef1fe384c177b1e020be7d0fda262148054fa593397df93
+    sha256: 71eeda775dc06064e4c2991c83c3de8e38c3f1abbff89f0584932f1153b79c36
     purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, one-time legacy horizon migration, non-refreshing assigned expiry, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
@@ -106,9 +106,9 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 15b49cf6bf01f4b2375aa7eae1a7674931ee7461b44da2c5f449ca70f8f775c2
+  binary_sha256: ca4047341bfe1a83e92bad9878da7d363af23018b1953d6e8950ccb83bf97933
 runtime_contract:
-  queue_intent_schema_version: 5
+  queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
   startup_states_protected_from_scale_down: true
@@ -118,10 +118,10 @@ runtime_contract:
   job_available_identity_binding_before_acquire: true
   startup_queue_promotion: true
   deferred_available_message_retained: true
-  global_max_in_flight: 16
+  global_max_in_flight: 32
   maximum_background_in_flight: 2
   weighted_repository_fairness: true
-  per_repository_limit: 12
+  per_repository_limit: 32
   maximum_repository_share_percent_when_contended: 75
   uncontended_repository_may_use_full_capacity: true
   priority_aging_seconds: 300
@@ -140,6 +140,8 @@ runtime_contract:
   authoritative_idle_offline_runner_reaping: true
   authoritative_access_refusal_backoff_seconds: 900
   job_started_runner_identity: true
+  job_available_correlation_binding: true
+  job_started_numeric_runner_identity: true
   immutable_same_phase_entry_time: true
   weighted_cpu_memory_admission: true
   priority_zero_capacity_reservation: true

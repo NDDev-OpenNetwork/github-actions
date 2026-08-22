@@ -142,6 +142,10 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_queue_oldest_age_seconds", "Age of the oldest active GitHub queue intent.", float64(snapshot.Queue.OldestQueueAgeSeconds))
 	gauge(&output, "gha_fleet_queue_uncovered_running", "Running queue intents without a durable created or warm-claimed execution lease.", float64(snapshot.Queue.UncoveredRunning))
 	gauge(&output, "gha_fleet_queue_running_without_runner_identity", "Running queue intents written before or without an exact JobStarted runner identity.", float64(snapshot.Queue.RunningWithoutRunnerIdentity))
+	gauge(&output, "gha_fleet_queue_unbound_repository", "Active intents still scoped only to their forge account before JobAvailable binding.", float64(snapshot.Queue.UnboundRepository))
+	gauge(&output, "gha_fleet_queue_missing_runner_request_id", "Active intents awaiting their numeric runner request identity.", float64(snapshot.Queue.MissingRunnerRequestID))
+	gauge(&output, "gha_fleet_queue_missing_workflow_run_id", "Active intents awaiting their GitHub workflow run identity.", float64(snapshot.Queue.MissingWorkflowRunID))
+	gauge(&output, "gha_fleet_queue_running_missing_github_runner_id", "Running intents without GitHub's numeric runner identity.", float64(snapshot.Queue.RunningMissingGitHubRunnerID))
 	labeledGaugeHeader(&output, "gha_fleet_queue_intents_by_state", "Active central queue intents by bounded state.")
 	for _, state := range []queueintent.State{
 		queueintent.StateQueued,

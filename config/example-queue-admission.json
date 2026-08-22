@@ -1,8 +1,8 @@
 {
   "schema_version": 5,
-  "max_in_flight": 16,
+  "max_in_flight": 32,
   "max_background_in_flight": 2,
-  "default_repository_limit": 16,
+  "default_repository_limit": 32,
   "default_weight": 1,
   "queued_ttl_seconds": 600,
   "acquiring_ttl_seconds": 120,

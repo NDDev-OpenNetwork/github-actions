@@ -53,7 +53,7 @@ func TestPresentButUnusableJournalStillFails(t *testing.T) {
 	}{
 		{name: "group readable", contents: `{"schema_version":1,"intents":{},"repositories":{}}`, mode: 0o640, wantError: "private regular file"},
 		{name: "malformed", contents: `{`, mode: 0o600, wantError: "decode queue-intent journal"},
-		{name: "wrong schema", contents: `{"schema_version":4,"intents":{},"repositories":{}}`, mode: 0o600, wantError: "schema_version"},
+		{name: "wrong schema", contents: `{"schema_version":5,"intents":{},"repositories":{}}`, mode: 0o600, wantError: "schema_version"},
 		{name: "null maps", contents: `{"schema_version":1,"intents":null,"repositories":null}`, mode: 0o600, wantError: "must not be null"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
