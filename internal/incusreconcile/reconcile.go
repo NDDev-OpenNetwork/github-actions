@@ -79,6 +79,11 @@ type profileState struct {
 	Devices     map[string]map[string]string `json:"devices"`
 }
 
+type instanceState struct {
+	Name     string   `json:"name"`
+	Profiles []string `json:"profiles"`
+}
+
 var requiredExtensions = []string{
 	"instance_nic_bridged_port_isolation",
 	"instances_scriptlet_get_instances_count",
@@ -198,7 +203,12 @@ func (r Reconciler) Apply(ctx context.Context, plan incusplan.Plan) (Result, err
 	if err != nil {
 		return Result{}, fmt.Errorf("list Incus profiles: %w", err)
 	}
-	if err := r.ensureProfiles(ctx, plan.Project.Name, plan.Profiles, profiles, &result); err != nil {
+	instancesPath := "/1.0/instances?project=" + url.QueryEscape(plan.Project.Name) + "&recursion=1"
+	instances, err := get[[]instanceState](ctx, r.Runner, instancesPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("list Incus instances before profile reconciliation: %w", err)
+	}
+	if err := r.ensureProfiles(ctx, plan.Project.Name, plan.Profiles, profiles, instances, &result); err != nil {
 		return Result{}, err
 	}
 
@@ -398,7 +408,7 @@ func (r Reconciler) ensureProject(ctx context.Context, desired incusplan.Project
 	return nil
 }
 
-func (r Reconciler) ensureProfiles(ctx context.Context, project string, desired []incusplan.Profile, current []profileState, result *Result) error {
+func (r Reconciler) ensureProfiles(ctx context.Context, project string, desired []incusplan.Profile, current []profileState, instances []instanceState, result *Result) error {
 	byName := make(map[string]profileState, len(current))
 	for _, profile := range current {
 		byName[profile.Name] = profile
@@ -417,6 +427,9 @@ func (r Reconciler) ensureProfiles(ctx context.Context, project string, desired 
 			if currentProfile.Description == profile.Description && reflect.DeepEqual(currentProfile.Config, profile.Config) && reflect.DeepEqual(currentProfile.Devices, profile.Devices) {
 				continue
 			}
+			if instance := firstInstanceUsingProfile(instances, profile.Name); instance != "" {
+				return fmt.Errorf("managed profile %q is used by instance %q; refusing live update until the profile drains", profile.Name, instance)
+			}
 			path := "/1.0/profiles/" + url.PathEscape(profile.Name) + "?project=" + url.QueryEscape(project)
 			if err := put(ctx, r.Runner, path, payload); err != nil {
 				return fmt.Errorf("update profile %q: %w", profile.Name, err)
@@ -432,6 +445,15 @@ func (r Reconciler) ensureProfiles(ctx context.Context, project string, desired 
 		result.Changes = append(result.Changes, Change{"profile", profile.Name, "create"})
 	}
 	return nil
+}
+
+func firstInstanceUsingProfile(instances []instanceState, profile string) string {
+	for _, instance := range instances {
+		if slices.Contains(instance.Profiles, profile) {
+			return instance.Name
+		}
+	}
+	return ""
 }
 
 func hasProfile(profiles []incusplan.Profile, name string) bool {
