@@ -20,6 +20,9 @@ Versioning.
   runner tree instead of copying and recursively chowning it while a second
   `Runner.Listener warmup` process starts in parallel. Standard and integration
   container aliases advance to b10 and b4; b9 and b3 remain rollback targets.
+- Cut provider derivative `v0.1.5-nddev.60` from the exact cold-bootstrap
+  source commit so the no-copy runner verification cannot deploy under the
+  previous `.59` identity.
 - Expanded every worker image compatibility contract with pinned pnpm and Yarn
   distributions, conventional Python/pip entry points, and default Go/gofmt
   links. Standard and integration variants now share Python, Java, Maven,
