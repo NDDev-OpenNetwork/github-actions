@@ -12,6 +12,8 @@ Versioning.
   links. Standard and integration variants now share Python, Java, Maven,
   CMake and Ninja prerequisites, and image smoke tests execute each command so
   missing package-manager support fails at build time instead of in project CI.
+  Every changed recipe advances its immutable image alias; existing `b11`,
+  `b10`, `b7` and `b2` artifacts remain untouched rollback targets.
 - Made the cluster-wide Incus placement scriptlet typed public desired state.
   Eligible workers now use hard-memory best-fit packing after pressure and disk
   admission, preserving contiguous capacity for larger jobs instead of
