@@ -95,6 +95,8 @@ var runtimeContractFields = []string{
 	"maximum_background_in_flight",
 	"weighted_repository_fairness",
 	"per_repository_limit",
+	"maximum_repository_share_percent_when_contended",
+	"uncontended_repository_may_use_full_capacity",
 	"priority_aging_seconds",
 	"failed_scale_set_registration_cleanup",
 	"direct_jit_provider_handoff",

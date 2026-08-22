@@ -211,8 +211,8 @@ func (n *nddevAdmission) Admit(
 			ControllerID:     n.controllerID,
 			PoolID:           bootstrap.PoolID,
 			PoolName:         bootstrap.Flavor,
-			VCPU:             pool.Resources.VCPU,
-			MemoryMiB:        pool.Resources.MemoryMiB,
+			VCPU:             pool.EffectiveReservation().CPUUnits,
+			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
 			ImageFingerprint: imagePolicy.Fingerprint,
 		},
 		QueueIntentAuthorized: true,
@@ -254,8 +254,8 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 			ControllerID:     n.controllerID,
 			PoolID:           warmPoolIDPrefix + flavor,
 			PoolName:         flavor,
-			VCPU:             pool.Resources.VCPU,
-			MemoryMiB:        pool.Resources.MemoryMiB,
+			VCPU:             pool.EffectiveReservation().CPUUnits,
+			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
 			ImageFingerprint: imagePolicy.Fingerprint,
 		},
 	})
@@ -301,7 +301,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 				allocations = append(allocations, provideradmission.Allocation{
 					InstanceName: instance.Name, ControllerID: n.controllerID,
 					PoolID: "image-maintenance/" + maintenancePool.Name, PoolName: maintenancePool.Name,
-					VCPU: maintenancePool.Resources.VCPU, MemoryMiB: maintenancePool.Resources.MemoryMiB,
+					VCPU: maintenancePool.EffectiveReservation().CPUUnits, MemoryMiB: maintenancePool.EffectiveReservation().MemoryMiB,
 					ImageFingerprint: imagePolicy.Fingerprint, State: providerjournal.StateCreated,
 				})
 				continue
@@ -428,8 +428,8 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			ControllerID:     instance.ExpandedConfig[controllerIDKeyName],
 			PoolID:           instance.ExpandedConfig[poolIDKey],
 			PoolName:         flavor,
-			VCPU:             pool.Resources.VCPU,
-			MemoryMiB:        pool.Resources.MemoryMiB,
+			VCPU:             pool.EffectiveReservation().CPUUnits,
+			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
 			ImageFingerprint: instance.ExpandedConfig[imageFingerprintKey],
 			State:            state,
 			JobName:          instance.ExpandedConfig[garmJobNameKey],

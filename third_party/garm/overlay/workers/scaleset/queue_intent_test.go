@@ -895,7 +895,7 @@ func TestQueueCoordinatorStillCapsOneRepositoryBelowItsWidth(t *testing.T) {
 // never keep, so it is refused at load rather than silently clamped.
 func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 4, MaxInFlight: 2, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: queueAdmissionSchemaVersion, MaxInFlight: 2, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1, MaxRepositorySharePercent: 75,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: 2, MemoryMiB: 2048}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -914,7 +914,7 @@ func TestQueueAdmissionConfigRefusesARepositoryWiderThanTheQueue(t *testing.T) {
 // than every host together can hold.
 func TestQueueAdmissionConfigRefusesAnUnboundedWidth(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 4, MaxInFlight: queueMaxInFlightCeiling + 1, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1,
+		SchemaVersion: queueAdmissionSchemaVersion, MaxInFlight: queueMaxInFlightCeiling + 1, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 1, DefaultWeight: 1, MaxRepositorySharePercent: 75,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
 		Capacity: queueResourceBudget{CPUUnits: queueMaxInFlightCeiling, MemoryMiB: queueMaxInFlightCeiling * 1024}, ScaleSets: testQueueScaleSetResourceMap(),
@@ -957,9 +957,9 @@ func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	config := queueAdmissionConfig{
 		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
-			"nddev-linux-standard":    {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
-			"nddev-linux-integration": {CPUUnits: 4, MemoryMiB: 4096, Priority: 1},
-			"nddev-linux-fast":        {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
+			"nddev-linux-standard":    {CPUUnits: 2, MemoryMiB: 2048, ReservationCPUUnits: 2, ReservationMemoryMiB: 2048, Priority: 1},
+			"nddev-linux-integration": {CPUUnits: 4, MemoryMiB: 4096, ReservationCPUUnits: 4, ReservationMemoryMiB: 4096, Priority: 1},
+			"nddev-linux-fast":        {CPUUnits: 2, MemoryMiB: 2048, ReservationCPUUnits: 2, ReservationMemoryMiB: 2048, Priority: 1},
 		},
 		PriorityAgingSeconds: 300,
 	}
@@ -978,12 +978,64 @@ func TestResourceAdmissionBackfillsUntilPriorityReservation(t *testing.T) {
 	}
 }
 
+func TestCompetingRepositoryRetainsTwentyFivePercentOfQueueSlots(t *testing.T) {
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		MaxInFlight: 16, DefaultRepositoryLimit: 16, DefaultWeight: 1,
+		MaxBackgroundInFlight: 2, MaxRepositorySharePercent: 75,
+		PriorityAgingSeconds: 300,
+		Capacity:             queueResourceBudget{CPUUnits: 40, MemoryMiB: 57344},
+		ScaleSets:            testQueueScaleSetResourceMap(), Repositories: map[string]queueRepositoryPolicy{},
+	}
+	journal := queueIntentJournal{Repositories: map[string]queueRepositoryState{}, Intents: map[string]queueIntent{}}
+	for index := range 12 {
+		key := fmt.Sprintf("priority-%d", index)
+		journal.Intents[key] = queueIntent{State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "nddev-linux-standard"}
+	}
+	journal.Intents["more-priority"] = queueIntent{Key: "more-priority", State: queueStateQueued, Repository: "owner/priority", ScaleSetName: "nddev-linux-standard", QueueTime: now, Priority: 0}
+	journal.Intents["ordinary"] = queueIntent{Key: "ordinary", State: queueStateQueued, Repository: "owner/ordinary", ScaleSetName: "nddev-linux-standard", QueueTime: now.Add(time.Second), Priority: 1}
+	_, inFlight := queueInFlight(&journal)
+	candidates := eligibleQueueCandidates(&journal, config, inFlight, now)
+	if len(candidates) != 1 || candidates[0].Key != "ordinary" {
+		t.Fatalf("competing queue candidates = %#v, want only ordinary", candidates)
+	}
+	delete(journal.Intents, "ordinary")
+	_, inFlight = queueInFlight(&journal)
+	candidates = eligibleQueueCandidates(&journal, config, inFlight, now)
+	if len(candidates) != 1 || candidates[0].Key != "more-priority" {
+		t.Fatalf("uncontended repository could not use free fleet slots: %#v", candidates)
+	}
+}
+
+func TestCompetingRepositoryRetainsTwentyFivePercentOfResourceBudget(t *testing.T) {
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		MaxInFlight: 16, DefaultRepositoryLimit: 16, DefaultWeight: 1,
+		MaxRepositorySharePercent: 75, PriorityAgingSeconds: 300,
+		Capacity: queueResourceBudget{CPUUnits: 40, MemoryMiB: 4096},
+		ScaleSets: map[string]queueScaleSetResources{
+			"measured": {CPUUnits: 4, MemoryMiB: 4096, ReservationCPUUnits: 1, ReservationMemoryMiB: 1024, Priority: 0},
+		},
+	}
+	journal := queueIntentJournal{Intents: map[string]queueIntent{
+		"one":      {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
+		"two":      {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
+		"three":    {State: queueStateRunning, Repository: "owner/priority", ScaleSetName: "measured"},
+		"priority": {Key: "priority", State: queueStateQueued, Repository: "owner/priority", ScaleSetName: "measured", QueueTime: now, Priority: 0},
+		"ordinary": {Key: "ordinary", State: queueStateQueued, Repository: "owner/ordinary", ScaleSetName: "measured", QueueTime: now.Add(time.Second), Priority: 1},
+	}}
+	selected, exists := resourceFitCandidate(&journal, config, []queueIntent{journal.Intents["priority"], journal.Intents["ordinary"]}, now)
+	if !exists || selected.Key != "ordinary" {
+		t.Fatalf("resource-share admission selected %#v exists=%t, want ordinary", selected, exists)
+	}
+}
+
 func TestQueueCoordinatorBoundsBackgroundWithoutBlockingProduction(t *testing.T) {
 	now := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
 	config := queueAdmissionConfig{
 		MaxInFlight: 4, MaxBackgroundInFlight: 1, DefaultRepositoryLimit: 4, DefaultWeight: 1,
-		PriorityAgingSeconds: 300,
-		Capacity:             queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
+		PriorityAgingSeconds: 300, MaxRepositorySharePercent: 75,
+		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
 			"background": {CPUUnits: 1, MemoryMiB: 1024, Priority: 2},
 			"ordinary":   {CPUUnits: 1, MemoryMiB: 1024, Priority: 1},
@@ -1012,7 +1064,7 @@ func TestQueueCoordinatorBoundsBackgroundWithoutBlockingProduction(t *testing.T)
 
 func TestQueueAdmissionConfigRejectsInvalidBackgroundEnvelope(t *testing.T) {
 	config := queueAdmissionConfig{
-		SchemaVersion: 4, MaxInFlight: 4, MaxBackgroundInFlight: 0,
+		SchemaVersion: queueAdmissionSchemaVersion, MaxInFlight: 4, MaxBackgroundInFlight: 0, MaxRepositorySharePercent: 75,
 		DefaultRepositoryLimit: 4, DefaultWeight: 1,
 		QueuedTTLSeconds: 600, AcquiringTTLSeconds: 120, AcquiredTTLSeconds: 600,
 		ExecutionTTLSeconds: 86400, PriorityAgingSeconds: 300,
@@ -1033,7 +1085,7 @@ func TestValidateQueueBudgetRejectsWeightedReservationOvercommit(t *testing.T) {
 		MaxInFlight: 4, DefaultRepositoryLimit: 4, DefaultWeight: 1,
 		Capacity: queueResourceBudget{CPUUnits: 4, MemoryMiB: 4096},
 		ScaleSets: map[string]queueScaleSetResources{
-			"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048, Priority: 1},
+			"nddev-linux-standard": {CPUUnits: 2, MemoryMiB: 2048, ReservationCPUUnits: 2, ReservationMemoryMiB: 2048, Priority: 1},
 		},
 		Repositories: map[string]queueRepositoryPolicy{},
 	}
@@ -1228,19 +1280,20 @@ func testQueueCoordinatorOfWidth(t *testing.T, now *time.Time, repositories map[
 		repositories = map[string]queueRepositoryPolicy{}
 	}
 	config := queueAdmissionConfig{
-		SchemaVersion:          4,
-		MaxInFlight:            maxInFlight,
-		MaxBackgroundInFlight:  maxInFlight,
-		DefaultRepositoryLimit: defaultRepositoryLimit,
-		DefaultWeight:          1,
-		QueuedTTLSeconds:       600,
-		AcquiringTTLSeconds:    120,
-		AcquiredTTLSeconds:     600,
-		ExecutionTTLSeconds:    86400,
-		PriorityAgingSeconds:   300,
-		Capacity:               queueResourceBudget{CPUUnits: maxInFlight, MemoryMiB: maxInFlight * 1024},
-		ScaleSets:              testQueueScaleSetResourceMap(),
-		Repositories:           repositories,
+		SchemaVersion:             queueAdmissionSchemaVersion,
+		MaxInFlight:               maxInFlight,
+		MaxBackgroundInFlight:     maxInFlight,
+		DefaultRepositoryLimit:    defaultRepositoryLimit,
+		DefaultWeight:             1,
+		QueuedTTLSeconds:          600,
+		AcquiringTTLSeconds:       120,
+		AcquiredTTLSeconds:        600,
+		ExecutionTTLSeconds:       86400,
+		PriorityAgingSeconds:      300,
+		MaxRepositorySharePercent: 75,
+		Capacity:                  queueResourceBudget{CPUUnits: maxInFlight, MemoryMiB: maxInFlight * 1024},
+		ScaleSets:                 testQueueScaleSetResourceMap(),
+		Repositories:              repositories,
 	}
 	data, err := json.Marshal(config)
 	if err != nil {

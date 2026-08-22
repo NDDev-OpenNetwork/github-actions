@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	queueAdmissionSchemaVersion      = 4
+	queueAdmissionSchemaVersion      = 5
 	queueIntentLegacySchemaVersion   = 1
 	queueIntentPreviousSchemaVersion = 2
 	queueIntentSchemaVersion         = 3
@@ -54,9 +54,22 @@ type queueResourceBudget struct {
 }
 
 type queueScaleSetResources struct {
-	CPUUnits  int `json:"cpu_units"`
-	MemoryMiB int `json:"memory_mib"`
-	Priority  int `json:"priority"`
+	CPUUnits             int `json:"cpu_units"`
+	MemoryMiB            int `json:"memory_mib"`
+	ReservationCPUUnits  int `json:"reservation_cpu_units"`
+	ReservationMemoryMiB int `json:"reservation_memory_mib"`
+	Priority             int `json:"priority"`
+}
+
+func (r queueScaleSetResources) reservation() queueResourceBudget {
+	if r.ReservationCPUUnits > 0 && r.ReservationMemoryMiB > 0 {
+		return queueResourceBudget{CPUUnits: r.ReservationCPUUnits, MemoryMiB: r.ReservationMemoryMiB}
+	}
+	memory := map[int]int{2048: 512, 3072: 512, 4096: 2560, 6144: 2048}[r.MemoryMiB]
+	if memory == 0 {
+		return queueResourceBudget{CPUUnits: r.CPUUnits, MemoryMiB: r.MemoryMiB}
+	}
+	return queueResourceBudget{CPUUnits: 1, MemoryMiB: memory}
 }
 
 // queueMaxInFlightCeiling bounds how wide this queue may be configured. The
@@ -68,19 +81,20 @@ type queueScaleSetResources struct {
 const queueMaxInFlightCeiling = 64
 
 type queueAdmissionConfig struct {
-	SchemaVersion          int                               `json:"schema_version"`
-	MaxInFlight            int                               `json:"max_in_flight"`
-	MaxBackgroundInFlight  int                               `json:"max_background_in_flight"`
-	DefaultRepositoryLimit int                               `json:"default_repository_limit"`
-	DefaultWeight          uint64                            `json:"default_weight"`
-	QueuedTTLSeconds       int                               `json:"queued_ttl_seconds"`
-	AcquiringTTLSeconds    int                               `json:"acquiring_ttl_seconds"`
-	AcquiredTTLSeconds     int                               `json:"acquired_ttl_seconds"`
-	ExecutionTTLSeconds    int                               `json:"execution_ttl_seconds"`
-	PriorityAgingSeconds   int                               `json:"priority_aging_seconds"`
-	Capacity               queueResourceBudget               `json:"capacity"`
-	ScaleSets              map[string]queueScaleSetResources `json:"scale_sets"`
-	Repositories           map[string]queueRepositoryPolicy  `json:"repositories"`
+	SchemaVersion             int                               `json:"schema_version"`
+	MaxInFlight               int                               `json:"max_in_flight"`
+	MaxBackgroundInFlight     int                               `json:"max_background_in_flight"`
+	DefaultRepositoryLimit    int                               `json:"default_repository_limit"`
+	DefaultWeight             uint64                            `json:"default_weight"`
+	QueuedTTLSeconds          int                               `json:"queued_ttl_seconds"`
+	AcquiringTTLSeconds       int                               `json:"acquiring_ttl_seconds"`
+	AcquiredTTLSeconds        int                               `json:"acquired_ttl_seconds"`
+	ExecutionTTLSeconds       int                               `json:"execution_ttl_seconds"`
+	PriorityAgingSeconds      int                               `json:"priority_aging_seconds"`
+	MaxRepositorySharePercent int                               `json:"max_repository_share_percent"`
+	Capacity                  queueResourceBudget               `json:"capacity"`
+	ScaleSets                 map[string]queueScaleSetResources `json:"scale_sets"`
+	Repositories              map[string]queueRepositoryPolicy  `json:"repositories"`
 }
 
 type queueIntent struct {
@@ -886,7 +900,8 @@ func (c queueAdmissionConfig) Validate() error {
 		return fmt.Errorf("queue admission default repository limit %d is outside 1..%d", c.DefaultRepositoryLimit, c.MaxInFlight)
 	}
 	if c.QueuedTTLSeconds != 600 || c.AcquiringTTLSeconds != 120 || c.AcquiredTTLSeconds != 600 ||
-		c.ExecutionTTLSeconds != 86400 || c.PriorityAgingSeconds != 300 {
+		c.ExecutionTTLSeconds != 86400 || c.PriorityAgingSeconds != 300 ||
+		c.MaxRepositorySharePercent != 75 {
 		return fmt.Errorf("queue admission pilot TTL/aging policy is invalid")
 	}
 	if c.Capacity.CPUUnits < 1 || c.Capacity.CPUUnits > 1024 ||
@@ -897,8 +912,12 @@ func (c queueAdmissionConfig) Validate() error {
 		return fmt.Errorf("queue admission scale-set resources must not be empty")
 	}
 	for name, resources := range c.ScaleSets {
+		reservation := resources.reservation()
 		if !validQueueText(name) || resources.CPUUnits < 1 || resources.CPUUnits > c.Capacity.CPUUnits ||
 			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB ||
+			reservation.CPUUnits < 1 || reservation.CPUUnits > resources.CPUUnits ||
+			reservation.MemoryMiB < 256 || reservation.MemoryMiB%256 != 0 ||
+			reservation.MemoryMiB > resources.MemoryMiB ||
 			resources.Priority < 0 || resources.Priority > 2 {
 			return fmt.Errorf("queue admission scale-set resources %q are invalid", name)
 		}
@@ -1046,8 +1065,12 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 	candidates := make([]queueIntent, 0)
 	backgroundInFlight := queueBackgroundInFlight(journal)
 	for _, intent := range journal.Intents {
+		limit := repositoryPolicy(config, intent.Repository).MaxInFlight
+		if queueHasCompetingRepository(journal, intent.Repository) {
+			limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
+		}
 		if intent.State != queueStateQueued ||
-			inFlight[intent.Repository] >= repositoryPolicy(config, intent.Repository).MaxInFlight ||
+			inFlight[intent.Repository] >= limit ||
 			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) {
 			continue
 		}
@@ -1070,6 +1093,19 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		return candidates[left].Key < candidates[right].Key
 	})
 	return candidates
+}
+
+func percentageCeiling(total, percent int) int {
+	return (total*percent + 99) / 100
+}
+
+func queueHasCompetingRepository(journal *queueIntentJournal, repository string) bool {
+	for _, intent := range journal.Intents {
+		if intent.State == queueStateQueued && intent.Repository != repository {
+			return true
+		}
+	}
+	return false
 }
 
 // queueBackgroundInFlight counts the immutable admission class, not its aged
@@ -1112,24 +1148,30 @@ type queueResourceUsage struct {
 	MemoryMiB int
 }
 
-func queueResourcesInFlight(journal *queueIntentJournal, config queueAdmissionConfig) (queueResourceUsage, bool) {
+func queueResourcesInFlight(journal *queueIntentJournal, config queueAdmissionConfig) (queueResourceUsage, map[string]queueResourceUsage, bool) {
 	usage := queueResourceUsage{}
+	byRepository := make(map[string]queueResourceUsage)
 	for _, intent := range journal.Intents {
 		if intent.State == queueStateQueued {
 			continue
 		}
 		resources, exists := config.ScaleSets[intent.ScaleSetName]
 		if !exists {
-			return queueResourceUsage{}, false
+			return queueResourceUsage{}, nil, false
 		}
-		usage.CPUUnits += resources.CPUUnits
-		usage.MemoryMiB += resources.MemoryMiB
+		reservation := resources.reservation()
+		usage.CPUUnits += reservation.CPUUnits
+		usage.MemoryMiB += reservation.MemoryMiB
+		repository := byRepository[intent.Repository]
+		repository.CPUUnits += reservation.CPUUnits
+		repository.MemoryMiB += reservation.MemoryMiB
+		byRepository[intent.Repository] = repository
 	}
-	return usage, true
+	return usage, byRepository, true
 }
 
 func resourceFitCandidate(journal *queueIntentJournal, config queueAdmissionConfig, candidates []queueIntent, now time.Time) (queueIntent, bool) {
-	usage, valid := queueResourcesInFlight(journal, config)
+	usage, byRepository, valid := queueResourcesInFlight(journal, config)
 	if !valid {
 		return queueIntent{}, false
 	}
@@ -1138,16 +1180,28 @@ func resourceFitCandidate(journal *queueIntentJournal, config queueAdmissionConf
 		if !exists {
 			return queueIntent{}, false
 		}
-		fits := usage.CPUUnits+resources.CPUUnits <= config.Capacity.CPUUnits &&
-			usage.MemoryMiB+resources.MemoryMiB <= config.Capacity.MemoryMiB
-		if fits {
+		reservation := resources.reservation()
+		fitsGlobal := usage.CPUUnits+reservation.CPUUnits <= config.Capacity.CPUUnits &&
+			usage.MemoryMiB+reservation.MemoryMiB <= config.Capacity.MemoryMiB
+		repository := byRepository[candidate.Repository]
+		fitsRepository := true
+		if queueHasCompetingRepository(journal, candidate.Repository) {
+			// Capacity is discrete. A percentage smaller than one job must still
+			// admit that job; otherwise a one-slot fixture or a future very large
+			// class would deadlock every repository under contention.
+			cpuLimit := max(reservation.CPUUnits, percentageCeiling(config.Capacity.CPUUnits, config.MaxRepositorySharePercent))
+			memoryLimit := max(reservation.MemoryMiB, percentageCeiling(config.Capacity.MemoryMiB, config.MaxRepositorySharePercent))
+			fitsRepository = repository.CPUUnits+reservation.CPUUnits <= cpuLimit &&
+				repository.MemoryMiB+reservation.MemoryMiB <= memoryLimit
+		}
+		if fitsGlobal && fitsRepository {
 			return candidate, true
 		}
 		// Priority zero is a bounded reservation. Once an old/release candidate
 		// reaches it, backfilling smaller work stops until enough running
 		// resources complete. Before that point, smaller jobs may consume holes
 		// that the first candidate cannot use, preserving useful throughput.
-		if index == 0 && effectiveQueuePriority(candidate, config, now) == 0 {
+		if !fitsGlobal && index == 0 && effectiveQueuePriority(candidate, config, now) == 0 {
 			return queueIntent{}, false
 		}
 	}
@@ -1175,8 +1229,9 @@ func validateQueueBudget(journal *queueIntentJournal, config queueAdmissionConfi
 		if !exists {
 			return fmt.Errorf("queue journal contains a reservation without a resource contract")
 		}
-		reservedResources.CPUUnits += resources.CPUUnits
-		reservedResources.MemoryMiB += resources.MemoryMiB
+		reservation := resources.reservation()
+		reservedResources.CPUUnits += reservation.CPUUnits
+		reservedResources.MemoryMiB += reservation.MemoryMiB
 	}
 	if reserved > config.MaxInFlight {
 		return fmt.Errorf("queue journal exceeds global reservation budget: %d > %d", reserved, config.MaxInFlight)

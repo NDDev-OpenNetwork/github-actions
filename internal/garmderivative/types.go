@@ -78,6 +78,8 @@ type RuntimeContract struct {
 	MaximumBackgroundInFlight                int  `json:"maximum_background_in_flight" yaml:"maximum_background_in_flight"`
 	WeightedRepositoryFairness               bool `json:"weighted_repository_fairness" yaml:"weighted_repository_fairness"`
 	PerRepositoryLimit                       int  `json:"per_repository_limit" yaml:"per_repository_limit"`
+	MaximumRepositorySharePercentContended   int  `json:"maximum_repository_share_percent_when_contended" yaml:"maximum_repository_share_percent_when_contended"`
+	UncontendedRepositoryMayUseFullCapacity  bool `json:"uncontended_repository_may_use_full_capacity" yaml:"uncontended_repository_may_use_full_capacity"`
 	PriorityAgingSeconds                     int  `json:"priority_aging_seconds" yaml:"priority_aging_seconds"`
 	FailedScaleSetRegistrationCleanup        bool `json:"failed_scale_set_registration_cleanup" yaml:"failed_scale_set_registration_cleanup"`
 	DirectJITProviderHandoff                 bool `json:"direct_jit_provider_handoff" yaml:"direct_jit_provider_handoff"`

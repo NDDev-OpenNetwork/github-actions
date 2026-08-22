@@ -15,6 +15,12 @@ Versioning.
 
 ### Changed
 
+- Replaced worst-case queue/provider/placement reservations with p95-derived
+  measured envelopes while retaining hard Incus limits and PSI as safety
+  authorities. Queue schema v5 also caps one repository at 75 percent of slots,
+  measured CPU and measured memory only while another repository is waiting;
+  uncontended work remains able to use the full fleet. The exact artifacts are
+  GARM `v0.2.1-nddev.61` and provider `v0.1.5-nddev.62`.
 - Added observer schema v12 with a 30-second deleting-visibility convergence
   counter. A runner already absent from Incus while its lease is two seconds
   into normal teardown no longer causes a transient platform outage; the same

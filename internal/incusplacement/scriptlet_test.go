@@ -19,7 +19,8 @@ func TestRenderBestFitPlacementFromPortablePolicy(t *testing.T) {
 	for _, required := range []string{
 		`PROJECT = "gha-fleet"`, `POOL = "gha-lvm"`,
 		"MINIMUM_MEMORY_BYTES = 1024 * 1024 * 1024",
-		"MINIMUM_MEMORY_PERCENT = 10", "MAX_WORKER_MEMORY_BYTES = 6144 * 1024 * 1024",
+		"MINIMUM_MEMORY_PERCENT = 10", "MAX_WORKER_MEMORY_BYTES = 2560 * 1024 * 1024",
+		"2048: 512", "3072: 512", "4096: 2560", "6144: 2048",
 		"remaining < chosen_remaining", "pending_count > chosen_count",
 		"user.gha_pressure.state", "get_instances_count(PROJECT, name, True)",
 		"insufficient-memory: no fleet member has room for this worker",
