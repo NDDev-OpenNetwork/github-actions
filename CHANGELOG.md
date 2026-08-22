@@ -30,6 +30,10 @@ Versioning.
 
 ### Changed
 
+- Cluster admission now compares measured reservations with physical memory
+  instead of treating `free_ram + buffers` as Linux MemAvailable. Placement
+  preserves host reserves, PSI remains the live stop, and page cache no longer
+  makes an otherwise idle fleet appear full.
 - Split measured scheduling capacity from Incus aggregate hard-limit quotas.
   Queue, provider and placement continue to admit against measured reservations
   and PSI, while the project memory and disk quotas now bound the absolute
