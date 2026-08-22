@@ -62,6 +62,7 @@ type Incus struct {
 	StorageDriver             string   `json:"storage_driver" yaml:"storage_driver"`
 	StorageSizeGiB            int      `json:"storage_size_gib" yaml:"storage_size_gib"`
 	ProjectDiskLimitGiB       int      `json:"project_disk_limit_gib" yaml:"project_disk_limit_gib"`
+	ProjectHardDiskLimitGiB   int      `json:"project_hard_disk_limit_gib,omitempty" yaml:"project_hard_disk_limit_gib,omitempty"`
 	Network                   string   `json:"network" yaml:"network"`
 	NetworkCIDR               string   `json:"network_cidr" yaml:"network_cidr"`
 	EgressACL                 string   `json:"egress_acl" yaml:"egress_acl"`
@@ -71,6 +72,7 @@ type Incus struct {
 	ProjectMaxInstances       int      `json:"project_max_instances" yaml:"project_max_instances"`
 	ProjectMaxCPUUnits        int      `json:"project_max_cpu_units" yaml:"project_max_cpu_units"`
 	ProjectMaxMemoryMiB       int      `json:"project_max_memory_mib" yaml:"project_max_memory_mib"`
+	ProjectHardMemoryLimitMiB int      `json:"project_hard_memory_limit_mib,omitempty" yaml:"project_hard_memory_limit_mib,omitempty"`
 	// Cluster describes this host's membership of the fleet's Incus cluster.
 	// A cluster is what lets one queue place a worker on any host: the
 	// provider talks to one API and Incus decides which member runs the VM.
@@ -308,3 +310,23 @@ func (i Incus) FleetMaxCPUUnits() int { return i.ProjectMaxCPUUnits * i.ClusterM
 func (i Incus) FleetMaxMemoryMiB() int { return i.ProjectMaxMemoryMiB * i.ClusterMembers() }
 
 func (i Incus) FleetDiskLimitGiB() int { return i.ProjectDiskLimitGiB * i.ClusterMembers() }
+
+// FleetHardMemoryLimitMiB and FleetHardDiskLimitGiB are disaster ceilings for
+// Incus' aggregate hard-limit accounting. Scheduling continues to use
+// FleetMaxMemoryMiB and FleetDiskLimitGiB; measured placement and PSI decide
+// whether physical capacity can accept a concrete worker.
+func (i Incus) FleetHardMemoryLimitMiB() int {
+	perMember := i.ProjectHardMemoryLimitMiB
+	if perMember == 0 {
+		perMember = i.ProjectMaxMemoryMiB
+	}
+	return perMember * i.ClusterMembers()
+}
+
+func (i Incus) FleetHardDiskLimitGiB() int {
+	perMember := i.ProjectHardDiskLimitGiB
+	if perMember == 0 {
+		perMember = i.ProjectDiskLimitGiB
+	}
+	return perMember * i.ClusterMembers()
+}

@@ -217,6 +217,14 @@ func (c Config) Validate() error {
 	if c.Incus.ProjectDiskLimitGiB < maxPoolDisk {
 		add("incus.project_disk_limit_gib", "must fit the largest pool disk request")
 	}
+	if c.Incus.ProjectHardMemoryLimitMiB != 0 &&
+		(c.Incus.ProjectHardMemoryLimitMiB < c.Incus.ProjectMaxMemoryMiB || c.Incus.ProjectHardMemoryLimitMiB > c.Incus.ProjectMaxInstances*maxPoolMemory) {
+		add("incus.project_hard_memory_limit_mib", "must be between scheduling capacity and the absolute per-member instance envelope")
+	}
+	if c.Incus.ProjectHardDiskLimitGiB != 0 &&
+		(c.Incus.ProjectHardDiskLimitGiB < c.Incus.ProjectDiskLimitGiB || c.Incus.ProjectHardDiskLimitGiB > c.Incus.ProjectMaxInstances*maxPoolDisk) {
+		add("incus.project_hard_disk_limit_gib", "must be between scheduling capacity and the absolute per-member instance envelope")
+	}
 
 	if len(issues) == 0 {
 		return nil

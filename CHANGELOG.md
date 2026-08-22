@@ -15,6 +15,10 @@ Versioning.
 
 ### Changed
 
+- Split measured scheduling capacity from Incus aggregate hard-limit quotas.
+  Queue, provider and placement continue to admit against measured reservations
+  and PSI, while the project memory and disk quotas now bound the absolute
+  32-container hard-limit envelope instead of rejecting physically safe work.
 - Replaced worst-case queue/provider/placement reservations with p95-derived
   measured envelopes while retaining hard Incus limits and PSI as safety
   authorities. Queue schema v5 also caps one repository at 75 percent of slots,
