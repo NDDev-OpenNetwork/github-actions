@@ -5,6 +5,14 @@ Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added the `actions/package-cache` composite action for VPC-local,
+  repository/trust-scoped Go, npm, pnpm, Yarn, Bun, uv, pip, Cargo, Maven and
+  Gradle package caches. It reuses the one-job RustFS identity, stores no build
+  outputs, degrades to uncached execution on transient cache outages, and emits
+  structured transfer telemetry for real-job optimization.
+
 ### Changed
 
 - Expanded every worker image compatibility contract with pinned pnpm and Yarn
