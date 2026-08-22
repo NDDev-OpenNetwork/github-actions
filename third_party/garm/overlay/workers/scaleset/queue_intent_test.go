@@ -719,6 +719,66 @@ func TestQueueCoordinatorRehydratesOnlyAnAuthoritativeCurrentScaleSetJob(t *test
 	}
 }
 
+func TestQueueCoordinatorEnrichesSparseAssignedIntentFromAuthoritativeJob(t *testing.T) {
+	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinatorOfWidth(t, &now, nil, 4, 3)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
+	assigned := testQueueJob(304, "example-org", "example-repo", now.Add(-time.Minute))
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.OwnerName = ""
+	assigned.RepositoryName = ""
+	assigned.JobWorkflowRef = ""
+	assigned.EventName = ""
+	assigned.QueueTime = time.Time{}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	job := params.Job{
+		ScaleSetJobID: assigned.JobID, RepositoryOwner: "example-org",
+		RepositoryName: "example-repo", Action: "pull_request",
+	}
+	job.CreatedAt = now.Add(-2 * time.Minute)
+	changed, err := coordinator.EnsureAuthoritative(scaleSet, entity, job)
+	if err != nil || !changed {
+		t.Fatalf("authoritative enrichment changed=%t err=%v", changed, err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := journal.Intents[queueIntentKey(11, assigned.JobID)]
+	if intent.Repository != "example-org/example-repo" || intent.State != queueStateAssigned ||
+		intent.WorkflowRef != "authoritative-reconciliation" || intent.EventName != "pull_request" ||
+		!intent.QueueTime.Equal(job.CreatedAt) || intent.RunnerRequestID != 0 {
+		t.Fatalf("sparse assigned intent was not enriched losslessly: %#v", intent)
+	}
+	changed, err = coordinator.EnsureAuthoritative(scaleSet, entity, job)
+	if err != nil || changed {
+		t.Fatalf("idempotent enrichment changed=%t err=%v", changed, err)
+	}
+}
+
+func TestQueueCoordinatorRejectsAuthoritativeRepositoryRebinding(t *testing.T) {
+	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
+	job := params.Job{
+		ScaleSetJobID:   "00000000-0000-4000-8000-000000000305",
+		RepositoryOwner: "example-org", RepositoryName: "first-repo", Action: "push",
+	}
+	job.CreatedAt = now.Add(-time.Minute)
+	if changed, err := coordinator.EnsureAuthoritative(scaleSet, entity, job); err != nil || !changed {
+		t.Fatalf("initial authoritative intent changed=%t err=%v", changed, err)
+	}
+	job.RepositoryName = "second-repo"
+	if _, err := coordinator.EnsureAuthoritative(scaleSet, entity, job); err == nil {
+		t.Fatal("authoritative reconciliation rebound an already bound repository")
+	}
+}
+
 func TestQueueCoordinatorRehydratesAStartedIntentFromSameBatch(t *testing.T) {
 	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
