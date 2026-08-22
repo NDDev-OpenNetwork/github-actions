@@ -84,7 +84,8 @@ func ValidateConfig(contract Contract, platform platformconfig.Config) error {
 		}
 		if pool.Trust != class.Trust || pool.Capabilities.Credentials != class.Credentials ||
 			pool.Capabilities.NetworkPolicy != class.NetworkPolicy || pool.Capabilities.CacheWriteScope != class.CacheWriteScope ||
-			pool.Capabilities.Docker != class.Docker || pool.Resources.VCPU != class.Resources.VCPU ||
+			pool.Capabilities.Docker != class.Docker || pool.Resources.VCPU < class.Resources.VCPUMin ||
+			pool.Resources.VCPU > class.Resources.VCPUMax ||
 			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB ||
 			pool.Warm.TargetReady != class.Warm.TargetReady || pool.Warm.MaxReady != class.Warm.MaxReady {
 			return fmt.Errorf("pool %q capability or resource shape differs from fleet contract v%d", class.Label, contract.ContractVersion)
@@ -179,7 +180,12 @@ type RunnerClass struct {
 }
 
 type Resources struct {
+	// VCPU is the portable default. Deployments may tune CPU within the
+	// published envelope from real workload telemetry without changing the
+	// class's trust, capability, memory or storage contract.
 	VCPU      int `json:"vcpu"`
+	VCPUMin   int `json:"vcpu_min"`
+	VCPUMax   int `json:"vcpu_max"`
 	MemoryMiB int `json:"memory_mib"`
 	DiskGiB   int `json:"disk_gib"`
 }
@@ -257,9 +263,12 @@ func Build(sources Sources, commit string) (Contract, error) {
 			JobsPerWorker: declaration.Execution.JobsPerWorker,
 			Trust:         class.Trust, Credentials: class.Credentials,
 			NetworkPolicy: class.NetworkPolicy, CacheWriteScope: class.CacheWriteScope,
-			Docker:    class.Docker,
-			Resources: Resources{VCPU: class.VCPU, MemoryMiB: class.MemoryMiB, DiskGiB: class.DiskGiB},
-			Warm:      Warm{Supported: false, TargetReady: 0, MaxReady: 0},
+			Docker: class.Docker,
+			Resources: Resources{
+				VCPU: class.VCPU, VCPUMin: tunableVCPUMin(class.VCPU), VCPUMax: class.VCPU,
+				MemoryMiB: class.MemoryMiB, DiskGiB: class.DiskGiB,
+			},
+			Warm: Warm{Supported: false, TargetReady: 0, MaxReady: 0},
 		})
 	}
 
@@ -300,6 +309,13 @@ func Build(sources Sources, commit string) (Contract, error) {
 		NotContractual: declaration.NotContractual,
 		OpenBlockers:   declaration.OpenBlockers,
 	}, nil
+}
+
+func tunableVCPUMin(portableDefault int) int {
+	if portableDefault > 2 {
+		return 2
+	}
+	return portableDefault
 }
 
 func validateQueueIntentSchemaPair(garm garmderivative.Manifest, provider providerrelease.Manifest) error {

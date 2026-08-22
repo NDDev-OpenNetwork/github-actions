@@ -55,6 +55,12 @@ Admission reserves declared resources before GitHub job acquisition. Provider
 and placement checks remain physical safety authorities. Capacity pressure is
 bounded backpressure, not a provider-failure storm.
 
+Each published class carries a portable default and a bounded CPU envelope.
+An estate may tune vCPU inside that envelope from real-job telemetry to improve
+complete-pipeline time. Memory, disk, trust, credentials, network, Docker and
+isolation remain exact class guarantees; CPU cannot be tuned below or above the
+published bounds.
+
 Cluster placement packs eligible workers by the smallest safe remaining hard
 memory after the request. Pressure, disk and host reserve checks run first.
 This best-fit policy prevents small jobs from fragmenting every member and
