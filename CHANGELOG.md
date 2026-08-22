@@ -23,6 +23,9 @@ Versioning.
 - Cut provider derivative `v0.1.5-nddev.60` from the exact cold-bootstrap
   source commit so the no-copy runner verification cannot deploy under the
   previous `.59` identity.
+- Made the reproducible provider lane reject binary-affecting source drift
+  after the manifest's exact release commit. Changing provider code while
+  rebuilding an older declared source can no longer produce a green artifact.
 - Expanded every worker image compatibility contract with pinned pnpm and Yarn
   distributions, conventional Python/pip entry points, and default Go/gofmt
   links. Standard and integration variants now share Python, Java, Maven,
