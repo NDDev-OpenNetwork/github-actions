@@ -46,6 +46,10 @@ gha-fleet reconcile-openobserve-alerts \
   provider/config repair, stop GARM only with zero running leases, dry-run and
   apply the exact `recover-provider-retry` CAS operation, restart GARM, and
   require a fresh job to reach provider create and runner online.
+- Persistent provider-retry pages: ignore capacity backpressure and retained
+  history; inspect only the current non-capacity deferred class, correlate its
+  exact private journal identity, repair the cause, and preserve the record
+  until normal successful consolidation removes or supersedes it.
 - Slow-burn tickets: inspect class/tenant percentiles and capacity evidence;
   do not page an operator for a trend without an immediate action.
 

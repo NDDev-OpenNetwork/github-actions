@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 11 {
-		t.Fatalf("rules = %d, want 11", len(bundle.Rules))
+	if len(bundle.Rules) != 12 {
+		t.Fatalf("rules = %d, want 12", len(bundle.Rules))
 	}
 }
 
@@ -21,8 +21,9 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	wanted := map[string]string{
-		"memory_psi_slow_burn": `window_seconds="10"`,
-		"queue_wait_slow_burn": `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
+		"memory_psi_slow_burn":            `window_seconds="10"`,
+		"queue_wait_slow_burn":            `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
+		"provider_retry_error_persistent": `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {
