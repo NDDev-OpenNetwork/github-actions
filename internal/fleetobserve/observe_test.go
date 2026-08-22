@@ -453,6 +453,46 @@ func TestCollectorKeepsBoundedDeletingVisibilityConvergenceHealthy(t *testing.T)
 	}
 }
 
+func TestCollectorBoundsFirstObservedCreatedVisibilityConvergence(t *testing.T) {
+	collector := healthyCollector(t)
+	now := observationTime
+	collector.Now = func() time.Time { return now }
+	collector.CreatedVisibility = NewCreatedVisibilityTracker()
+	collector.Instances = func(context.Context) ([]string, error) { return nil, nil }
+
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.MissingInstances != 0 ||
+		snapshot.Incus.MissingCreatedWithinGrace != 1 || snapshot.Incus.OldestMissingCreatedAgeSecs != 0 {
+		t.Fatalf("first absent created sample poisoned health: %#v", snapshot.Incus)
+	}
+
+	now = now.Add(20 * time.Second)
+	snapshot = collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.MissingCreatedWithinGrace != 1 ||
+		snapshot.Incus.OldestMissingCreatedAgeSecs != 20 {
+		t.Fatalf("bounded created convergence was not retained: %#v", snapshot.Incus)
+	}
+
+	now = now.Add(createdVisibilityGrace - 20*time.Second + time.Second)
+	snapshot = collector.Collect(context.Background())
+	if snapshot.Healthy || snapshot.Incus.MissingInstances != 1 || snapshot.Incus.MissingCreatedWithinGrace != 0 {
+		t.Fatalf("persistent missing created lease escaped health blocker: %#v", snapshot.Incus)
+	}
+
+	collector.Instances = func(context.Context) ([]string, error) { return []string{"runner-one"}, nil }
+	snapshot = collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.MissingInstances != 0 {
+		t.Fatalf("returned instance did not clear missing state: %#v", snapshot.Incus)
+	}
+
+	collector.Instances = func(context.Context) ([]string, error) { return nil, nil }
+	snapshot = collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.MissingCreatedWithinGrace != 1 ||
+		snapshot.Incus.OldestMissingCreatedAgeSecs != 0 {
+		t.Fatalf("new absence reused stale first-seen state: %#v", snapshot.Incus)
+	}
+}
+
 func TestCollectorObservesMissingImageMaintenanceWithoutFailingFleetHealth(t *testing.T) {
 	collector := healthyCollector(t)
 	journal, err := collector.Journal(context.Background())
