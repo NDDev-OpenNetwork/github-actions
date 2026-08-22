@@ -69,12 +69,13 @@ func TestCreatePlanNeverIssuesDelete(t *testing.T) {
 
 	plan := repositoryPlan(t)
 	runner := &fakeRunner{responses: map[string][]byte{
-		"/1.0":                                        mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
-		"/1.0/storage-pools?recursion=1":              {},
-		"/1.0/network-acls?recursion=1":               {},
-		"/1.0/networks?recursion=1":                   {},
-		"/1.0/projects?recursion=1":                   {},
-		"/1.0/profiles?project=gha-fleet&recursion=1": {},
+		"/1.0":                                         mustJSON(t, compatibleServer("6.0.6", plan.APIAddress)),
+		"/1.0/storage-pools?recursion=1":               {},
+		"/1.0/network-acls?recursion=1":                {},
+		"/1.0/networks?recursion=1":                    {},
+		"/1.0/projects?recursion=1":                    {},
+		"/1.0/profiles?project=gha-fleet&recursion=1":  {},
+		"/1.0/instances?project=gha-fleet&recursion=1": {},
 	}}
 	for path := range runner.responses {
 		if path != "/1.0" {
@@ -94,6 +95,38 @@ func TestCreatePlanNeverIssuesDelete(t *testing.T) {
 		}
 		if contains(call, "--request") && (!contains(call, "--force-local") || !contains(call, "--wait")) {
 			t.Fatalf("mutation is not local and bounded: %#v", call)
+		}
+	}
+}
+
+func TestProfileUpdateIsBlockedWhileAnInstanceUsesIt(t *testing.T) {
+	t.Parallel()
+
+	plan := repositoryPlan(t)
+	responses := desiredResponses(t, plan)
+	profilesPath := "/1.0/profiles?project=gha-fleet&recursion=1"
+	var profiles []profileState
+	if err := json.Unmarshal(responses[profilesPath], &profiles); err != nil {
+		t.Fatal(err)
+	}
+	for index := range profiles {
+		if profiles[index].Name == plan.Profiles[0].Name {
+			profiles[index].Config = cloneMap(profiles[index].Config)
+			profiles[index].Config["limits.cpu.allowance"] = "400%"
+		}
+	}
+	responses[profilesPath] = mustJSON(t, profiles)
+	responses["/1.0/instances?project=gha-fleet&recursion=1"] = mustJSON(t, []instanceState{{
+		Name: "example-running-worker", Profiles: []string{plan.Profiles[0].Name},
+	}})
+	runner := &fakeRunner{responses: responses}
+	_, err := (Reconciler{Runner: runner}).Apply(context.Background(), plan)
+	if err == nil || !strings.Contains(err.Error(), "refusing live update until the profile drains") {
+		t.Fatalf("expected in-use profile failure, got %v", err)
+	}
+	for _, call := range runner.calls {
+		if contains(call, "--request") {
+			t.Fatalf("blocked profile update mutated Incus: %#v", call)
 		}
 	}
 }
@@ -164,12 +197,13 @@ func desiredResponses(t *testing.T, plan incusplan.Plan) map[string][]byte {
 		profiles = append(profiles, profileState(profile))
 	}
 	return map[string][]byte{
-		"/1.0":                                        mustJSON(t, serverWithDesiredConfig(compatibleServer("6.0.6", plan.APIAddress), plan)),
-		"/1.0/storage-pools?recursion=1":              mustJSON(t, []storageState{{Name: plan.Storage.Name, Driver: plan.Storage.Driver, Config: plan.Storage.Config}}),
-		"/1.0/network-acls?recursion=1":               mustJSON(t, []aclState{{Name: plan.ACL.Name, Description: plan.ACL.Description, Config: plan.ACL.Config, Ingress: plan.ACL.Ingress, Egress: plan.ACL.Egress}}),
-		"/1.0/networks?recursion=1":                   mustJSON(t, []networkState{{Name: plan.Network.Name, Description: "Isolated public-egress bridge for disposable GitHub Actions VMs", Type: plan.Network.Type, Managed: true, Config: plan.Network.Config}}),
-		"/1.0/projects?recursion=1":                   mustJSON(t, []projectState{{Name: plan.Project.Name, Description: plan.Project.Description, Config: plan.Project.Config}}),
-		"/1.0/profiles?project=gha-fleet&recursion=1": mustJSON(t, profiles),
+		"/1.0":                                         mustJSON(t, serverWithDesiredConfig(compatibleServer("6.0.6", plan.APIAddress), plan)),
+		"/1.0/storage-pools?recursion=1":               mustJSON(t, []storageState{{Name: plan.Storage.Name, Driver: plan.Storage.Driver, Config: plan.Storage.Config}}),
+		"/1.0/network-acls?recursion=1":                mustJSON(t, []aclState{{Name: plan.ACL.Name, Description: plan.ACL.Description, Config: plan.ACL.Config, Ingress: plan.ACL.Ingress, Egress: plan.ACL.Egress}}),
+		"/1.0/networks?recursion=1":                    mustJSON(t, []networkState{{Name: plan.Network.Name, Description: "Isolated public-egress bridge for disposable GitHub Actions VMs", Type: plan.Network.Type, Managed: true, Config: plan.Network.Config}}),
+		"/1.0/projects?recursion=1":                    mustJSON(t, []projectState{{Name: plan.Project.Name, Description: plan.Project.Description, Config: plan.Project.Config}}),
+		"/1.0/profiles?project=gha-fleet&recursion=1":  mustJSON(t, profiles),
+		"/1.0/instances?project=gha-fleet&recursion=1": mustJSON(t, []instanceState{}),
 	}
 }
 
