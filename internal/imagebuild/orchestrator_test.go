@@ -112,7 +112,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:cf76795861ddac88760af12b5d9f8425570e07bb18c560b9e7f696474f15f853" {
+	if first != "sha256:19905fdc7ce023bfbeaf29da16fc6b1f0f5a5ea376fc66edfb2539762b3f47d0" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -284,7 +284,8 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 	for _, compatibilityInvariant := range []string{
 		"python3 -m pip --version", "/usr/local/bin/python", "/usr/local/bin/pip",
 		"/usr/local/bin/go", "/usr/local/bin/gofmt", "pnpm.cjs", "pnpx.cjs",
-		"yarn.js", "pnpm --version", "yarn --version",
+		"yarn.js", `chmod 0755 "${package_root}/bin/pnpm.cjs" "${package_root}/bin/pnpx.cjs"`,
+		`chmod 0755 "${package_root}/bin/yarn.js"`, "pnpm --version", "yarn --version",
 	} {
 		if !strings.Contains(provisionText, compatibilityInvariant) {
 			t.Fatalf("provision script misses compatibility invariant %s", compatibilityInvariant)

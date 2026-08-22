@@ -258,6 +258,7 @@ for toolchain_name in "${toolchain_names[@]}"; do
 			--strip-components=1 --no-same-owner --no-same-permissions
 		test -f "${package_root}/bin/pnpm.cjs"
 		test -f "${package_root}/bin/pnpx.cjs"
+		chmod 0755 "${package_root}/bin/pnpm.cjs" "${package_root}/bin/pnpx.cjs"
 		ln -sfn "${package_root}/bin/pnpm.cjs" /usr/local/bin/pnpm
 		ln -sfn "${package_root}/bin/pnpx.cjs" /usr/local/bin/pnpx
 		[[ "$(pnpm --version)" == "${toolchain_version}" ]]
@@ -286,6 +287,7 @@ for toolchain_name in "${toolchain_names[@]}"; do
 		tar --extract --gzip --file "${toolchain_archive}" --directory "${package_root}" \
 			--strip-components=1 --no-same-owner --no-same-permissions
 		test -f "${package_root}/bin/yarn.js"
+		chmod 0755 "${package_root}/bin/yarn.js"
 		ln -sfn "${package_root}/bin/yarn.js" /usr/local/bin/yarn
 		[[ "$(yarn --version)" == "${toolchain_version}" ]]
 		;;
