@@ -87,8 +87,8 @@ a running job. Scheduled work is background unless it uses a high scale set.
 Background work ages into ordinary service so it cannot starve forever.
 
 Background work has a separate bounded concurrency envelope. Aging selects
-which background job receives those slots; it never lets a long maintenance or
-soak workload occupy the whole production fleet. A reduced limit does not
+which background job receives those slots; it never lets one long maintenance
+workload occupy the whole production fleet. A reduced limit does not
 preempt already-running work: the observed overage drains naturally.
 
 Sparse lifecycle events do not carry reliable repository or workflow metadata.
@@ -102,10 +102,12 @@ one active worker and exactly one terminal outcome. Duplicate events, process
 restart, provider restart, one member loss and temporary external failure do
 not silently lose it.
 
-Running jobs are not preempted. When a pull-request commit is superseded,
-already-running work completes while not-yet-started work for the obsolete
-commit can be cancelled durably. Main, release and deployment work is never
-superseded implicitly.
+Running and queued jobs are not preempted, superseded or replaced by a newer
+run. Every accepted run remains eligible to reach its terminal outcome, even
+when a newer pull-request commit arrives. Workflow concurrency therefore uses
+a run-unique key with cancellation disabled; a shared key must not silently
+replace an older pending run. An explicit user cancellation remains a durable,
+observable terminal outcome rather than disappearing from the lifecycle.
 
 Infrastructure failures use bounded classified retry. Product and test
 failures remain visible. A flaky retry remains observable and cannot silently
@@ -181,5 +183,7 @@ artifacts, private deployment policy, runtime, telemetry and documentation must
 identify the same contract and versions.
 
 Final acceptance requires zero lost accepted jobs, duplicate active workers,
-host OOM, silent fallback and missing required verification obligations under
-representative burst, soak, restart, member-loss and dependency-outage tests.
+host OOM, silent fallback and missing required verification obligations. The
+evidence comes from normal project CI/CD jobs and their production telemetry;
+acceptance does not create synthetic fleet traffic, canary workloads, manual
+reruns or time-based soak runs.
