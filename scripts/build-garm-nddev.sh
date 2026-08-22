@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.62"
+readonly derivative_version="v0.2.1-nddev.63"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="ca4047341bfe1a83e92bad9878da7d363af23018b1953d6e8950ccb83bf97933"
+readonly expected_binary_sha256="e1b24a6d350c399531fa7fb0f3bfc2e9157f65a7860d154417342a69ab15b849"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -78,7 +78,7 @@ readonly patch_sha256s=(
   "60254f449fd0175db2636108cc65b8ea761a7b3933b1b185d6417ba48caffecb"
   "fb67643be9a2ddce1eab86182cf844bceda7f6d40b3e8386fc7c5d4fd2caa5ad"
   "7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2"
-  "e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b"
+  "fe74bd962cfe3b361b64db9b4a584f1ad998af3c3789efd35d5dfd2780157485"
   "24661113a5fa3db00fc12f57da9764b1c5dc2c112e0a14b50eb39ffa9f6079ae"
   "cb072aeacbbfa2761dc9fb9ec0799e9e2116135bdaf70372ed388205f89868f2"
   "d4a4f73c5a45708149edc9782c2772cede3c1bc9fcb523be07d4f9c98f51fc4b"
@@ -92,8 +92,8 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "ffd5a41411c7867a96997d1d808867c5726de6839aa0488f45a9eb72deddde0c"
-  "71eeda775dc06064e4c2991c83c3de8e38c3f1abbff89f0584932f1153b79c36"
+  "0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7"
+  "02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65"
   "8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8"
   "85b405e38f8b343d25f060f1f9dbc60cffa5a89676e3856fda1e620e997c86e9"
 )

@@ -197,10 +197,12 @@ func NDDevRemoveQueueIntent(ctx context.Context, jobID string) (bool, error) {
 	return removed, err
 }
 
-// NDDevEnsureQueueIntent rehydrates one GitHub-authoritatively queued DB job
-// after its acknowledged JobAssigned token expired. The DB row and current
-// scale-set identity are supplied by GARM's authoritative reconciler; this
-// function only restores bounded admission and never invents a job.
+// NDDevEnsureQueueIntent reconciles one GitHub-authoritatively queued DB job.
+// It restores a missing intent after an acknowledged JobAssigned token expired
+// and enriches a sparse organization-scoped intent with the repository that
+// GitHub omitted from JobAssigned. The DB row and current scale-set identity
+// are supplied by GARM's authoritative reconciler; this function never invents
+// a job.
 func NDDevEnsureQueueIntent(ctx context.Context, scaleSet params.ScaleSet, entity params.ForgeEntity, job params.Job) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -222,15 +224,36 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 	if !validRepository(repository) {
 		return false, fmt.Errorf("authoritative queued job repository is invalid")
 	}
-	created := false
+	changed := false
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		key := queueIntentKey(int64(scaleSet.ScaleSetID), job.ScaleSetJobID)
-		if _, exists := journal.Intents[key]; exists {
-			return nil
-		}
 		queueTime := job.CreatedAt.UTC()
 		if queueTime.IsZero() || queueTime.After(now) {
 			queueTime = now
+		}
+		if existing, exists := journal.Intents[key]; exists {
+			if existing.ScaleSetName != scaleSet.Name || existing.Owner != entity.Owner ||
+				!queueIntentRepositoryCompatible(existing, queueIntent{Owner: entity.Owner, Repository: repository}) {
+				return fmt.Errorf("authoritative queued job changed immutable queue identity")
+			}
+			if queueIntentRepositoryBound(existing) {
+				return nil
+			}
+			// Direct JIT normally goes from JobAssigned straight to JobStarted,
+			// so an organization scale set may never receive JobAvailable. The
+			// authoritative queued DB row is the first exact repository identity
+			// available in that path. Bind it without changing state, lease,
+			// runner identity or resource ownership.
+			existing.Repository = repository
+			existing.WorkflowRef = "authoritative-reconciliation"
+			existing.EventName = job.Action
+			existing.QueueTime = queueTime
+			existing.Priority = baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action})
+			existing.UpdatedAt = now
+			journal.Intents[key] = existing
+			ensureRepositoryState(journal, config, repository)
+			changed = true
+			return nil
 		}
 		journal.Intents[key] = queueIntent{
 			Key: key, ScaleSetID: int64(scaleSet.ScaleSetID), JobID: job.ScaleSetJobID,
@@ -242,10 +265,10 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 		}
 		ensureRepositoryState(journal, config, repository)
 		admitQueuedToBudget(journal, config, now)
-		created = true
+		changed = true
 		return nil
 	})
-	return created, err
+	return changed, err
 }
 
 func (c *queueIntentCoordinator) Validate() error {

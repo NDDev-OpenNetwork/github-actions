@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.62
+derivative_version: v0.2.1-nddev.63
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -62,8 +62,8 @@ patches:
     sha256: 7e8822d4bd13dcab7990e15df38e828211609f2c20afb4d9721f524a617b0cb2
     purpose: Sort stale workflow-job reconciliation oldest-first before the bounded API batch so continuous new work cannot starve cancelled rows indefinitely.
   - path: third_party/garm/patches/0019-authoritative-live-job-rehydration.patch
-    sha256: e6eefa3cc56acf049161f8f020ae796f30aacf51cb55c7b14d8db452e53a544b
-    purpose: Rehydrate one bounded queue intent when GitHub authoritatively confirms an acknowledged JobAssigned DB row is still queued, preventing valid old work from deadlocking after its provisional TTL.
+    sha256: fe74bd962cfe3b361b64db9b4a584f1ad998af3c3789efd35d5dfd2780157485
+    purpose: Reconcile one bounded queue intent when GitHub authoritatively confirms an acknowledged JobAssigned DB row is still queued, allowing the overlay to restore missing ownership or bind repository identity without inventing work.
   - path: third_party/garm/patches/0020-reachable-scale-set-job-reconciliation.patch
     sha256: 24661113a5fa3db00fc12f57da9764b1c5dc2c112e0a14b50eb39ffa9f6079ae
     purpose: Query scale-set protocol rows through a dedicated bounded SQL path so authoritative cleanup and live-job rehydration are reachable without leaking those rows into ordinary webhook pool consumption.
@@ -81,11 +81,11 @@ patches:
     purpose: Delete a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: ffd5a41411c7867a96997d1d808867c5726de6839aa0488f45a9eb72deddde0c
-    purpose: Fsync-backed central queue admission where disabled scale sets cannot record or acquire work, sparse JobAssigned owns a bounded provisional token without refreshing its TTL on unrelated queue transactions, JobAvailable binds complete identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
+    sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
+    purpose: Fsync-backed central queue admission where disabled scale sets cannot record or acquire work, sparse JobAssigned owns a bounded provisional token without refreshing its TTL, JobAvailable or the authoritative queued DB row binds repository identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 71eeda775dc06064e4c2991c83c3de8e38c3f1abbff89f0584932f1153b79c36
-    purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, one-time legacy horizon migration, non-refreshing assigned expiry, authoritative orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, message acknowledgement, crash expiry and concurrent-selection tests.
+    sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
+    purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
     purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, one domain retry lease after proven saturation, five-minute fallback with immediate deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: ca4047341bfe1a83e92bad9878da7d363af23018b1953d6e8950ccb83bf97933
+  binary_sha256: e1b24a6d350c399531fa7fb0f3bfc2e9157f65a7860d154417342a69ab15b849
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
@@ -137,6 +137,7 @@ runtime_contract:
   bounded_scale_up_capacity_probe: true
   authoritative_job_reconciliation: true
   authoritative_queue_intent_reconciliation: true
+  authoritative_repository_binding: true
   authoritative_idle_offline_runner_reaping: true
   authoritative_access_refusal_backoff_seconds: 900
   job_started_runner_identity: true

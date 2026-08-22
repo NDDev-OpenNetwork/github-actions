@@ -110,6 +110,7 @@ var runtimeContractFields = []string{
 	"bounded_scale_up_capacity_probe",
 	"authoritative_job_reconciliation",
 	"authoritative_queue_intent_reconciliation",
+	"authoritative_repository_binding",
 	"authoritative_idle_offline_runner_reaping",
 	"authoritative_access_refusal_backoff_seconds",
 	"job_started_runner_identity",

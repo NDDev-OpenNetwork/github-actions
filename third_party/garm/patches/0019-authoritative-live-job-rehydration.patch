@@ -48,12 +48,12 @@ index 331a206..55c84d0 100644
 +	if err != nil {
 +		return err
 +	}
-+	created, err := nddevEnsureAuthoritativeQueueIntent(r.ctx, scaleSet, r.entity, job)
++	changed, err := nddevEnsureAuthoritativeQueueIntent(r.ctx, scaleSet, r.entity, job)
 +	if err != nil {
 +		return err
 +	}
-+	if created {
-+		slog.InfoContext(r.ctx, "rehydrated authoritative queued job intent", "scale_set_job_id", job.ScaleSetJobID, "scale_set", scaleSet.Name)
++	if changed {
++		slog.InfoContext(r.ctx, "reconciled authoritative queued job intent", "scale_set_job_id", job.ScaleSetJobID, "scale_set", scaleSet.Name)
 +	}
 +	return nil
 +}
@@ -105,4 +105,3 @@ index da687f6..d03fabd 100644
  func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
  	reconciledJobID := ""
  	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
-

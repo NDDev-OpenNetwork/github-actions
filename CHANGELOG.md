@@ -30,6 +30,12 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.63`: authoritative reconciliation now
+  binds an existing organization-scoped JobAssigned intent to the exact
+  repository from GARM's verified queued-job row. Direct-JIT jobs no longer
+  remain account-only when GitHub skips JobAvailable; UUID, state, lease,
+  runner identity and capacity ownership remain unchanged, and any attempted
+  repository rebinding fails closed.
 - Cluster admission now compares measured reservations with physical memory
   instead of treating `free_ram + buffers` as Linux MemAvailable. Placement
   preserves host reserves, PSI remains the live stop, and page cache no longer
