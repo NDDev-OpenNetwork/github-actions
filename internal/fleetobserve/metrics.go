@@ -173,6 +173,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 		metric(&output, "gha_fleet_queue_intents_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.ByScaleSet[scaleSet]))
 	}
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
+	gauge(&output, "gha_fleet_incus_visible_maintenance_instances", "Visible exact image builder or smoke instances; observable maintenance capacity, never GitHub job runners.", float64(snapshot.Incus.VisibleMaintenanceInstances))
 	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without an admitted, created, deleting or warm journal lease.", float64(snapshot.Incus.OrphanInstances))
 	gauge(&output, "gha_fleet_journal_missing_instances", "Created or deleting journal leases without a visible Incus instance.", float64(snapshot.Incus.MissingInstances))
 	gauge(&output, "gha_fleet_journal_missing_maintenance_instances", "Completed image-maintenance leases awaiting the next provider inventory reconciliation.", float64(snapshot.Incus.MissingMaintenanceInstances))

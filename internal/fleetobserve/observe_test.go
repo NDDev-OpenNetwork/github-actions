@@ -448,6 +448,44 @@ func TestCollectorObservesMissingImageMaintenanceWithoutFailingFleetHealth(t *te
 	}
 }
 
+func TestCollectorObservesVisibleImageMaintenanceWithoutReportingAnOrphan(t *testing.T) {
+	collector := healthyCollector(t)
+	journal, err := collector.Journal(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(journal.Leases, "runner-one")
+	collector.Journal = func(context.Context) (providerjournal.Journal, error) { return journal, nil }
+	collector.Instances = func(context.Context) ([]string, error) {
+		return []string{"gha-image-builder-012345abcdef", "gha-image-smoke-fedcba543210"}, nil
+	}
+
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy || snapshot.Incus.OrphanInstances != 0 ||
+		snapshot.Incus.VisibleMaintenanceInstances != 2 {
+		t.Fatalf("visible maintenance poisoned fleet health: %#v", snapshot)
+	}
+}
+
+func TestCollectorDoesNotHideMalformedMaintenanceName(t *testing.T) {
+	collector := healthyCollector(t)
+	journal, err := collector.Journal(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(journal.Leases, "runner-one")
+	collector.Journal = func(context.Context) (providerjournal.Journal, error) { return journal, nil }
+	collector.Instances = func(context.Context) ([]string, error) {
+		return []string{"gha-image-builder-not-a-digest"}, nil
+	}
+
+	snapshot := collector.Collect(context.Background())
+	if snapshot.Healthy || snapshot.Incus.OrphanInstances != 1 ||
+		snapshot.Incus.VisibleMaintenanceInstances != 0 {
+		t.Fatalf("malformed maintenance identity escaped orphan detection: %#v", snapshot)
+	}
+}
+
 func TestCollectorTreatsAdmittedLeaseAsCreateTransition(t *testing.T) {
 	t.Parallel()
 	for _, visible := range []bool{false, true} {
