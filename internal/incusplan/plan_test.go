@@ -450,8 +450,8 @@ func TestClusterProjectQuotaIsThePerHostCeilingTimesTheMembers(t *testing.T) {
 	for key, want := range map[string]string{
 		"limits.instances":        strconv.Itoa(cfg.Incus.ProjectMaxInstances * members),
 		"limits.virtual-machines": "0",
-		"limits.memory":           strconv.Itoa(cfg.Incus.ProjectMaxMemoryMiB*members) + "MiB",
-		"limits.disk":             strconv.Itoa(cfg.Incus.ProjectDiskLimitGiB*members) + "GiB",
+		"limits.memory":           strconv.Itoa(cfg.Incus.ProjectHardMemoryLimitMiB*members) + "MiB",
+		"limits.disk":             strconv.Itoa(cfg.Incus.ProjectHardDiskLimitGiB*members) + "GiB",
 	} {
 		if got := plan.Project.Config[key]; got != want {
 			t.Errorf("%s = %q across %d members, want %q", key, got, members, want)

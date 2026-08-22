@@ -9,7 +9,7 @@ control_plane:
   manager_version: v0.2.1-nddev.61
   scheduling_mode: scale-set
   provider: incus
-  provider_version: v0.1.5-nddev.63
+  provider_version: v0.1.5-nddev.64
   provider_interface: v0.1.0
   worker_kind: incus-container
   runner: actions/runner
@@ -24,6 +24,7 @@ incus:
   storage_driver: lvm
   storage_size_gib: 200
   project_disk_limit_gib: 120
+  project_hard_disk_limit_gib: 240
   network: gha0
   network_cidr: 198.51.100.1/24
   egress_acl: gha-public-egress
@@ -38,6 +39,7 @@ incus:
   project_max_instances: 8
   project_max_cpu_units: 10
   project_max_memory_mib: 14336
+  project_hard_memory_limit_mib: 49152
   cluster:
     enabled: true
     member_name: example-runner-3
