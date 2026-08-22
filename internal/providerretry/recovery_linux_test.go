@@ -123,6 +123,7 @@ func TestInspectCountsOnlyTerminalFailureDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	if snapshot.Generation != 42 || snapshot.Records != 3 || snapshot.TerminalCircuits != 1 ||
+		snapshot.DeferredRecords != 2 || snapshot.DeferredByErrorClass["provider"] != 1 || snapshot.DeferredByErrorClass["capacity"] != 1 ||
 		snapshot.OldestTerminalAgeSeconds != 600 || snapshot.NextRetryDelaySeconds != 30 ||
 		snapshot.ByErrorClass["provider"] != 2 || snapshot.ByErrorClass["capacity"] != 1 {
 		t.Fatalf("unexpected retry snapshot: %#v", snapshot)
