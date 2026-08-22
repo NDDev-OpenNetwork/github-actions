@@ -110,9 +110,14 @@ func clusterHostState(cli InstanceServerInterface, platform platformconfig.Confi
 		eligible++
 		snapshot.TotalCPUUnits += platform.Incus.ProjectMaxCPUUnits
 		snapshot.TotalMemoryMiB += memberMemoryMiB
-		// Reclaimable page cache is available to a new worker; free_ram alone
-		// reads a member that has merely been reading images as full.
-		snapshot.AvailableMemoryMiB += memberAvailableMiB
+		// Cluster admission is a measured reservation ledger, not a second
+		// instantaneous RSS gate. Incus does not expose Linux MemAvailable here;
+		// free+buffers excludes reclaimable page cache and closed the entire fleet
+		// after image-heavy jobs even with no memory PSI. Count physical memory
+		// against measured reservations; placement preserves the per-host reserve,
+		// PSI is the live pressure stop, and Incus hard limits remain the disaster
+		// ceiling.
+		snapshot.AvailableMemoryMiB += memberMemoryMiB
 		if memberDisk < snapshot.FreeDiskPercent {
 			snapshot.FreeDiskPercent = memberDisk
 		}

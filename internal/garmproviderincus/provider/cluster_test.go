@@ -79,8 +79,9 @@ func TestFleetHostStateSumsOnlineClusterMembers(t *testing.T) {
 	require.Equal(t, 12, state.TotalCPUUnits)
 	// Emergency swap is recovery headroom, not schedulable hard memory.
 	require.Equal(t, 32*1024, state.TotalMemoryMiB)
-	// Free plus reclaimable cache, excluding swap: (10+1) + (12+0) GiB.
-	require.Equal(t, 23*1024, state.AvailableMemoryMiB)
+	// Measured reservations consume the two members' physical envelope. Live
+	// pressure and placement, not free+buffers without page cache, stop work.
+	require.Equal(t, 32*1024, state.AvailableMemoryMiB)
 	// The worst member, not the average: 50% free beats 90% free hiding it.
 	require.Equal(t, 50, state.FreeDiskPercent)
 
