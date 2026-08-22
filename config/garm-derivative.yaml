@@ -118,10 +118,10 @@ runtime_contract:
   job_available_identity_binding_before_acquire: true
   startup_queue_promotion: true
   deferred_available_message_retained: true
-  global_max_in_flight: 16
+  global_max_in_flight: 32
   maximum_background_in_flight: 2
   weighted_repository_fairness: true
-  per_repository_limit: 12
+  per_repository_limit: 32
   maximum_repository_share_percent_when_contended: 75
   uncontended_repository_may_use_full_capacity: true
   priority_aging_seconds: 300

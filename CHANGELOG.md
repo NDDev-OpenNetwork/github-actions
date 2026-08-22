@@ -11,6 +11,10 @@ Versioning.
   runner request, job display name and numeric runner identity. JobAvailable and
   JobStarted enrich the original durable JobAssigned UUID in place; observer
   schema v13 reports every remaining bounded correlation gap.
+- Raised the durable queue's slot ceiling from the historical 16 to the
+  32-container fleet envelope. Measured CPU/memory budgets, placement and PSI
+  remain the actual admission limits; a contended repository is capped at 24
+  slots and an uncontended repository may use the full envelope.
 - Added the `actions/package-cache` composite action for VPC-local,
   repository/trust-scoped Go, npm, pnpm, Yarn, Bun, uv, pip, Cargo, Maven and
   Gradle package caches. It reuses the one-job RustFS identity, stores no build
