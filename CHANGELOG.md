@@ -7,6 +7,9 @@ Versioning.
 
 ### Added
 
+- Added a bidirectional repository contract proving that actionlint's runner
+  labels exactly equal all ten published fleet classes; missing, extra and
+  duplicate labels now fail together.
 - Added real queue-phase duration spans emitted from durable journal
   transitions. Every GitHub job UUID receives a stable trace identity; spans
   carry repository, scale set, workflow run, runner request, numeric runner and
