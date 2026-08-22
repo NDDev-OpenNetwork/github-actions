@@ -428,7 +428,7 @@ func TestReconcileCreatesReviewedRepositoryScopedPriorityScaleSet(t *testing.T) 
 		t.Fatal(err)
 	}
 	if created.Repository == nil || created.Repository.Name != options.Repository || created.ScaleSet == nil ||
-		created.ScaleSet.Name != PriorityStandardScaleSetName || created.ScaleSet.Image != DefaultImage ||
+		created.ScaleSet.Name != PriorityStandardScaleSetName || created.ScaleSet.Image != PriorityStandardImage ||
 		created.ScaleSet.Flavor != PriorityStandardFlavor {
 		t.Fatalf("unexpected Priority repository reconciliation: %#v", created)
 	}

@@ -37,6 +37,8 @@ const (
 	DefaultProviderName               = "nddev-incus"
 	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
 	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2"
+	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b10"
+	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b4"
 	// Every Linux class is an ephemeral Incus container. Docker-capable classes
 	// use their nested-runtime image; release uses a separately stage-smoked
 	// standard image so OIDC authority does not inherit Docker/nesting.
@@ -104,8 +106,8 @@ func PublishedScaleSets() []ScaleSetClass {
 		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, false),
 		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, false),
 		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, 2, 4096, 30, false),
-		class(PriorityStandardScaleSetName, DefaultImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
-		class(PriorityIntegrationScaleSetName, IntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
+		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
+		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
 		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, true),
 	}
 }
