@@ -18,12 +18,14 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/diagnosticexport"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetobserve"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/fleettrace"
 	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/provider"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queuephase"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
 
@@ -77,6 +79,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	rootContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shutdownTrace, err := fleettrace.Configure(rootContext, "gha-fleet-observer", version)
+	if err != nil {
+		logger.Error("configure NDDev Drakkars observer tracing", "error", err)
+		return 1
+	}
+	defer func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTrace(shutdownContext); err != nil {
+			logger.Error("flush NDDev Drakkars observer tracing", "error", err)
+		}
+	}()
+	providerConfiguration, err := providerconfig.NewConfig(options.providerConfig)
+	if err != nil {
+		logger.Error("load queue correlation source", "error", err)
+		return 1
+	}
+	queueReader := queueintent.Reader{Path: providerConfiguration.QueueIntentFile}
+	phaseEmitter := queuephase.New()
+	initialQueue, err := queueReader.ReadActive(rootContext)
+	if err != nil {
+		logger.Error("seed queue phase tracing", "error", err)
+		return 1
+	}
+	phaseEmitter.Observe(rootContext, initialQueue, time.Now().UTC())
 	state := &fleetobserve.State{}
 	state.Set(collect(rootContext, collector))
 
@@ -92,7 +119,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	go sample(rootContext, collector, state, logger)
+	go sample(rootContext, collector, queueReader, phaseEmitter, state, logger)
 	go func() {
 		<-rootContext.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -209,7 +236,7 @@ func collect(parent context.Context, collector fleetobserve.Collector) fleetobse
 	return collector.Collect(ctx)
 }
 
-func sample(ctx context.Context, collector fleetobserve.Collector, state *fleetobserve.State, logger *slog.Logger) {
+func sample(ctx context.Context, collector fleetobserve.Collector, queueReader queueintent.Reader, phaseEmitter *queuephase.Emitter, state *fleetobserve.State, logger *slog.Logger) {
 	ticker := time.NewTicker(sampleInterval)
 	defer ticker.Stop()
 	for {
@@ -219,6 +246,12 @@ func sample(ctx context.Context, collector fleetobserve.Collector, state *fleeto
 		case <-ticker.C:
 			snapshot := collect(ctx, collector)
 			state.Set(snapshot)
+			queueSnapshot, queueErr := queueReader.ReadActive(ctx)
+			if queueErr != nil {
+				logger.Warn("queue phase tracing read failed", "error", queueErr)
+			} else {
+				phaseEmitter.Observe(ctx, queueSnapshot, time.Now().UTC())
+			}
 			if !snapshot.Healthy {
 				logger.Warn(
 					"NDDev Drakkars observer sample is unhealthy",
