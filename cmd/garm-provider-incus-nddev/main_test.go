@@ -26,6 +26,7 @@ func TestOperatorCommandsRefuseRootBeforeReadingConfiguration(t *testing.T) {
 			"warm-pool", "--config", "/does/not/exist", "--controller-id", "controller",
 		}},
 		{"probe", []string{"probe", "--config", "/does/not/exist"}},
+		{"reconcile-maintenance", []string{"reconcile-maintenance", "--config", "/does/not/exist"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			originalEffectiveUID := effectiveUID
@@ -97,6 +98,16 @@ func TestProbeRejectsPositionalArgumentsBeforeReadingConfiguration(t *testing.T)
 	var stdout, stderr bytes.Buffer
 	if exitCode := run([]string{"probe", "unexpected"}, &stdout, &stderr); exitCode != 2 {
 		t.Fatalf("run probe exit code = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "accepts no positional arguments") {
+		t.Fatalf("stderr = %q, want positional-argument diagnostic", stderr.String())
+	}
+}
+
+func TestMaintenanceReconcileRejectsPositionalArgumentsBeforeReadingConfiguration(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exitCode := run([]string{"reconcile-maintenance", "unexpected"}, &stdout, &stderr); exitCode != 2 {
+		t.Fatalf("run reconcile-maintenance exit code = %d, want 2", exitCode)
 	}
 	if !strings.Contains(stderr.String(), "accepts no positional arguments") {
 		t.Fatalf("stderr = %q, want positional-argument diagnostic", stderr.String())

@@ -216,6 +216,24 @@ type CompatibilityProbe struct {
 	CacheRole            string   `json:"cache_role,omitempty"`
 }
 
+func (l *Incus) ReconcileMaintenanceLeases(ctx context.Context, apply bool) (providerjournal.MaintenanceReconcileResult, error) {
+	cli, err := l.getCLI(ctx)
+	if err != nil {
+		return providerjournal.MaintenanceReconcileResult{}, errors.Wrap(err, "connecting to Incus")
+	}
+	instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
+	if err != nil {
+		return providerjournal.MaintenanceReconcileResult{}, errors.Wrap(err, "listing instances")
+	}
+	visible := make(map[string]struct{}, len(instances))
+	for _, instance := range instances {
+		visible[instance.Name] = struct{}{}
+	}
+	return providerjournal.ReconcileExpiredMaintenance(ctx, providerjournal.Store{
+		Path: l.cfg.JournalFile, LockPath: l.cfg.JournalLockFile,
+	}, visible, time.Now(), apply)
+}
+
 func (l *Incus) workerImagePolicy(flavor string) (config.WorkerImage, error) {
 	pool, exists := l.platform.Pool(flavor)
 	if !exists {
