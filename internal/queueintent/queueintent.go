@@ -21,8 +21,8 @@ import (
 
 const (
 	LegacySchemaVersion   = 1
-	PreviousSchemaVersion = 2
-	SchemaVersion         = 3
+	PreviousSchemaVersion = 3
+	SchemaVersion         = 4
 	maxJournalBytes       = 4 * 1024 * 1024
 )
 
@@ -45,6 +45,9 @@ type Intent struct {
 	ScaleSetID      int64  `json:"scale_set_id"`
 	JobID           string `json:"job_id"`
 	RunnerRequestID int64  `json:"runner_request_id"`
+	WorkflowRunID   int64  `json:"workflow_run_id,omitempty"`
+	JobDisplayName  string `json:"job_display_name,omitempty"`
+	GitHubRunnerID  int64  `json:"github_runner_id,omitempty"`
 	ScaleSetName    string `json:"scale_set_name"`
 	RunnerName      string `json:"runner_name,omitempty"`
 	// Owner is the forge account the scale set hangs from, written by GARM.
@@ -266,12 +269,14 @@ func readJournal(path string) (Journal, error) {
 		return Journal{}, fmt.Errorf("decode trailing queue-intent journal data: %w", err)
 	}
 	switch journal.SchemaVersion {
-	case LegacySchemaVersion, PreviousSchemaVersion:
+	case LegacySchemaVersion, 2:
 		journal.SchemaVersion = SchemaVersion
 		for key, intent := range journal.Intents {
 			intent.StateEnteredAt = intent.UpdatedAt
 			journal.Intents[key] = intent
 		}
+	case PreviousSchemaVersion:
+		journal.SchemaVersion = SchemaVersion
 	case SchemaVersion:
 	default:
 		return Journal{}, fmt.Errorf("queue-intent journal schema_version must be %d", SchemaVersion)
@@ -293,7 +298,8 @@ func (j Journal) Validate() error {
 		if key == "" || intent.Key != key || intent.Key != intentKey(intent.ScaleSetID, intent.JobID) {
 			return fmt.Errorf("queue intent key %q does not match embedded key %q", key, intent.Key)
 		}
-		if intent.ScaleSetID <= 0 || !validText(intent.JobID) || intent.RunnerRequestID < 0 || !validText(intent.ScaleSetName) ||
+		if intent.ScaleSetID <= 0 || !validText(intent.JobID) || intent.RunnerRequestID < 0 || intent.WorkflowRunID < 0 || intent.GitHubRunnerID < 0 || !validText(intent.ScaleSetName) ||
+			(intent.JobDisplayName != "" && !validText(intent.JobDisplayName)) ||
 			(intent.RunnerName != "" && !validText(intent.RunnerName)) ||
 			!validAccountOrRepository(intent.Repository) || !validText(intent.WorkflowRef) || !validText(intent.EventName) {
 			return fmt.Errorf("queue intent %q has incomplete identity", key)

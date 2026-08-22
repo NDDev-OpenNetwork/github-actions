@@ -7,6 +7,10 @@ Versioning.
 
 ### Added
 
+- Added queue journal schema v4 correlation fields for GitHub workflow run,
+  runner request, job display name and numeric runner identity. JobAvailable and
+  JobStarted enrich the original durable JobAssigned UUID in place; observer
+  schema v13 reports every remaining bounded correlation gap.
 - Added the `actions/package-cache` composite action for VPC-local,
   repository/trust-scoped Go, npm, pnpm, Yarn, Bun, uv, pip, Cargo, Maven and
   Gradle package caches. It reuses the one-job RustFS identity, stores no build

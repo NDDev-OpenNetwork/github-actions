@@ -22,8 +22,8 @@ import (
 const (
 	queueAdmissionSchemaVersion      = 5
 	queueIntentLegacySchemaVersion   = 1
-	queueIntentPreviousSchemaVersion = 2
-	queueIntentSchemaVersion         = 3
+	queueIntentPreviousSchemaVersion = 3
+	queueIntentSchemaVersion         = 4
 	queueIntentMaxBytes              = 4 * 1024 * 1024
 	queueSchedulerStride             = uint64(1_000_000)
 	queueAcquireRetryDelay           = 5 * time.Second
@@ -102,6 +102,9 @@ type queueIntent struct {
 	ScaleSetID      int64  `json:"scale_set_id"`
 	JobID           string `json:"job_id"`
 	RunnerRequestID int64  `json:"runner_request_id"`
+	WorkflowRunID   int64  `json:"workflow_run_id,omitempty"`
+	JobDisplayName  string `json:"job_display_name,omitempty"`
+	GitHubRunnerID  int64  `json:"github_runner_id,omitempty"`
 	ScaleSetName    string `json:"scale_set_name"`
 	// RunnerName is bound only by JobStarted. It is the exact ephemeral GARM
 	// instance name and lets the observer prove both directions of execution
@@ -298,6 +301,8 @@ func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs
 					// any binding outside the account that was admitted.
 					existing.Repository = intent.Repository
 					existing.RunnerRequestID = intent.RunnerRequestID
+					existing.WorkflowRunID = intent.WorkflowRunID
+					existing.JobDisplayName = intent.JobDisplayName
 					existing.WorkflowRef = intent.WorkflowRef
 					existing.EventName = intent.EventName
 					existing.QueueTime = intent.QueueTime
@@ -608,6 +613,15 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			intent.State = queueStateRunning
 			if validQueueText(job.RunnerName) {
 				intent.RunnerName = job.RunnerName
+			}
+			if job.WorkflowRunID > 0 {
+				intent.WorkflowRunID = job.WorkflowRunID
+			}
+			if validQueueText(job.JobDisplayName) {
+				intent.JobDisplayName = job.JobDisplayName
+			}
+			if job.RunnerID > 0 {
+				intent.GitHubRunnerID = job.RunnerID
 			}
 			intent.UpdatedAt = now
 			intent.ExpiresAt = expiryForState(config, queueStateRunning, now)
@@ -940,7 +954,8 @@ func (j queueIntentJournal) Validate() error {
 	}
 	for key, intent := range j.Intents {
 		if key == "" || intent.Key != key || intent.Key != queueIntentKey(intent.ScaleSetID, intent.JobID) ||
-			intent.ScaleSetID <= 0 || !validQueueText(intent.JobID) || intent.RunnerRequestID < 0 || !validQueueText(intent.ScaleSetName) ||
+			intent.ScaleSetID <= 0 || !validQueueText(intent.JobID) || intent.RunnerRequestID < 0 || intent.WorkflowRunID < 0 || intent.GitHubRunnerID < 0 || !validQueueText(intent.ScaleSetName) ||
+			(intent.JobDisplayName != "" && !validQueueText(intent.JobDisplayName)) ||
 			(intent.RunnerName != "" && !validQueueText(intent.RunnerName)) ||
 			!validQueueAccountOrRepository(intent.Repository) || !validQueueText(intent.WorkflowRef) || !validQueueText(intent.EventName) || intent.QueueTime.IsZero() ||
 			intent.StateEnteredAt.IsZero() || intent.StateEnteredAt.After(intent.UpdatedAt) ||
@@ -978,6 +993,9 @@ func queueIntentFromJob(config queueAdmissionConfig, scaleSet params.ScaleSet, j
 		ScaleSetID:      int64(scaleSet.ScaleSetID),
 		JobID:           job.JobID,
 		RunnerRequestID: job.RunnerRequestID,
+		WorkflowRunID:   job.WorkflowRunID,
+		JobDisplayName:  job.JobDisplayName,
+		GitHubRunnerID:  job.RunnerID,
 		ScaleSetName:    scaleSet.Name,
 		Owner:           job.OwnerName,
 		Repository:      repository,
@@ -1027,6 +1045,9 @@ func queueIntentFromLifecycle(config queueAdmissionConfig, scaleSet params.Scale
 		ScaleSetID:      int64(scaleSet.ScaleSetID),
 		JobID:           job.JobID,
 		RunnerRequestID: 0,
+		WorkflowRunID:   job.WorkflowRunID,
+		JobDisplayName:  job.JobDisplayName,
+		GitHubRunnerID:  job.RunnerID,
 		ScaleSetName:    scaleSet.Name,
 		RunnerName:      runnerName,
 		Owner:           entity.Owner,
@@ -1326,7 +1347,7 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 		return queueIntentJournal{}, fmt.Errorf("queue-intent journal has trailing data")
 	}
 	switch journal.SchemaVersion {
-	case queueIntentLegacySchemaVersion, queueIntentPreviousSchemaVersion:
+	case queueIntentLegacySchemaVersion, 2:
 		// v2 adds only the JobStarted runner identity. Old active intents have no
 		// value to synthesize; they remain explicitly uncorrelated until their
 		// lifecycle completes, and the next writer transaction upgrades the file.
@@ -1335,6 +1356,10 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 			intent.StateEnteredAt = intent.UpdatedAt
 			journal.Intents[key] = intent
 		}
+	case queueIntentPreviousSchemaVersion:
+		// v4 adds correlation fields only. Existing intents remain explicitly
+		// incomplete until a later JobAvailable or JobStarted binds them.
+		journal.SchemaVersion = queueIntentSchemaVersion
 	case queueIntentSchemaVersion:
 	default:
 		return queueIntentJournal{}, fmt.Errorf("queue-intent journal schema_version must be %d", queueIntentSchemaVersion)
@@ -1502,7 +1527,8 @@ func queueIntentRepositoryBound(intent queueIntent) bool {
 }
 
 func queueIntentMetadataEqual(left, right queueIntent) bool {
-	return left.WorkflowRef == right.WorkflowRef && left.EventName == right.EventName &&
+	return left.WorkflowRunID == right.WorkflowRunID && left.JobDisplayName == right.JobDisplayName &&
+		left.GitHubRunnerID == right.GitHubRunnerID && left.WorkflowRef == right.WorkflowRef && left.EventName == right.EventName &&
 		left.QueueTime.Equal(right.QueueTime) && left.Priority == right.Priority
 }
 
