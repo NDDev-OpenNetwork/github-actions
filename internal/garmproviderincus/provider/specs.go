@@ -35,14 +35,22 @@ source_root=/opt/cache/actions-runner/latest
 runner_root=/home/runner/actions-runner
 
 test -x "${source_root}/bin/Runner.Listener"
+test -x "${runner_root}/bin/Runner.Listener"
 if find "${source_root}" -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; then
   echo "registration state exists in the immutable runner cache" >&2
   exit 1
 fi
 
-install -d -o runner -g runner -m 0755 /home/runner "${runner_root}"
-cp -a --reflink=auto "${source_root}/." "${runner_root}/"
-chown -R runner:runner "${runner_root}"
+if find "${runner_root}" -xdev ! -user runner -print -quit | grep -q .; then
+  echo "pre-materialized runner tree is not owned by runner" >&2
+  exit 1
+fi
+source_version="$("${source_root}/bin/Runner.Listener" --version | tail -n 1 | tr -d '\r')"
+runner_version="$(runuser --user runner -- "${runner_root}/bin/Runner.Listener" --version | tail -n 1 | tr -d '\r')"
+if [[ -z "${source_version}" || "${runner_version}" != "${source_version}" ]]; then
+  echo "pre-materialized runner tree differs from the immutable source" >&2
+  exit 1
+fi
 if find "${runner_root}" -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; then
   echo "registration state appeared while materializing the runner cache" >&2
   exit 1

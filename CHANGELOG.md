@@ -15,6 +15,11 @@ Versioning.
 
 ### Changed
 
+- Removed dormant warm-runner services from the cold-only Incus container
+  images. Cold bootstrap now verifies and reuses the already materialized clean
+  runner tree instead of copying and recursively chowning it while a second
+  `Runner.Listener warmup` process starts in parallel. Standard and integration
+  container aliases advance to b10 and b4; b9 and b3 remain rollback targets.
 - Expanded every worker image compatibility contract with pinned pnpm and Yarn
   distributions, conventional Python/pip entry points, and default Go/gofmt
   links. Standard and integration variants now share Python, Java, Maven,

@@ -173,21 +173,14 @@ fi
 id runner >/dev/null
 [[ "$(id --groups --name runner | tr ' ' '\n' | grep -vx runner | LC_ALL=C sort | paste -sd' ' -)" == "docker sudo" ]]
 test -x /home/runner/actions-runner/bin/Runner.Listener
-test -x /usr/local/libexec/gha-warm-agent
 test "$(stat --format='%U:%G:%a:%F' /home/runner/.gha-cache)" = 'runner:runner:700:directory'
 test "$(command -v openssl)" = /usr/bin/openssl
-test "$(systemctl is-enabled gha-warm-agent.path)" = enabled
-for _ in {1..120}; do
-	if systemctl is-active --quiet gha-warm-agent.path && systemctl is-active --quiet gha-warm-ready.service; then
-		break
-	fi
-	sleep 0.25
-done
-systemctl is-active --quiet gha-warm-agent.path
-systemctl is-active --quiet gha-warm-ready.service
-grep -Fx 'ready-unregistered-v1' /run/gha-warm/ready >/dev/null
-test -d /run/gha-warm/assignments
-test -z "$(find /run/gha-warm/assignments /var/lib/gha-warm/claims -mindepth 1 -print -quit)"
+test ! -e /usr/local/libexec/gha-warm-agent
+test ! -e /etc/systemd/system/gha-warm-agent.service
+test ! -e /etc/systemd/system/gha-warm-agent.path
+test ! -e /etc/systemd/system/gha-warm-ready.service
+test ! -e /run/gha-warm
+test ! -e /var/lib/gha-warm
 if dpkg -s openssh-server >/dev/null 2>&1; then
   echo "OpenSSH server package is installed in smoke VM" >&2
   exit 1

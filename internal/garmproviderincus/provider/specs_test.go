@@ -279,7 +279,7 @@ rm -f /tmp/real-install.sh
 	require.Equal(t, want, got)
 }
 
-func TestTrustedBootstrapMaterializesPinnedRunnerCache(t *testing.T) {
+func TestTrustedBootstrapVerifiesPreMaterializedRunnerCache(t *testing.T) {
 	raw, err := trustedBootstrapExtraSpecs(false, false)
 	require.NoError(t, err)
 
@@ -289,8 +289,10 @@ func TestTrustedBootstrapMaterializesPinnedRunnerCache(t *testing.T) {
 	require.Len(t, parsed.PreInstallScripts, 2)
 	script := string(parsed.PreInstallScripts["00-nddev-runner-cache.sh"])
 	require.Contains(t, script, "/opt/cache/actions-runner/latest")
-	require.Contains(t, script, "cp -a --reflink=auto")
-	require.Contains(t, script, "chown -R runner:runner")
+	require.Contains(t, script, "pre-materialized runner tree")
+	require.Contains(t, script, "Runner.Listener\" --version")
+	require.NotContains(t, script, "cp -a --reflink=auto")
+	require.NotContains(t, script, "chown -R runner:runner")
 	require.Contains(t, script, "registration state")
 	groupsScript := string(parsed.PreInstallScripts["01-nddev-runner-groups.sh"])
 	require.Contains(t, groupsScript, "usermod --groups sudo runner")

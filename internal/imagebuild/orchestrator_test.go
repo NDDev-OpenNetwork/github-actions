@@ -248,20 +248,13 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 		}
 	}
 	provisionText := string(provision)
-	for _, warmupInvariant := range []string{
-		"/home/runner/actions-runner/bin/Runner.Listener warmup",
-		"runuser --user runner",
-		"registration state appeared while preparing the warm filesystem",
-		"ready-unregistered-v1",
+	for _, retiredWarmPath := range []string{
+		"gha-warm-agent", "gha-warm-ready", "ready-unregistered-v1",
+		"Runner.Listener warmup", "/run/gha-warm", "/var/lib/gha-warm",
 	} {
-		if !strings.Contains(provisionText, warmupInvariant) {
-			t.Fatalf("provision script misses official-runner warmup invariant %s", warmupInvariant)
+		if strings.Contains(provisionText, retiredWarmPath) {
+			t.Fatalf("cold-only provision script retained warm startup path %s", retiredWarmPath)
 		}
-	}
-	warmupIndex := strings.Index(provisionText, "/home/runner/actions-runner/bin/Runner.Listener warmup")
-	readyIndex := strings.Index(provisionText, `printf "ready-unregistered-v1\n"`)
-	if warmupIndex < 0 || readyIndex <= warmupIndex || strings.Count(provisionText[warmupIndex:readyIndex], ".credentials_rsaparams") != 1 {
-		t.Fatal("warm readiness must be published only after official warmup and a second registration-state check")
 	}
 	installerIndex := strings.Index(provisionText, `"${version_root}/bin/installdependencies.sh"`)
 	finalStopIndex := strings.Index(provisionText, `systemctl stop "${unit}"`)
