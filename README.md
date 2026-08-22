@@ -34,6 +34,9 @@ whole-pipeline performance standard implemented by this engine.
   Incus member signal; missing, stale or closed signals remove capacity rather
   than becoming provider failures or hidden overcommit.
 - Public repository CI runs only on standard GitHub-hosted runners.
+- Private Linux jobs can use the [trust-scoped package cache](docs/package-cache.md)
+  over their existing one-job RustFS identity; compiler and package caches
+  remain separate, measurable layers.
 - Configuration examples use documentation identities and address ranges.
 
 ## Development

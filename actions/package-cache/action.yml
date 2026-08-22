@@ -1,0 +1,40 @@
+name: NDDev package cache
+description: Restore or save a trust-scoped package cache through the Drakkars VPC-local RustFS endpoint.
+
+inputs:
+  operation:
+    description: Exactly restore or save.
+    required: true
+  ecosystem:
+    description: One of go, npm, pnpm, yarn, bun, uv, pip, cargo, maven, or gradle.
+    required: true
+  runtime-version:
+    description: Exact package-manager or language runtime version used in the cache identity.
+    required: true
+  lock-file:
+    description: Repository-relative dependency lock file whose digest identifies the cache.
+    required: true
+
+outputs:
+  enabled:
+    description: Whether a complete NDDev cache assignment was available.
+    value: ${{ steps.cache.outputs.enabled }}
+  hit:
+    description: Whether restore found and extracted an exact cache object.
+    value: ${{ steps.cache.outputs.hit }}
+  key_sha256:
+    description: Non-secret digest of the exact cache identity.
+    value: ${{ steps.cache.outputs.key_sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: ${{ inputs.operation }} NDDev package cache
+      id: cache
+      shell: bash
+      env:
+        NDDEV_PACKAGE_CACHE_OPERATION: ${{ inputs.operation }}
+        NDDEV_PACKAGE_CACHE_ECOSYSTEM: ${{ inputs.ecosystem }}
+        NDDEV_PACKAGE_CACHE_RUNTIME: ${{ inputs.runtime-version }}
+        NDDEV_PACKAGE_CACHE_LOCK_FILE: ${{ inputs.lock-file }}
+      run: '"$GITHUB_ACTION_PATH/package-cache.sh"'
