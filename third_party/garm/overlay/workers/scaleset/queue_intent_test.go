@@ -550,6 +550,35 @@ func TestQueueCoordinatorRecordsABatchedAssignedMessage(t *testing.T) {
 	}
 }
 
+func TestDisabledScaleSetCannotCreateOrAcquireQueueIntent(t *testing.T) {
+	now := time.Date(2026, 8, 22, 3, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "retired-scale-set")
+	scaleSet.Enabled = false
+	job := testQueueJob(101, "owner", "repo", now)
+	job.RunnerRequestID = 0
+	job.MessageType = params.MessageTypeJobAssigned
+	if deferred, err := coordinator.ObserveLifecycle(scaleSet, testQueueEntityForJob(job), []params.ScaleSetJobMessage{job}, nil, nil); err != nil || deferred {
+		t.Fatalf("disabled lifecycle deferred=%t err=%v", deferred, err)
+	}
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatalf("disabled available message failed: %v", err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSet, []params.ScaleSetJobMessage{job})
+	if err != nil || len(selected) != 0 {
+		t.Fatalf("disabled selection=%v err=%v", selected, err)
+	}
+	if fileExists(coordinator.journalPath) {
+		journal, readErr := readQueueIntentJournal(coordinator.journalPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if len(journal.Intents) != 0 {
+			t.Fatalf("disabled scale set wrote intents: %#v", journal.Intents)
+		}
+	}
+}
+
 func TestQueueCoordinatorCompletionPromotesQueuedIntentWithoutRedelivery(t *testing.T) {
 	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
@@ -1244,7 +1273,7 @@ func testQueueScaleSetResourceMap() map[string]queueScaleSetResources {
 }
 
 func testQueueScaleSet(id int, name string) params.ScaleSet {
-	return params.ScaleSet{ScaleSetID: id, Name: name, MaxRunners: 1}
+	return params.ScaleSet{ScaleSetID: id, Name: name, MaxRunners: 1, Enabled: true}
 }
 
 func testQueueEntityForJob(job params.ScaleSetJobMessage) params.ForgeEntity {
