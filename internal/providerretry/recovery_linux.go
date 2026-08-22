@@ -53,8 +53,10 @@ type RecoveryResult struct {
 type Snapshot struct {
 	Generation               uint64         `json:"generation"`
 	Records                  int            `json:"records"`
+	DeferredRecords          int            `json:"deferred_records"`
 	TerminalCircuits         int            `json:"terminal_circuits"`
 	ByErrorClass             map[string]int `json:"by_error_class"`
+	DeferredByErrorClass     map[string]int `json:"deferred_by_error_class"`
 	OldestTerminalAgeSeconds int64          `json:"oldest_terminal_age_seconds"`
 	NextRetryDelaySeconds    int64          `json:"next_retry_delay_seconds"`
 }
@@ -72,9 +74,10 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 	}
 	now = now.UTC()
 	result := Snapshot{
-		Generation:   state.Generation,
-		Records:      len(state.Records),
-		ByErrorClass: map[string]int{"capacity": 0, "identity": 0, "intent": 0, "provider": 0, "timeout": 0, "unknown": 0},
+		Generation:           state.Generation,
+		Records:              len(state.Records),
+		ByErrorClass:         retryClassCounts(),
+		DeferredByErrorClass: retryClassCounts(),
 	}
 	for key, retry := range state.Records {
 		class := retry.LastErrorClass
@@ -82,6 +85,11 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 			class = "unknown"
 		}
 		result.ByErrorClass[class]++
+		deferred := retry.NextAllowedAt.After(now) || retry.TerminalUntil.After(now)
+		if deferred {
+			result.DeferredRecords++
+			result.DeferredByErrorClass[class]++
+		}
 		if retry.NextAllowedAt.After(now) {
 			delay := int64(retry.NextAllowedAt.Sub(now) / time.Second)
 			if result.NextRetryDelaySeconds == 0 || delay < result.NextRetryDelaySeconds {
@@ -97,6 +105,10 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 		}
 	}
 	return result, nil
+}
+
+func retryClassCounts() map[string]int {
+	return map[string]int{"capacity": 0, "identity": 0, "intent": 0, "provider": 0, "timeout": 0, "unknown": 0}
 }
 
 func retryDomainKey(key string) string {
