@@ -51,9 +51,11 @@ All compute members form one work-conserving CPU, memory and storage pool.
 Labels describe capabilities and trust; they do not own hosts or permanent
 capacity. Every safe resource may be used when eligible work exists.
 
-Admission reserves declared resources before GitHub job acquisition. Provider
-and placement checks remain physical safety authorities. Capacity pressure is
-bounded backpressure, not a provider-failure storm.
+Admission reserves a measured p95 envelope before GitHub job acquisition, not
+the container's worst-case cgroup ceiling. Hard Incus CPU/memory limits remain
+protection against one runaway job. Host PSI, disk and reserve checks remain
+the physical stop authority; safe idle headroom is usable capacity, not an
+imaginary simultaneous hard-limit allocation.
 
 Each published class carries a portable default and a bounded CPU envelope.
 An estate may tune vCPU inside that envelope from real-job telemetry to improve
@@ -61,8 +63,9 @@ complete-pipeline time. Memory, disk, trust, credentials, network, Docker and
 isolation remain exact class guarantees; CPU cannot be tuned below or above the
 published bounds.
 
-Cluster placement packs eligible workers by the smallest safe remaining hard
-memory after the request. Pressure, disk and host reserve checks run first.
+Cluster placement packs eligible workers by the smallest safe remaining
+measured memory reservation after the request. Pressure, disk and host reserve
+checks run first.
 This best-fit policy prevents small jobs from fragmenting every member and
 preserves contiguous capacity for larger capability classes without dedicating
 a host or leaving safe capacity idle.
@@ -76,10 +79,12 @@ The engine supports exactly three owner-configured levels:
 2. background.
 
 The private estate decides which exact scale sets receive each level. A high
-job moves ahead of queued ordinary work and may use the entire safe fleet, but
-never interrupts a running job. Scheduled work is background unless it uses a
-high scale set. Background work ages into ordinary service so it cannot starve
-forever.
+job moves ahead of queued ordinary work, but when another repository is waiting
+one repository may hold at most 75 percent of fleet slots and measured CPU or
+memory. The remaining 25 percent prevents cross-repository starvation. Without
+competition the repository may use the entire safe fleet. No policy interrupts
+a running job. Scheduled work is background unless it uses a high scale set.
+Background work ages into ordinary service so it cannot starve forever.
 
 Background work has a separate bounded concurrency envelope. Aging selects
 which background job receives those slots; it never lets a long maintenance or

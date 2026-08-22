@@ -384,6 +384,14 @@ func validatePool(add func(string, string), prefix string, pool Pool) {
 	if pool.Resources.DiskGiB < 10 || pool.Resources.DiskGiB > 100 {
 		add(prefix+".resources.disk_gib", "must be between 10 and 100 GiB")
 	}
+	reservation := pool.EffectiveReservation()
+	if reservation.CPUUnits < 1 || reservation.CPUUnits > pool.Resources.VCPU {
+		add(prefix+".reservation.cpu_units", "must be positive and no greater than the hard vCPU limit")
+	}
+	if reservation.MemoryMiB < 256 || reservation.MemoryMiB%256 != 0 ||
+		reservation.MemoryMiB > pool.Resources.MemoryMiB {
+		add(prefix+".reservation.memory_mib", "must be at least 256 MiB, divisible by 256 and no greater than the hard memory limit")
+	}
 	if pool.MaxRunning < 1 {
 		add(prefix+".max_running", "must be positive")
 	}

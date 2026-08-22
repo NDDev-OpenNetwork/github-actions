@@ -11,7 +11,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 const maxConfigBytes = 64 * 1024
 
 type ResourceBudget struct {
@@ -20,9 +20,11 @@ type ResourceBudget struct {
 }
 
 type ScaleSetResources struct {
-	CPUUnits  int `json:"cpu_units"`
-	MemoryMiB int `json:"memory_mib"`
-	Priority  int `json:"priority"`
+	CPUUnits             int `json:"cpu_units"`
+	MemoryMiB            int `json:"memory_mib"`
+	ReservationCPUUnits  int `json:"reservation_cpu_units"`
+	ReservationMemoryMiB int `json:"reservation_memory_mib"`
+	Priority             int `json:"priority"`
 }
 
 type RepositoryPolicy struct {
@@ -31,19 +33,20 @@ type RepositoryPolicy struct {
 }
 
 type Config struct {
-	SchemaVersion          int                          `json:"schema_version"`
-	MaxInFlight            int                          `json:"max_in_flight"`
-	MaxBackgroundInFlight  int                          `json:"max_background_in_flight"`
-	DefaultRepositoryLimit int                          `json:"default_repository_limit"`
-	DefaultWeight          uint64                       `json:"default_weight"`
-	QueuedTTLSeconds       int                          `json:"queued_ttl_seconds"`
-	AcquiringTTLSeconds    int                          `json:"acquiring_ttl_seconds"`
-	AcquiredTTLSeconds     int                          `json:"acquired_ttl_seconds"`
-	ExecutionTTLSeconds    int                          `json:"execution_ttl_seconds"`
-	PriorityAgingSeconds   int                          `json:"priority_aging_seconds"`
-	Capacity               ResourceBudget               `json:"capacity"`
-	ScaleSets              map[string]ScaleSetResources `json:"scale_sets"`
-	Repositories           map[string]RepositoryPolicy  `json:"repositories"`
+	SchemaVersion             int                          `json:"schema_version"`
+	MaxInFlight               int                          `json:"max_in_flight"`
+	MaxBackgroundInFlight     int                          `json:"max_background_in_flight"`
+	DefaultRepositoryLimit    int                          `json:"default_repository_limit"`
+	DefaultWeight             uint64                       `json:"default_weight"`
+	QueuedTTLSeconds          int                          `json:"queued_ttl_seconds"`
+	AcquiringTTLSeconds       int                          `json:"acquiring_ttl_seconds"`
+	AcquiredTTLSeconds        int                          `json:"acquired_ttl_seconds"`
+	ExecutionTTLSeconds       int                          `json:"execution_ttl_seconds"`
+	PriorityAgingSeconds      int                          `json:"priority_aging_seconds"`
+	MaxRepositorySharePercent int                          `json:"max_repository_share_percent"`
+	Capacity                  ResourceBudget               `json:"capacity"`
+	ScaleSets                 map[string]ScaleSetResources `json:"scale_sets"`
+	Repositories              map[string]RepositoryPolicy  `json:"repositories"`
 }
 
 func Load(path string) (Config, error) {
@@ -78,7 +81,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("queue admission identity or count limits are invalid")
 	}
 	if c.QueuedTTLSeconds != 600 || c.AcquiringTTLSeconds != 120 || c.AcquiredTTLSeconds != 600 ||
-		c.ExecutionTTLSeconds != 86400 || c.PriorityAgingSeconds != 300 {
+		c.ExecutionTTLSeconds != 86400 || c.PriorityAgingSeconds != 300 ||
+		c.MaxRepositorySharePercent != 75 {
 		return fmt.Errorf("queue admission TTL/aging policy is invalid")
 	}
 	if c.Capacity.CPUUnits < 1 || c.Capacity.MemoryMiB < 1024 || len(c.ScaleSets) == 0 || c.Repositories == nil {
@@ -87,6 +91,9 @@ func (c Config) Validate() error {
 	for name, resources := range c.ScaleSets {
 		if name == "" || resources.CPUUnits < 1 || resources.CPUUnits > c.Capacity.CPUUnits ||
 			resources.MemoryMiB < 1 || resources.MemoryMiB > c.Capacity.MemoryMiB ||
+			resources.ReservationCPUUnits < 1 || resources.ReservationCPUUnits > resources.CPUUnits ||
+			resources.ReservationMemoryMiB < 256 || resources.ReservationMemoryMiB%256 != 0 ||
+			resources.ReservationMemoryMiB > resources.MemoryMiB ||
 			resources.Priority < 0 || resources.Priority > 2 {
 			return fmt.Errorf("queue admission scale-set resources %q are invalid", name)
 		}
@@ -112,8 +119,13 @@ func (c Config) ValidateAgainstPlatform(platform config.Config) error {
 		if !exists {
 			return fmt.Errorf("queue admission omits scale set %q", pool.ScaleSetName)
 		}
-		want := ScaleSetResources{CPUUnits: pool.Resources.VCPU, MemoryMiB: pool.Resources.MemoryMiB, Priority: declared.Priority}
-		if declared.CPUUnits != want.CPUUnits || declared.MemoryMiB != want.MemoryMiB {
+		want := ScaleSetResources{
+			CPUUnits: pool.Resources.VCPU, MemoryMiB: pool.Resources.MemoryMiB,
+			ReservationCPUUnits:  pool.EffectiveReservation().CPUUnits,
+			ReservationMemoryMiB: pool.EffectiveReservation().MemoryMiB,
+			Priority:             declared.Priority,
+		}
+		if declared != want {
 			return fmt.Errorf("queue resources for %q are %#v, want %#v", pool.ScaleSetName, declared, want)
 		}
 		if previous, duplicate := seen[pool.ScaleSetName]; duplicate && previous != want {

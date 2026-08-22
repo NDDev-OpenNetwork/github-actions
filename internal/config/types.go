@@ -157,10 +157,15 @@ type Pool struct {
 	// and this field is the half the scale set name cannot carry. Empty
 	// means the fleet's own tenant, which keeps every single-tenant host
 	// configuration valid without restating what it already means.
-	Tenant       string       `json:"tenant,omitempty" yaml:"tenant,omitempty"`
-	ScaleSetName string       `json:"scale_set_name" yaml:"scale_set_name"`
-	Trust        string       `json:"trust" yaml:"trust"`
-	Resources    Resources    `json:"resources" yaml:"resources"`
+	Tenant       string    `json:"tenant,omitempty" yaml:"tenant,omitempty"`
+	ScaleSetName string    `json:"scale_set_name" yaml:"scale_set_name"`
+	Trust        string    `json:"trust" yaml:"trust"`
+	Resources    Resources `json:"resources" yaml:"resources"`
+	// Reservation is measured admission demand, not the container hard limit.
+	// Incus still applies Resources as the safety ceiling; queue/provider
+	// admission and placement use this p95-derived envelope so idle headroom is
+	// not reserved as if every worker simultaneously reached its hard maximum.
+	Reservation  Reservation  `json:"reservation" yaml:"reservation"`
 	MaxRunning   int          `json:"max_running" yaml:"max_running"`
 	Warm         WarmPool     `json:"warm" yaml:"warm"`
 	Capabilities Capabilities `json:"capabilities" yaml:"capabilities"`
@@ -178,6 +183,27 @@ type Resources struct {
 	VCPU      int `json:"vcpu" yaml:"vcpu"`
 	MemoryMiB int `json:"memory_mib" yaml:"memory_mib"`
 	DiskGiB   int `json:"disk_gib" yaml:"disk_gib"`
+}
+
+type Reservation struct {
+	CPUUnits  int `json:"cpu_units" yaml:"cpu_units"`
+	MemoryMiB int `json:"memory_mib" yaml:"memory_mib"`
+}
+
+// EffectiveReservation returns the measured fleet admission envelope. The
+// current immutable classes use seven-day OpenObserve p95 memory rounded up to
+// 256 MiB; one CPU unit lets host PSI, rather than worst-case cgroup ceilings,
+// close admission under real contention. Unknown development fixtures retain
+// their hard limits until they have measured evidence.
+func (p Pool) EffectiveReservation() Reservation {
+	if p.Reservation.CPUUnits > 0 && p.Reservation.MemoryMiB > 0 {
+		return p.Reservation
+	}
+	memory := map[int]int{2048: 512, 3072: 512, 4096: 2560, 6144: 2048}[p.Resources.MemoryMiB]
+	if memory == 0 {
+		return Reservation{CPUUnits: p.Resources.VCPU, MemoryMiB: p.Resources.MemoryMiB}
+	}
+	return Reservation{CPUUnits: 1, MemoryMiB: memory}
 }
 
 type WarmPool struct {

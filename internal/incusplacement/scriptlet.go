@@ -5,6 +5,7 @@ package incusplacement
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,14 +22,29 @@ func Render(cfg config.Config) (string, error) {
 	if err := cfg.Validate(); err != nil {
 		return "", err
 	}
-	maxWorkerMemoryMiB := 0
+	maxWorkerReservationMiB := 0
+	reservationByLimit := make(map[int]int)
 	for _, pool := range cfg.Pools {
-		if pool.Resources.MemoryMiB > maxWorkerMemoryMiB {
-			maxWorkerMemoryMiB = pool.Resources.MemoryMiB
+		reservation := pool.EffectiveReservation()
+		if previous, exists := reservationByLimit[pool.Resources.MemoryMiB]; exists && previous != reservation.MemoryMiB {
+			return "", fmt.Errorf("placement requires one measured reservation per hard memory limit")
+		}
+		reservationByLimit[pool.Resources.MemoryMiB] = reservation.MemoryMiB
+		if reservation.MemoryMiB > maxWorkerReservationMiB {
+			maxWorkerReservationMiB = reservation.MemoryMiB
 		}
 	}
-	if maxWorkerMemoryMiB == 0 {
+	if maxWorkerReservationMiB == 0 {
 		return "", fmt.Errorf("placement requires at least one worker memory class")
+	}
+	limits := make([]int, 0, len(reservationByLimit))
+	for limit := range reservationByLimit {
+		limits = append(limits, limit)
+	}
+	sort.Ints(limits)
+	entries := make([]string, 0, len(limits))
+	for _, limit := range limits {
+		entries = append(entries, fmt.Sprintf("%d: %d", limit, reservationByLimit[limit]))
 	}
 
 	values := map[string]string{
@@ -36,7 +52,8 @@ func Render(cfg config.Config) (string, error) {
 		"POOL":                   strconv.Quote(cfg.Incus.StoragePool),
 		"MINIMUM_MEMORY_MIB":     strconv.Itoa(cfg.HostReserve.MinimumMemoryMiB),
 		"MINIMUM_MEMORY_PERCENT": strconv.Itoa(cfg.HostReserve.MinimumPercent),
-		"MAX_WORKER_MEMORY_MIB":  strconv.Itoa(maxWorkerMemoryMiB),
+		"MAX_WORKER_MEMORY_MIB":  strconv.Itoa(maxWorkerReservationMiB),
+		"RESERVATION_BY_LIMIT":   "{" + strings.Join(entries, ", ") + "}",
 		"PRESSURE_SCHEMA":        strconv.Quote("1"),
 		"PRESSURE_OPEN":          strconv.Quote("open"),
 	}
@@ -61,6 +78,7 @@ POOL = {{POOL}}
 MINIMUM_MEMORY_BYTES = {{MINIMUM_MEMORY_MIB}} * 1024 * 1024
 MINIMUM_MEMORY_PERCENT = {{MINIMUM_MEMORY_PERCENT}}
 MAX_WORKER_MEMORY_BYTES = {{MAX_WORKER_MEMORY_MIB}} * 1024 * 1024
+RESERVATION_BY_LIMIT_MIB = {{RESERVATION_BY_LIMIT}}
 PRESSURE_SCHEMA = {{PRESSURE_SCHEMA}}
 PRESSURE_OPEN = {{PRESSURE_OPEN}}
 
@@ -77,7 +95,10 @@ def committed_memory_bytes(member_name, pending_count):
         memory = instance.expanded_config.get("limits.memory", "")
         if not memory.endswith("MiB"):
             fail("fleet instance has non-MiB memory limit: " + instance.name)
-        committed += int(memory[:-3]) * 1024 * 1024
+        limit_mib = int(memory[:-3])
+        if limit_mib not in RESERVATION_BY_LIMIT_MIB:
+            fail("fleet instance has no measured memory reservation: " + instance.name)
+        committed += RESERVATION_BY_LIMIT_MIB[limit_mib] * 1024 * 1024
     pending_without_record = pending_count - len(instances)
     if pending_without_record < 0:
         fail("fleet pending instance count is below committed records")
@@ -88,6 +109,10 @@ def instance_placement(request, candidate_members):
         return
 
     want = get_instance_resources()
+    want_limit_mib = want.memory_size // (1024 * 1024)
+    if want_limit_mib not in RESERVATION_BY_LIMIT_MIB:
+        fail("requested worker has no measured memory reservation")
+    want_reservation_bytes = RESERVATION_BY_LIMIT_MIB[want_limit_mib] * 1024 * 1024
     chosen = ""
     chosen_remaining = -1
     chosen_count = -1
@@ -108,7 +133,7 @@ def instance_placement(request, candidate_members):
         pending_count = get_instances_count(PROJECT, name, True)
         committed = committed_memory_bytes(name, pending_count)
         reserve = memory_reserve_bytes(resources.memory.total)
-        remaining = resources.memory.total - committed - want.memory_size - reserve
+        remaining = resources.memory.total - committed - want_reservation_bytes - reserve
         if remaining < 0:
             continue
 
