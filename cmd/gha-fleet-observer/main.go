@@ -215,6 +215,7 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		},
 		Service:            serviceState,
 		DiagnosticMaxBytes: providerConfiguration.DiagnosticsMaxTotalBytes,
+		CreatedVisibility:  fleetobserve.NewCreatedVisibilityTracker(),
 	}
 	if platformOwnsDiagnosticExporter(platform) {
 		collector.Export = func() (diagnosticexport.Status, error) {

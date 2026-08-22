@@ -30,6 +30,11 @@ Versioning.
 
 ### Changed
 
+- Added observer schema v14 with a stateful first-observed horizon for created
+  leases temporarily absent from Incus during terminal teardown. One
+  cross-source sample no longer flaps platform health; absence beyond 30
+  seconds remains a strict missing-instance blocker, with separate count and
+  oldest-age metrics.
 - Added GARM derivative `v0.2.1-nddev.64`: when GitHub has already moved a
   direct-JIT job to `in_progress`, authoritative reconciliation now binds its
   repository before removing the stale queued DB duplicate. A binding failure

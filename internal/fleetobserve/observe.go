@@ -18,16 +18,18 @@ import (
 )
 
 const (
-	// 13 adds bounded GitHub run/request/runner correlation completeness. 12 separates bounded successful-delete convergence from persistent missing
+	// 14 separates first-observed created-to-deleting inventory convergence from
+	// persistent missing ownership. 13 adds bounded GitHub run/request/runner correlation completeness. 12 separates bounded successful-delete convergence from persistent missing
 	// runner ownership. 11 separated exact image builder/smoke inventory from orphan job runners.
 	// 9 added exact JobStarted runner correlation and symmetric created-without-
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 13
+	SchemaVersion                   = 14
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 	deletingVisibilityGrace         = 30 * time.Second
+	createdVisibilityGrace          = 30 * time.Second
 )
 
 const (
@@ -89,6 +91,56 @@ type Collector struct {
 	Service            ServiceSource
 	DiagnosticMaxBytes int64
 	Now                func() time.Time
+	CreatedVisibility  *CreatedVisibilityTracker
+}
+
+// CreatedVisibilityTracker remembers when a created lease was first observed
+// absent from Incus. Lease age cannot answer this question: a worker can run for
+// hours before terminal teardown creates a short journal/inventory race.
+type CreatedVisibilityTracker struct {
+	mu        sync.Mutex
+	firstSeen map[string]time.Time
+	grace     time.Duration
+}
+
+func NewCreatedVisibilityTracker() *CreatedVisibilityTracker {
+	return &CreatedVisibilityTracker{
+		firstSeen: make(map[string]time.Time),
+		grace:     createdVisibilityGrace,
+	}
+}
+
+func (t *CreatedVisibilityTracker) observe(names []string, now time.Time) (map[string]bool, int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	current := make(map[string]struct{}, len(names))
+	within := make(map[string]bool, len(names))
+	for _, name := range names {
+		current[name] = struct{}{}
+		first, exists := t.firstSeen[name]
+		if !exists || first.After(now) {
+			first = now
+			t.firstSeen[name] = first
+		}
+		age := now.Sub(first)
+		within[name] = age <= t.grace
+	}
+	for name := range t.firstSeen {
+		if _, exists := current[name]; !exists {
+			delete(t.firstSeen, name)
+		}
+	}
+	var oldest int64
+	for name, isWithin := range within {
+		if !isWithin {
+			continue
+		}
+		age := int64(now.Sub(t.firstSeen[name]) / time.Second)
+		if age > oldest {
+			oldest = age
+		}
+	}
+	return within, oldest
 }
 
 type Snapshot struct {
@@ -159,12 +211,14 @@ type QueueSummary struct {
 }
 
 type IncusSummary struct {
-	VisibleInstances            int `json:"visible_instances"`
-	VisibleMaintenanceInstances int `json:"visible_maintenance_instances"`
-	OrphanInstances             int `json:"orphan_instances"`
-	MissingInstances            int `json:"missing_instances"`
-	MissingDeletingWithinGrace  int `json:"missing_deleting_within_grace"`
-	MissingMaintenanceInstances int `json:"missing_maintenance_instances"`
+	VisibleInstances            int   `json:"visible_instances"`
+	VisibleMaintenanceInstances int   `json:"visible_maintenance_instances"`
+	OrphanInstances             int   `json:"orphan_instances"`
+	MissingInstances            int   `json:"missing_instances"`
+	MissingDeletingWithinGrace  int   `json:"missing_deleting_within_grace"`
+	MissingCreatedWithinGrace   int   `json:"missing_created_within_grace"`
+	OldestMissingCreatedAgeSecs int64 `json:"oldest_missing_created_within_grace_age_seconds"`
+	MissingMaintenanceInstances int   `json:"missing_maintenance_instances"`
 }
 
 type ServiceStatus struct {
@@ -325,6 +379,20 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		} else {
 			snapshot.Incus.VisibleInstances = len(visibleNames)
 			if journalErr == nil {
+				createdWithinGrace := map[string]bool{}
+				if c.CreatedVisibility != nil {
+					missingCreated := make([]string, 0)
+					for name, lease := range expectedNames {
+						if lease.State != providerjournal.StateCreated {
+							continue
+						}
+						if _, exists := visibleNames[name]; !exists {
+							missingCreated = append(missingCreated, name)
+						}
+					}
+					createdWithinGrace, snapshot.Incus.OldestMissingCreatedAgeSecs =
+						c.CreatedVisibility.observe(missingCreated, now)
+				}
 				for name := range visibleNames {
 					if _, exists := coveredNames[name]; !exists {
 						if providerjournal.IsImageMaintenanceInstance(name) {
@@ -339,6 +407,8 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 						age := now.Sub(lease.UpdatedAt)
 						if lease.State == providerjournal.StateDeleting && age >= 0 && age <= deletingVisibilityGrace {
 							snapshot.Incus.MissingDeletingWithinGrace++
+						} else if createdWithinGrace[name] {
+							snapshot.Incus.MissingCreatedWithinGrace++
 						} else {
 							snapshot.Incus.MissingInstances++
 						}
