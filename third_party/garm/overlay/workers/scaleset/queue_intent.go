@@ -843,7 +843,7 @@ func migrateLegacyQueueIntentOwnership(journal *queueIntentJournal, config queue
 	for key, intent := range journal.Intents {
 		switch {
 		case intent.State == queueStateAssigned && intent.RunnerRequestID == 0 &&
-			intent.ExpiresAt.After(now.Add(time.Duration(config.AcquiringTTLSeconds)*time.Second)):
+			intent.ExpiresAt.After(now.Add(time.Duration(config.AcquiredTTLSeconds)*time.Second)):
 			// Before nddev.41, sparse JobAssigned consumed a slot and received the
 			// execution horizon. Current provisional ownership has the bounded
 			// acquiring horizon already and must not be downgraded on every read.
