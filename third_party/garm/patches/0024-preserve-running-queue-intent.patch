@@ -9,7 +9,7 @@
  			}
  			if resp != nil && r.deferAuthoritativeReconcile(time.Now(), resp.StatusCode) {
  				slog.WarnContext(r.ctx, "authoritative job reconciliation deferred after GitHub access refusal",
-@@ -2176,14 +2176,15 @@
+@@ -2176,14 +2176,21 @@
  	}
  
  	if len(matched) == 0 {
@@ -22,8 +22,14 @@
  	}
  	if matched[0].GetStatus() != "queued" {
 -		return r.deleteStaleScaleSetJob(job, "job is no longer queued")
-+		releaseIntent := matched[0].GetStatus() != "in_progress"
-+		return r.deleteStaleScaleSetJob(job, "job is no longer queued", releaseIntent)
++		if matched[0].GetStatus() == "in_progress" {
++			if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
++				slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to bind authoritative running job", "scale_set_job_id", job.ScaleSetJobID)
++				return false
++			}
++			return r.deleteStaleScaleSetJob(job, "job is no longer queued", false)
++		}
++		return r.deleteStaleScaleSetJob(job, "job is no longer queued", true)
  	}
  	if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
  		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to rehydrate authoritative queued job", "scale_set_job_id", job.ScaleSetJobID)
@@ -64,21 +70,29 @@
  	s.T().Cleanup(func() {
  		nddevRemoveAuthoritativeQueueIntent = originalQueueReconciler
  		nddevEnsureAuthoritativeQueueIntent = originalQueueHydrator
-@@ -874,6 +876,30 @@
+@@ -874,6 +876,39 @@
  	s.False(s.mgr.reconcileStaleScaleSetJob(job))
  }
  
 +func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQueueIntent() {
 +	released := false
++	reconciled := false
 +	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, _ string) (bool, error) {
 +		released = true
 +		return true, nil
 +	}
++	nddevEnsureAuthoritativeQueueIntent = func(_ context.Context, _ params.ScaleSet, _ params.ForgeEntity, got params.Job) (bool, error) {
++		reconciled = got.ScaleSetJobID == "scale-job-started" && got.RepositoryOwner == "test-owner" && got.RepositoryName == "test-repo"
++		return true, nil
++	}
++	_, err := s.store.CreateEntityScaleSet(s.adminCtx, s.entity, params.CreateScaleSetParams{ProviderName: "test-provider", Name: "nddev-linux-standard", Image: "test-image", Flavor: "test-flavor", MaxRunners: 1, OSType: commonParams.Linux, OSArch: commonParams.Amd64, Enabled: true})
++	s.Require().NoError(err)
 +	job := params.Job{
 +		ScaleSetJobID: "scale-job-started", RunID: 4444, Name: "soak-fast-cpu-1",
 +		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++		Labels: []string{"nddev-linux-standard"},
 +	}
-+	_, err := s.store.CreateOrUpdateJob(s.adminCtx, job)
++	_, err = s.store.CreateOrUpdateJob(s.adminCtx, job)
 +	s.Require().NoError(err)
 +	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4444), mock.Anything).
 +		Return(&github.Jobs{Jobs: []*github.WorkflowJob{{
@@ -87,6 +101,7 @@
 +
 +	s.True(s.mgr.reconcileStaleScaleSetJob(job))
 +	s.False(released, "a stale queued DB duplicate released the running capacity intent")
++	s.True(reconciled, "the authoritative repository was not bound before the queued DB duplicate was removed")
 +	jobs, err := s.store.ListAllJobs(s.adminCtx)
 +	s.Require().NoError(err)
 +	s.Empty(jobs)

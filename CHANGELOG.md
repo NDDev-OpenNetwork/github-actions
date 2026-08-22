@@ -30,6 +30,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.64`: when GitHub has already moved a
+  direct-JIT job to `in_progress`, authoritative reconciliation now binds its
+  repository before removing the stale queued DB duplicate. A binding failure
+  retains the row for retry; running intent ownership is never released.
 - Added GARM derivative `v0.2.1-nddev.63`: authoritative reconciliation now
   binds an existing organization-scoped JobAssigned intent to the exact
   repository from GARM's verified queued-job row. Direct-JIT jobs no longer
