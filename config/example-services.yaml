@@ -24,10 +24,10 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.61
+  manager_version: v0.2.1-nddev.62
   scheduling_mode: scale-set
   provider: incus
-  provider_version: v0.1.5-nddev.64
+  provider_version: v0.1.5-nddev.65
   provider_interface: v0.1.0
   worker_kind: incus-container
   runner: actions/runner

@@ -113,6 +113,8 @@ var runtimeContractFields = []string{
 	"authoritative_idle_offline_runner_reaping",
 	"authoritative_access_refusal_backoff_seconds",
 	"job_started_runner_identity",
+	"job_available_correlation_binding",
+	"job_started_numeric_runner_identity",
 	"immutable_same_phase_entry_time",
 	"weighted_cpu_memory_admission",
 	"priority_zero_capacity_reservation",
