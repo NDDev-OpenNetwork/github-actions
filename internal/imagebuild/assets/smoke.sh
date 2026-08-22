@@ -197,4 +197,4 @@ jq -n \
   --arg nested_cpu_flags "${nested_cpu_flags}" \
   --argjson root_disk_bytes "${root_disk_bytes}" \
   --argjson root_filesystem_bytes "${root_bytes}" \
-  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",warm_agent:"ready-unregistered",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
+  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'

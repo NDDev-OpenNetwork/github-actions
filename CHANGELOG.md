@@ -15,6 +15,11 @@ Versioning.
 
 ### Changed
 
+- Separated exact visible image-builder/smoke inventory from orphan GitHub job
+  runners in observer schema v11. Maintenance remains measurable without
+  making the production platform unhealthy, while malformed lookalike names
+  remain blockers. Image smoke evidence now reports `startup_mode: cold-only`
+  instead of the retired warm-agent label.
 - Removed dormant warm-runner services from the cold-only Incus container
   images. Cold bootstrap now verifies and reuses the already materialized clean
   runner tree instead of copying and recursively chowning it while a second

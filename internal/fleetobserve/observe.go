@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	// 9 adds exact JobStarted runner correlation and symmetric created-without-
+	// 11 separates exact image builder/smoke inventory from orphan job runners.
+	// 9 added exact JobStarted runner correlation and symmetric created-without-
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 10
+	SchemaVersion                   = 11
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 )
@@ -153,6 +154,7 @@ type QueueSummary struct {
 
 type IncusSummary struct {
 	VisibleInstances            int `json:"visible_instances"`
+	VisibleMaintenanceInstances int `json:"visible_maintenance_instances"`
 	OrphanInstances             int `json:"orphan_instances"`
 	MissingInstances            int `json:"missing_instances"`
 	MissingMaintenanceInstances int `json:"missing_maintenance_instances"`
@@ -318,7 +320,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			if journalErr == nil {
 				for name := range visibleNames {
 					if _, exists := coveredNames[name]; !exists {
-						snapshot.Incus.OrphanInstances++
+						if isImageMaintenanceInstance(name) {
+							snapshot.Incus.VisibleMaintenanceInstances++
+						} else {
+							snapshot.Incus.OrphanInstances++
+						}
 					}
 				}
 				for name := range expectedNames {
@@ -393,6 +399,21 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Pools[index].ContainerAdmissionReady = exists && backend.Implementation == "incus-container" && snapshot.Healthy
 	}
 	return snapshot
+}
+
+func isImageMaintenanceInstance(name string) bool {
+	for _, prefix := range []string{"gha-image-builder-", "gha-image-smoke-"} {
+		suffix, found := strings.CutPrefix(name, prefix)
+		if !found || len(suffix) != 12 {
+			continue
+		}
+		if strings.IndexFunc(suffix, func(character rune) bool {
+			return (character < '0' || character > '9') && (character < 'a' || character > 'f')
+		}) == -1 {
+			return true
+		}
+	}
+	return false
 }
 
 type executionCorrelation struct {
