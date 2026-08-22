@@ -10,6 +10,10 @@ self-hosted-runner:
     - nddev-linux-standard
     - nddev-linux-integration
     - nddev-linux-fast
-    # Not a published class: the canary dispatches into whichever class it is
-    # testing and carries its own label for the run.
-    - nddev-canary
+    - nddev-linux-untrusted
+    - nddev-linux-release
+    - nddev-linux-container-canary
+    - nddev-linux-docker-container-canary
+    - nddev-priority-standard
+    - nddev-priority-integration
+    - nddev-priority-untrusted
