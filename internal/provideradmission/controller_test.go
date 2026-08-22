@@ -491,6 +491,35 @@ func TestReconcileAdoptsObservedInstanceWithoutNewCapacityDecision(t *testing.T)
 	}
 }
 
+func TestReconcileMigratesOnlyResourceAccountingForSameLiveInstance(t *testing.T) {
+	now := time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	legacy := request("runner-existing")
+	if decision, err := controller.Admit(context.Background(), healthyHost(), nil, legacy); err != nil || !decision.Admitted {
+		t.Fatalf("legacy admission decision=%#v err=%v", decision, err)
+	}
+	measured := legacy.Allocation
+	measured.VCPU = 1
+	measured.MemoryMiB = 2560
+	if err := controller.Reconcile(context.Background(), []Allocation{measured}); err != nil {
+		t.Fatalf("measured reservation migration failed: %v", err)
+	}
+	journal, err := controller.Store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := journal.Leases[measured.InstanceName]
+	if lease.VCPU != measured.VCPU || lease.MemoryMiB != measured.MemoryMiB {
+		t.Fatalf("resource accounting was not migrated: %#v", lease)
+	}
+
+	conflicting := measured
+	conflicting.ImageFingerprint = strings.Repeat("b", 64)
+	if err := controller.Reconcile(context.Background(), []Allocation{conflicting}); err == nil {
+		t.Fatal("resource migration accepted different immutable image identity")
+	}
+}
+
 func TestForeignObservedInstanceFailsClosed(t *testing.T) {
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
 	controller := testController(t, &now)

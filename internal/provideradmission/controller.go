@@ -526,14 +526,23 @@ func (c Controller) reconcile(journal *providerjournal.Journal, observed map[str
 		allocation, exists := observed[name]
 		if exists {
 			if err := leaseMatches(lease, allocation); err != nil {
-				claim, claimed := claimsByInstance[name]
-				if !claimed || !allocationMatchesClaim(allocation, claim) ||
-					lease.InstanceName != allocation.InstanceName || lease.ControllerID != allocation.ControllerID ||
-					lease.PoolName != allocation.PoolName || lease.VCPU != allocation.VCPU ||
-					lease.MemoryMiB != allocation.MemoryMiB || lease.ImageFingerprint != allocation.ImageFingerprint {
-					return fmt.Errorf("observed instance conflicts with journal: %w", err)
+				if leaseMatchesIdentity(lease, allocation) {
+					// Resource accounting is release policy, not immutable instance
+					// identity. Adopt the current measured reservation atomically so
+					// a hard-limit-to-p95 release can migrate live leases without
+					// deleting or recreating their running workers.
+					lease.VCPU = allocation.VCPU
+					lease.MemoryMiB = allocation.MemoryMiB
+				} else {
+					claim, claimed := claimsByInstance[name]
+					if !claimed || !allocationMatchesClaim(allocation, claim) ||
+						lease.InstanceName != allocation.InstanceName || lease.ControllerID != allocation.ControllerID ||
+						lease.PoolName != allocation.PoolName || lease.VCPU != allocation.VCPU ||
+						lease.MemoryMiB != allocation.MemoryMiB || lease.ImageFingerprint != allocation.ImageFingerprint {
+						return fmt.Errorf("observed instance conflicts with journal: %w", err)
+					}
+					lease.PoolID = allocation.PoolID
 				}
-				lease.PoolID = allocation.PoolID
 			}
 			observedState := normalizedObservedState(allocation.State)
 			if lease.State == providerjournal.StateWarmClaimed && observedState == providerjournal.StateWarmReady {
@@ -608,6 +617,14 @@ func (c Controller) reconcile(journal *providerjournal.Journal, observed map[str
 		}
 	}
 	return nil
+}
+
+func leaseMatchesIdentity(lease providerjournal.Lease, allocation Allocation) bool {
+	return lease.InstanceName == allocation.InstanceName &&
+		lease.ControllerID == allocation.ControllerID &&
+		lease.PoolID == allocation.PoolID &&
+		lease.PoolName == allocation.PoolName &&
+		lease.ImageFingerprint == allocation.ImageFingerprint
 }
 
 func normalizedObservedState(state providerjournal.LeaseState) providerjournal.LeaseState {
