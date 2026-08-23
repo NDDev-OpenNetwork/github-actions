@@ -40,6 +40,9 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.65` and provider derivative
+  `v0.1.5-nddev.69`, reproducibly binding incomplete-metadata convergence to
+  capacity retry semantics instead of provider-circuit semantics.
 - Classified a bounded Incus inventory record with missing expanded flavor and
   no durable lease as capacity convergence rather than a provider defect. The
   inventory remains fail-closed and the accepted job retries, but the transient
