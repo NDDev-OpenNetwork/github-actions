@@ -38,6 +38,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilitydashboards"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilityrules"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressurepublish"
@@ -100,6 +101,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateQueueAdmission(args[1:], stdout, stderr)
 	case "validate-observability-rules":
 		return runValidateObservabilityRules(args[1:], stdout, stderr)
+	case "validate-observability-dashboards":
+		return runValidateObservabilityDashboards(args[1:], stdout, stderr)
+	case "render-openobserve-dashboards":
+		return runRenderOpenObserveDashboards(args[1:], stdout, stderr)
 	case "render-openobserve-alerts":
 		return runRenderOpenObserveAlerts(args[1:], stdout, stderr)
 	case "reconcile-openobserve-alerts":
@@ -239,6 +244,53 @@ func runValidateObservabilityRules(args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	return writeJSONOrFail(stdout, stderr, bundle)
+}
+
+func runValidateObservabilityDashboards(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-observability-dashboards", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/observability-dashboards.yaml", "strict observability dashboard bundle")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: validate-observability-dashboards requires --config")
+		return 2
+	}
+	bundle, err := observabilitydashboards.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, bundle)
+}
+
+func runRenderOpenObserveDashboards(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("render-openobserve-dashboards", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/observability-dashboards.yaml", "strict observability dashboard bundle")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: render-openobserve-dashboards requires --config")
+		return 2
+	}
+	bundle, err := observabilitydashboards.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	rendered, err := observabilitydashboards.Render(bundle)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if _, err := stdout.Write(append(rendered, '\n')); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runRenderOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
@@ -1716,5 +1768,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|render-openobserve-alerts|reconcile-openobserve-alerts|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }
