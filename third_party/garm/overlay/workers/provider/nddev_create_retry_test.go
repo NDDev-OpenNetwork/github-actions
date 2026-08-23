@@ -378,6 +378,79 @@ func TestNDDevCapacityRetrySerializesEveryScaleSetInTheMeasuredFleet(t *testing.
 	}
 }
 
+func TestNDDevExpiredFailedConcreteProbeOwnerIsReleased(t *testing.T) {
+	now := time.Date(2026, 8, 23, 8, 18, 54, 0, time.UTC)
+	oldOwner := "scale-set:entity-one:5:instance:failed"
+	newOwner := "scale-set:entity-one:5:instance:replacement"
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{
+			nddevCapacityDomainKey: {
+				JobID:          nddevCapacityDomainKey,
+				Attempts:       1,
+				LastErrorClass: "capacity",
+				UpdatedAt:      now.Add(-3 * time.Minute),
+				NextAllowedAt:  now.Add(-time.Minute),
+				ProbeOwner:     oldOwner,
+				ScaleSetName:   "nddev-linux-integration",
+				WakeReason:     "probe-leased",
+			},
+			oldOwner: {
+				JobID:          oldOwner,
+				Attempts:       1,
+				LastErrorClass: "provider",
+				UpdatedAt:      now.Add(-3 * time.Minute),
+				NextAllowedAt:  now.Add(-2 * time.Minute),
+				ScaleSetName:   "nddev-linux-integration",
+			},
+		},
+	}
+
+	if err := nddevSharedCapacityCreateAllowed(&journal, now, newOwner, "nddev-linux-integration", true); err != nil {
+		t.Fatalf("replacement create remained blocked by failed expired owner: %v", err)
+	}
+	shared := journal.Records[nddevCapacityDomainKey]
+	if shared.ProbeOwner != newOwner || shared.WakeReason != "probe-leased" || shared.NextAllowedAt != now.Add(nddevRetryAttemptLease) {
+		t.Fatalf("replacement did not acquire released shared probe: %#v", shared)
+	}
+}
+
+func TestNDDevExpiredConcreteProbeOwnerWithoutFailureRemainsOwned(t *testing.T) {
+	now := time.Date(2026, 8, 23, 8, 18, 54, 0, time.UTC)
+	activeOwner := "scale-set:entity-one:5:instance:creating"
+	newOwner := "scale-set:entity-one:5:instance:replacement"
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{
+			nddevCapacityDomainKey: {
+				JobID:          nddevCapacityDomainKey,
+				Attempts:       1,
+				LastErrorClass: "capacity",
+				UpdatedAt:      now.Add(-3 * time.Minute),
+				NextAllowedAt:  now.Add(-time.Minute),
+				ProbeOwner:     activeOwner,
+				ScaleSetName:   "nddev-linux-integration",
+				WakeReason:     "probe-leased",
+			},
+			activeOwner: {
+				JobID:         activeOwner,
+				Attempts:      1,
+				UpdatedAt:     now.Add(-3 * time.Minute),
+				NextAllowedAt: now.Add(-2 * time.Minute),
+				ScaleSetName:  "nddev-linux-integration",
+			},
+		},
+	}
+
+	err := nddevSharedCapacityCreateAllowed(&journal, now, newOwner, "nddev-linux-integration", true)
+	if err == nil || !strings.Contains(err.Error(), activeOwner) {
+		t.Fatalf("replacement displaced an owner without a recorded failure: %v", err)
+	}
+	if got := journal.Records[nddevCapacityDomainKey].ProbeOwner; got != activeOwner {
+		t.Fatalf("active owner changed to %q", got)
+	}
+}
+
 func TestNDDevCapacityDeleteWakesExactlyOneFleetDomainAcrossRestart(t *testing.T) {
 	now := time.Date(2026, 8, 23, 4, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow
