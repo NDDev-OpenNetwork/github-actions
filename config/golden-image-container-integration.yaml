@@ -2,7 +2,7 @@ schema_version: 1
 
 image:
   type: container
-  alias: nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b4
+  alias: nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b5
   current_alias: nddev-ubuntu-24.04-amd64-container-docker-current
   previous_alias: nddev-ubuntu-24.04-amd64-container-docker-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801
@@ -90,9 +90,18 @@ toolchains:
     download_url: https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-4.18.0.tgz
     archive_sha256: 606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497
 
+browser_smoke:
+  version: 151.0.7922.34
+  upstream_ref: playwright/v1.62.1:chromium:1234:ubuntu24.04-x64
+  archive: playwright-chrome-151.0.7922.34-linux64.zip
+  download_url: https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/chrome-linux64.zip
+  archive_sha256: ae8736ac28bc69278551500f219fc749575648263c43ec5990749eff43b9fcf8
+  binary_path: chrome-linux64/chrome
+
 guest:
   builder_disk_gib: 24
   variant: integration
+  browser: chromium
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
   packages:
     - build-essential
@@ -103,10 +112,40 @@ guest:
     - docker-buildx
     - docker-compose-v2
     - docker.io
+    - fonts-freefont-ttf
+    - fonts-ipafont-gothic
+    - fonts-liberation
+    - fonts-noto-color-emoji
+    - fonts-tlwg-loma-otf
+    - fonts-unifont
+    - fonts-wqy-zenhei
     - git
     - git-lfs
     - jq
+    - libasound2t64
+    - libatk-bridge2.0-0t64
+    - libatk1.0-0t64
+    - libatspi2.0-0t64
+    - libcairo2
+    - libcups2t64
+    - libdbus-1-3
+    - libdrm2
+    - libfontconfig1
+    - libfreetype6
+    - libgbm1
+    - libglib2.0-0t64
+    - libnspr4
+    - libnss3
+    - libpango-1.0-0
     - libssl-dev
+    - libx11-6
+    - libxcb1
+    - libxcomposite1
+    - libxdamage1
+    - libxext6
+    - libxfixes3
+    - libxkbcommon0
+    - libxrandr2
     - maven
     - ninja-build
     - openjdk-21-jdk-headless
@@ -121,6 +160,9 @@ guest:
     - xz-utils
     - zip
     - zstd
+    - xfonts-cyrillic
+    - xfonts-scalable
+    - xvfb
   package_versions:
     busybox-static: 1:1.36.1-6ubuntu3.1
     docker-buildx: 0.30.1-0ubuntu1~24.04.1

@@ -21,6 +21,7 @@ trap 'report_error "$?" "${LINENO:-0}" "$BASH_COMMAND"' ERR
 : "${GHA_SCCACHE_VERSION:?}"
 : "${GHA_SCCACHE_BINARY_SHA256:?}"
 : "${GHA_TOOLCHAINS_B64:?}"
+: "${GHA_BROWSER:=}"
 
 cleanup_paths=()
 smoke_user_created=0
@@ -54,6 +55,7 @@ if grep -qx uninitialized /etc/machine-id; then
 fi
 test -s /etc/nddev/image-build.json
 [[ "$(jq -er .image_variant /etc/nddev/image-build.json)" == "integration" ]]
+[[ "$(jq -er .browser /etc/nddev/image-build.json)" == "${GHA_BROWSER}" ]]
 [[ "$(jq -er .docker_action_base_ref /etc/nddev/image-build.json)" == "${GHA_DOCKER_ACTION_BASE_REF}" ]]
 [[ "$(jq -er .sccache_version /etc/nddev/image-build.json)" == "${GHA_SCCACHE_VERSION}" ]]
 [[ "$(jq -er .sccache_binary_sha256 /etc/nddev/image-build.json)" == "${GHA_SCCACHE_BINARY_SHA256}" ]]
@@ -111,6 +113,34 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
 	yarn) [[ "$(yarn --version)" == "${expected_version}" ]] ;;
   esac
 done
+
+# Browser bytes are qualification input, not image content. Launch the pinned
+# Chrome-for-Testing archive against the baked OS libraries as the unprivileged
+# runner, then let cleanup delete the entire extracted tree and profile.
+browser_launch=not-declared
+browser_bytes_retained=false
+if [[ "${GHA_BROWSER}" == "chromium" ]]; then
+  : "${GHA_BROWSER_SMOKE_VERSION:?}"
+  : "${GHA_BROWSER_SMOKE_ARCHIVE:?}"
+  : "${GHA_BROWSER_SMOKE_SHA256:?}"
+  : "${GHA_BROWSER_SMOKE_BINARY:?}"
+  test -f "${GHA_BROWSER_SMOKE_ARCHIVE}"
+  echo "${GHA_BROWSER_SMOKE_SHA256}  ${GHA_BROWSER_SMOKE_ARCHIVE}" | sha256sum --check --strict --status
+  browser_root="$(mktemp -d /var/tmp/gha-browser-smoke.XXXXXXXX)"
+  cleanup_paths+=("${browser_root}")
+  unzip -q "${GHA_BROWSER_SMOKE_ARCHIVE}" -d "${browser_root}"
+  browser_binary="${browser_root}/${GHA_BROWSER_SMOKE_BINARY}"
+  test -x "${browser_binary}"
+  chown -R runner:runner "${browser_root}"
+  [[ "$(runuser -u runner -- "${browser_binary}" --version)" == "Google Chrome for Testing ${GHA_BROWSER_SMOKE_VERSION}" ]]
+  browser_dom="$(runuser -u runner -- env HOME=/home/runner "${browser_binary}" \
+    --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
+    --no-first-run --no-default-browser-check --user-data-dir="${browser_root}/profile" \
+    --dump-dom 'data:text/html,<title>nddev-browser-smoke</title><body>browser-ok</body>')"
+  grep -Fq '<title>nddev-browser-smoke</title>' <<<"${browser_dom}"
+  grep -Fq '<body>browser-ok</body>' <<<"${browser_dom}"
+  browser_launch=ok
+fi
 
 python --version >/dev/null
 python3 --version >/dev/null
@@ -291,6 +321,10 @@ jq -n \
   --arg docker_storage_driver "${docker_storage}" \
   --arg docker_cgroup_driver "${docker_cgroup}" \
   --arg docker_action_base_id "${actual_base_id}" \
+  --arg browser "${GHA_BROWSER}" \
+  --arg browser_smoke_version "${GHA_BROWSER_SMOKE_VERSION:-}" \
+  --arg browser_launch "${browser_launch}" \
+  --argjson browser_bytes_retained "${browser_bytes_retained}" \
   --arg docker_socket_filesystem "${socket_mount_fstype}:${socket_mount_target}" \
   --arg public_egress ok \
   --arg host_route blocked \
@@ -299,4 +333,4 @@ jq -n \
 	  --arg docker_socket_scope "${docker_socket_scope}" \
   --argjson root_disk_bytes "${root_disk_bytes}" \
   --argjson root_filesystem_bytes "${root_bytes}" \
-	  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,image_variant:"integration",docker_engine_version:$docker_engine_version,docker_storage_driver:$docker_storage_driver,docker_cgroup_driver:$docker_cgroup_driver,docker_action_base_id:$docker_action_base_id,docker_socket:$docker_socket_scope,docker_socket_filesystem:$docker_socket_filesystem,docker_nonroot_access:"ok",docker_action_build:"ok",docker_service_network:"ok",public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
+	  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,image_variant:"integration",browser:$browser,browser_smoke_version:$browser_smoke_version,browser_launch:$browser_launch,browser_bytes_retained:$browser_bytes_retained,docker_engine_version:$docker_engine_version,docker_storage_driver:$docker_storage_driver,docker_cgroup_driver:$docker_cgroup_driver,docker_action_base_id:$docker_action_base_id,docker_socket:$docker_socket_scope,docker_socket_filesystem:$docker_socket_filesystem,docker_nonroot_access:"ok",docker_action_build:"ok",docker_service_network:"ok",public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'

@@ -174,6 +174,11 @@ func TestVerifyTargetImageRequiresExplicitVariantForEveryWorkerClass(t *testing.
 			"user.nddev.image.variant":           plan.Variant,
 			"user.nddev.docker-action-base":      plan.DockerActionBaseRef,
 		}
+		if plan.Browser != "" {
+			properties["user.nddev.browser"] = plan.Browser
+			properties["user.nddev.browser-smoke.version"] = plan.BrowserSmoke.Version
+			properties["user.nddev.browser-smoke.archive_sha256"] = plan.BrowserSmoke.ArchiveSHA256
+		}
 		maps.Copy(properties, toolchainProperties(plan))
 		image := imageState{
 			Architecture: plan.Image.Architecture,

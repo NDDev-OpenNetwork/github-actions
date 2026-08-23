@@ -9,7 +9,7 @@ control_plane:
   manager_version: v0.2.1-nddev.67
   scheduling_mode: scale-set
   provider: incus
-  provider_version: v0.1.5-nddev.71
+  provider_version: v0.1.5-nddev.72
   provider_interface: v0.1.0
   worker_kind: incus-container
   runner: actions/runner
@@ -235,6 +235,7 @@ pools:
       max_ready: 0
     capabilities:
       docker: true
+      browser: true
       credentials: repository
       network_policy: public-internet
       cache_write_scope: trusted

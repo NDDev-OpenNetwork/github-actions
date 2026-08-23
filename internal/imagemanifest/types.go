@@ -3,13 +3,14 @@ package imagemanifest
 // Manifest pins every network-fetched input used to build a worker image.
 // It intentionally contains no credentials or mutable aliases as sources.
 type Manifest struct {
-	SchemaVersion int         `json:"schema_version" yaml:"schema_version"`
-	Image         Image       `json:"image" yaml:"image"`
-	Source        Source      `json:"source" yaml:"source"`
-	Runner        Runner      `json:"runner" yaml:"runner"`
-	CompilerCache Tool        `json:"compiler_cache" yaml:"compiler_cache"`
-	Toolchains    []Toolchain `json:"toolchains" yaml:"toolchains"`
-	Guest         Guest       `json:"guest" yaml:"guest"`
+	SchemaVersion int           `json:"schema_version" yaml:"schema_version"`
+	Image         Image         `json:"image" yaml:"image"`
+	Source        Source        `json:"source" yaml:"source"`
+	Runner        Runner        `json:"runner" yaml:"runner"`
+	CompilerCache Tool          `json:"compiler_cache" yaml:"compiler_cache"`
+	Toolchains    []Toolchain   `json:"toolchains" yaml:"toolchains"`
+	BrowserSmoke  *BrowserSmoke `json:"browser_smoke,omitempty" yaml:"browser_smoke,omitempty"`
+	Guest         Guest         `json:"guest" yaml:"guest"`
 }
 
 type Image struct {
@@ -79,6 +80,18 @@ type Toolchain struct {
 	ArchiveSHA256 string `json:"archive_sha256" yaml:"archive_sha256"`
 }
 
+// BrowserSmoke pins browser bytes used only to launch-test the image. The
+// archive is injected into the disposable smoke instance and deleted with it;
+// consumer jobs install the browser version from their own lockfile.
+type BrowserSmoke struct {
+	Version       string `json:"version,omitempty" yaml:"version,omitempty"`
+	UpstreamRef   string `json:"upstream_ref,omitempty" yaml:"upstream_ref,omitempty"`
+	Archive       string `json:"archive,omitempty" yaml:"archive,omitempty"`
+	DownloadURL   string `json:"download_url,omitempty" yaml:"download_url,omitempty"`
+	ArchiveSHA256 string `json:"archive_sha256,omitempty" yaml:"archive_sha256,omitempty"`
+	BinaryPath    string `json:"binary_path,omitempty" yaml:"binary_path,omitempty"`
+}
+
 // BakedToolchains are the toolchains every managed worker image must pin. The
 // representative benchmark installers short-circuit when the pinned version is
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
@@ -93,6 +106,7 @@ type Guest struct {
 	PackageVersions     map[string]string `json:"package_versions,omitempty" yaml:"package_versions,omitempty"`
 	Variant             string            `json:"variant,omitempty" yaml:"variant,omitempty"`
 	DockerActionBaseRef string            `json:"docker_action_base_ref,omitempty" yaml:"docker_action_base_ref,omitempty"`
+	Browser             string            `json:"browser,omitempty" yaml:"browser,omitempty"`
 }
 
 func (g Guest) EffectiveVariant() string {
@@ -105,3 +119,5 @@ func (g Guest) EffectiveVariant() string {
 func (g Guest) DockerCapable() bool {
 	return g.EffectiveVariant() == "integration"
 }
+
+func (g Guest) BrowserCapable() bool { return g.Browser == "chromium" }

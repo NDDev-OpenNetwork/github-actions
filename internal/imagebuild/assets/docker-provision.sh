@@ -97,13 +97,15 @@ jq \
   --arg docker_cgroup_driver "${docker_cgroup}" \
   --arg docker_action_base_ref "${GHA_DOCKER_ACTION_BASE_REF}" \
   --arg docker_action_base_id "${base_id}" \
+  --arg browser "${GHA_BROWSER:-}" \
   '. + {
     image_variant:$variant,
     docker_engine_version:$docker_engine_version,
     docker_storage_driver:$docker_storage_driver,
     docker_cgroup_driver:$docker_cgroup_driver,
     docker_action_base_ref:$docker_action_base_ref,
-    docker_action_base_id:$docker_action_base_id
+    docker_action_base_id:$docker_action_base_id,
+    browser:$browser
   }' /etc/nddev/image-build.json >"${image_build_tmp}"
 chmod 0644 "${image_build_tmp}"
 mv -f "${image_build_tmp}" /etc/nddev/image-build.json
