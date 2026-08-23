@@ -27,7 +27,6 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_host_psi_available 1\n",
 		`gha_fleet_host_psi_stall_percent{mode="some",resource="cpu",window_seconds="10"} 1.25`,
 		`gha_fleet_host_psi_stall_seconds_total{mode="some",resource="cpu"} 2`,
-		`gha_fleet_pool_pilot_ready{pool="nddev-linux-standard"} 1`,
 		`gha_fleet_pool_container_admission_ready{pool="nddev-linux-standard"} 1`,
 		`gha_fleet_provider_journal_leases_by_state{state="created"} 1`,
 		"gha_fleet_provider_retry_journal_generation 1\n",
@@ -70,6 +69,11 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 	} {
 		if !strings.Contains(metrics, wanted) {
 			t.Errorf("metrics missing %q\n%s", wanted, metrics)
+		}
+	}
+	for _, retired := range []string{"gha_fleet_pool_pilot_ready", "gha_fleet_pool_findings"} {
+		if strings.Contains(metrics, retired) {
+			t.Errorf("retired VM preflight metric %q remains\n%s", retired, metrics)
 		}
 	}
 	if strings.Contains(metrics, "runner-one") {
