@@ -138,16 +138,18 @@ if [[ "${GHA_BROWSER}" == "chromium" ]]; then
   printf '<!doctype html><title>nddev-browser-smoke</title><body>browser-ok</body>\n' >"${browser_page}"
   chown runner:runner "${browser_page}"
   browser_dom="${browser_root}/browser-smoke-dom.html"
-  set +e
-  runuser -u runner -- timeout --signal=TERM --kill-after=5s 30s \
+  browser_status=0
+  if runuser -u runner -- timeout --signal=TERM --kill-after=5s 30s \
     env HOME=/home/runner "${browser_binary}" \
     --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --disable-background-networking --disable-component-update --disable-sync \
     --metrics-recording-only --no-pings --no-first-run --no-default-browser-check \
     --user-data-dir="${browser_root}/profile" --dump-dom "file://${browser_page}" \
-    >"${browser_dom}"
-  browser_status=$?
-  set -e
+    >"${browser_dom}"; then
+    :
+  else
+    browser_status=$?
+  fi
   if [[ "${browser_status}" -ne 0 && "${browser_status}" -ne 124 ]]; then
     echo "browser smoke exited with unexpected status ${browser_status}" >&2
     exit 1
