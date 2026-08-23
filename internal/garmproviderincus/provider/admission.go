@@ -322,7 +322,10 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			}
 			lease, owned := state.Leases[instance.Name]
 			if !owned || (lease.State != providerjournal.StateAdmitted && lease.State != providerjournal.StateCreated && lease.State != providerjournal.StateDeleting) {
-				return nil, fmt.Errorf("instance %q has unknown flavor %q", instance.Name, flavor)
+				return nil, fmt.Errorf(
+					"incomplete instance metadata: instance %q has no flavor and no active provider lease",
+					instance.Name,
+				)
 			}
 			allocations = append(allocations, provideradmission.Allocation{
 				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,

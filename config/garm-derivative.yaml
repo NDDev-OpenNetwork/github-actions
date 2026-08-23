@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.64
+derivative_version: v0.2.1-nddev.65
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -87,10 +87,10 @@ overlays:
     sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
     purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: 8acf704414654d3dbcd65dd4c8a94c8b5f59cab8d3d749234a5fb7ad16cd84b8
-    purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification, one domain retry lease after proven saturation, five-minute fallback with immediate deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
+    sha256: 4dd2d3ea0407b89e7936408ffa1f28c709879caae6bd99abfb993cf8982cf337
+    purpose: Fsync-backed per-instance attempt leases with saturating parallel domain counters, complete capacity classification including bounded incomplete Incus metadata convergence, one domain retry lease after proven saturation, five-minute fallback with immediate deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: 85b405e38f8b343d25f060f1f9dbc60cffa5a89676e3856fda1e620e997c86e9
+    sha256: b90393001c10a25482b156fd680df70250e3f3c6228a37a3939ec1e10b799d6c
     purpose: Prove attempts survive process recreation, concurrent failures saturate without corrupting the journal, every admission/storage pressure reason remains capacity, one eligible retry leases its saturated domain, five-minute fallback remains bounded, one resource release wakes exactly one oldest domain, stale state is collected and success clears durable state.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: ef31b1e8065d7624daa34f8f48f5f6c907c00e6cdbdd39faa6be63fc42fbb3e5
+  binary_sha256: cbde704ad607f83c917fe9afd2b3f963bbefaa6f604458ed6fb9dde0d9525eb9
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
