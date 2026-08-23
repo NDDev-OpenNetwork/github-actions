@@ -321,12 +321,11 @@ func nddevRecordProviderCreateSuccess(ctx context.Context, key string) error {
 		if shared, exists := journal.Records[nddevCapacityDomainKey]; exists {
 			ownerDomain := nddevRetryDomainKey(shared.ProbeOwner)
 			if shared.ProbeOwner == "" || shared.ProbeOwner == key || ownerDomain == nddevRetryDomainKey(key) {
-				shared.ProbeOwner = ""
-				shared.ScaleSetName = ""
-				shared.WakeReason = "probe-succeeded"
-				shared.UpdatedAt = now
-				shared.NextAllowedAt = now.Add(nddevCapacityRetryDelay(nddevCapacityDomainKey, shared.Attempts))
-				journal.Records[nddevCapacityDomainKey] = shared
+				// A successful shared probe proves the measured envelope has
+				// capacity again. Leave saturated mode entirely so independent
+				// scale sets can resume bounded parallel creates. The next typed
+				// capacity refusal recreates the shared single-probe domain.
+				delete(journal.Records, nddevCapacityDomainKey)
 			}
 		}
 		return nil
