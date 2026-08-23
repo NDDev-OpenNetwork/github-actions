@@ -1,0 +1,45 @@
+# Code scanning for this repository. Advanced setup: the caller below is the
+# only scanner, and CodeQL default setup is deliberately left `not-configured`
+# because default setup cannot express a pinned reusable and cannot be reviewed
+# in a diff. Attachment is atomic — enabling default setup later means disabling
+# this workflow first, or the whole attachment fails.
+#
+# Verify rather than trust this comment:
+#   GET /repos/{owner}/{repo}/code-scanning/default-setup  -> not-configured
+#   GET /repos/{owner}/{repo}/actions/workflows            -> this file's state
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a new query release is applied to unchanged code. Without this
+    # a repository that stops changing also stops being scanned.
+    - cron: '0 5 * * 2'
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: codeql
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: NDDev-OpenNetwork/ci-workflows/.github/workflows/public-codeql.yml@b50364e2a415267688c1d845cea6866cdb5e53d6 # 0.1.4
+    with:
+      # Public repository: `pull_request` runs untrusted fork code. Name the
+      # hosted runner explicitly — the reusable's default belongs to the pinned
+      # commit, not to this repository, so inheriting it would let a pin bump
+      # move fork pull requests onto private infrastructure with no diff here.
+      runner: ubuntu-latest
+      # Go is 95% of this repository: the GARM provider that places every fleet job.
+      languages: '["go","actions"]'
+      # Go is a compiled language; CodeQL needs a build to extract from. The
+      # reusable sets Go up from go.mod when the language is go.
+      autobuild: true
