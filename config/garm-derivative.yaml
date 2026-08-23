@@ -81,7 +81,7 @@ patches:
     purpose: Bind authoritative repository identity before deleting a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; binding failures retain the row for retry, while terminal or absent jobs still release capacity exactly once.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
+    sha256: 18be93eabada82a284ecd50948af4e41ecd10b6eb59ae4f1e2ce1c1367e1618f
     purpose: Fsync-backed central queue admission where disabled scale sets cannot record or acquire work, sparse JobAssigned owns a bounded provisional token without refreshing its TTL, JobAvailable or the authoritative queued DB row binds repository identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
     sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65

@@ -670,7 +670,11 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				if !queueIntentCoreIdentityEqual(existing, intent) {
 					return fmt.Errorf("duplicate assigned intent %q changed immutable identity", intent.Key)
 				}
-				intent = existing
+				// Deliberately no write-back: the journal already holds `existing`,
+				// which carries mutable state this freshly rebuilt `intent` does not,
+				// so overwriting it would discard progress. This line used to read
+				// `intent = existing`, which looked load-bearing while being dead —
+				// `intent` is redeclared next iteration and nothing follows here.
 			} else {
 				journal.Intents[intent.Key] = intent
 				ensureRepositoryState(journal, config, intent.Repository)

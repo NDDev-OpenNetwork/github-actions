@@ -92,7 +92,7 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7"
+  "18be93eabada82a284ecd50948af4e41ecd10b6eb59ae4f1e2ce1c1367e1618f"
   "02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65"
   "5f0166c596ed3946ba72e6dbca850af7573f514186acb62d39ee21ec0021ca1c"
   "9b6f69301d4442f459315e11e72748cf54c407098975fe4302bb69cb259ce495"
