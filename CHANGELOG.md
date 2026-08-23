@@ -40,6 +40,12 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.66`: once any scale set proves the
+  measured fleet envelope saturated, a durable fleet-wide lease admits only
+  the oldest waiting capacity domain. One completed worker deletion wakes one
+  domain, successful replacement retains saturation, and unrelated in-flight
+  successes cannot steal the probe. Observer metrics expose bounded saturation,
+  waiter count, owner state, age and wake reason without tenant or runner labels.
 - Added GARM derivative `v0.2.1-nddev.65` and provider derivative
   `v0.1.5-nddev.69`, reproducibly binding incomplete-metadata convergence to
   capacity retry semantics instead of provider-circuit semantics.
