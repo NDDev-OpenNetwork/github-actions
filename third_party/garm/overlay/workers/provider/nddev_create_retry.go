@@ -355,6 +355,19 @@ func nddevSharedCapacityCreateAllowed(journal *nddevRetryJournal, now time.Time,
 		shared.ScaleSetName = ""
 		journal.Records[nddevCapacityDomainKey] = shared
 	}
+	if owner != "" && !shared.NextAllowedAt.After(now) &&
+		(strings.Contains(owner, ":instance:") || strings.Contains(owner, ":job:")) {
+		ownerRecord, ownerTracked := journal.Records[owner]
+		if !ownerTracked || ownerRecord.LastErrorClass != "" {
+			owner = ""
+			shared.ProbeOwner = ""
+			shared.ScaleSetName = ""
+			shared.WakeReason = "worker-deleted"
+			shared.UpdatedAt = now
+			shared.NextAllowedAt = now
+			journal.Records[nddevCapacityDomainKey] = shared
+		}
+	}
 	if owner == "" {
 		owner = nddevOldestEligibleCapacityDomain(journal, activeScaleSets, filterActive)
 		if owner != "" && reserve {

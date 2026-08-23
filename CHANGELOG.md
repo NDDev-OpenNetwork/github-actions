@@ -45,6 +45,11 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.68`: an expired shared-capacity probe
+  owned by a concrete create is released only when that owner's own durable
+  retry record proves failure or has disappeared. A still-tracked owner without
+  a failure remains protected, preventing duplicate in-flight probes while
+  allowing real jobs to recover automatically from failed creates.
 - Browser image qualification now accepts Chromium's bounded timeout only
   after the unprivileged process rendered the exact local smoke document and
   left no profile-bound process behind. Clean exits still pass; missing render
