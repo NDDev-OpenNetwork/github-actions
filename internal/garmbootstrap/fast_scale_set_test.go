@@ -20,6 +20,11 @@ func TestFastScaleSetResolves(t *testing.T) {
 	if spec.Image != ContainerCanaryImage {
 		t.Fatalf("fast image = %q, want the promoted container image", spec.Image)
 	}
+	for _, class := range PublishedScaleSets() {
+		if class.Name == FastScaleSetName && (class.Credentials != "repository" || class.CacheWriteScope != "trusted") {
+			t.Fatalf("fast cache claim contract = %+v", class)
+		}
+	}
 }
 
 // The set stays closed. A name outside it is a typo that would otherwise
