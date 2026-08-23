@@ -78,24 +78,11 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_legacy_runner_listeners", "Legacy runner listeners retained during migration.", float64(snapshot.Host.LegacyRunners.Listeners))
 	gauge(&output, "gha_fleet_legacy_runner_workers", "Active legacy runner workers observed during migration.", float64(snapshot.Host.LegacyRunners.Workers))
 
-	labeledGaugeHeader(&output, "gha_fleet_pool_pilot_ready", "Deprecated VM/KVM cold-pilot preflight; do not use for container-pool availability.")
 	labeledGaugeHeader(&output, "gha_fleet_pool_container_admission_ready", "Whether the current container pool has healthy control-plane, provider inventory, resource journal and diagnostic WAL inputs for admission.")
-	labeledGaugeHeader(&output, "gha_fleet_pool_findings", "Current preflight finding count by pool and severity.")
 	pools := append([]PoolStatus(nil), snapshot.Pools...)
 	sort.SliceStable(pools, func(i, j int) bool { return pools[i].Name < pools[j].Name })
 	for _, pool := range pools {
-		metric(&output, "gha_fleet_pool_pilot_ready", map[string]string{"pool": pool.Name}, boolFloat(pool.PilotReady))
 		metric(&output, "gha_fleet_pool_container_admission_ready", map[string]string{"pool": pool.Name}, boolFloat(pool.ContainerAdmissionReady))
-		for _, finding := range []struct {
-			severity string
-			count    int
-		}{
-			{severity: "blocker", count: pool.Blockers},
-			{severity: "warning", count: pool.Warnings},
-			{severity: "info", count: pool.Info},
-		} {
-			metric(&output, "gha_fleet_pool_findings", map[string]string{"pool": pool.Name, "severity": finding.severity}, float64(finding.count))
-		}
 	}
 
 	gauge(&output, "gha_fleet_provider_journal_generation", "Current fsync-backed provider journal generation.", float64(snapshot.Journal.Generation))
