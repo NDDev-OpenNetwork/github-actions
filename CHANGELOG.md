@@ -40,7 +40,8 @@ Versioning.
 
 ### Changed
 
-- Added GARM derivative `v0.2.1-nddev.67`: shared-capacity wake ownership now
+- Added GARM derivative `v0.2.1-nddev.67` and provider derivative
+  `v0.1.5-nddev.71`: shared-capacity wake ownership now
   intersects retry history with active durable queue intents by exact scale-set
   name. A completed worker can no longer grant its only wake to a historical
   domain with no waiting job; an empty active intersection remains unowned for
