@@ -418,9 +418,27 @@ if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
   response="$(mktemp /tmp/nddev-cache-claim.XXXXXXXXXX)"
   chmod 0600 "${response}"
   trap 'rm -f -- "${assignment}" "${ready}" "${response}"' EXIT
-  if ! jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
-      --arg repository "${GITHUB_REPOSITORY}" --arg token "${claim_token}" \
-      '{instance_name:$instance,runner_name:$runner,repository:$repository,claim_token:$token}' |
+  claim_payload() {
+    if [[ -n "${GITHUB_REPOSITORY_ID:-}" && -n "${GITHUB_RUN_ID:-}" &&
+          -n "${GITHUB_RUN_ATTEMPT:-}" && -n "${GITHUB_JOB:-}" &&
+          -n "${GITHUB_WORKFLOW_REF:-}" && -n "${GITHUB_SHA:-}" ]]; then
+      jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
+        --arg repository "${GITHUB_REPOSITORY}" --argjson repository_id "${GITHUB_REPOSITORY_ID}" \
+        --argjson workflow_run_id "${GITHUB_RUN_ID}" --argjson run_attempt "${GITHUB_RUN_ATTEMPT}" \
+        --arg job_name "${GITHUB_JOB}" --arg workflow_ref "${GITHUB_WORKFLOW_REF}" \
+        --arg commit_sha "${GITHUB_SHA}" --arg token "${claim_token}" \
+        '{instance_name:$instance,runner_name:$runner,repository:$repository,
+          repository_id:$repository_id,workflow_run_id:$workflow_run_id,
+          run_attempt:$run_attempt,job_name:$job_name,workflow_ref:$workflow_ref,
+          commit_sha:$commit_sha,claim_token:$token}'
+    else
+      printf 'GitHub job correlation is incomplete; cache claim continues with repository identity only\n' >&2
+      jq -nc --arg instance "${instance_name}" --arg runner "${RUNNER_NAME}" \
+        --arg repository "${GITHUB_REPOSITORY}" --arg token "${claim_token}" \
+        '{instance_name:$instance,runner_name:$runner,repository:$repository,claim_token:$token}'
+    fi
+  }
+  if ! claim_payload |
       curl --silent --show-error --fail --max-time 10 --cacert "${ca_path}" \
         --header 'Content-Type: application/json' --data-binary @- "${claim_endpoint}" >"${response}"; then
     printf 'repository-scoped compiler cache claim is unavailable; continuing without cache\n' >&2

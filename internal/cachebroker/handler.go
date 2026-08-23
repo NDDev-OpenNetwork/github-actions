@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetryattrs"
 )
 
 const (
@@ -25,10 +27,16 @@ const (
 )
 
 type ClaimRequest struct {
-	InstanceName string `json:"instance_name"`
-	RunnerName   string `json:"runner_name"`
-	Repository   string `json:"repository"`
-	Token        string `json:"claim_token"`
+	InstanceName  string `json:"instance_name"`
+	RunnerName    string `json:"runner_name"`
+	Repository    string `json:"repository"`
+	RepositoryID  int64  `json:"repository_id,omitempty"`
+	WorkflowRunID int64  `json:"workflow_run_id,omitempty"`
+	RunAttempt    int64  `json:"run_attempt,omitempty"`
+	JobName       string `json:"job_name,omitempty"`
+	WorkflowRef   string `json:"workflow_ref,omitempty"`
+	CommitSHA     string `json:"commit_sha,omitempty"`
+	Token         string `json:"claim_token"`
 }
 
 type Delivery struct {
@@ -106,6 +114,10 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		deny(logger, writer, request, http.StatusBadRequest, "invalid repository")
 		return
 	}
+	if err := validateJobCorrelation(claimRequest); err != nil {
+		deny(logger, writer, request, http.StatusBadRequest, "invalid job correlation")
+		return
+	}
 	token, err := base64.RawURLEncoding.DecodeString(claimRequest.Token)
 	if err != nil || len(token) != ClaimTokenBytes {
 		deny(logger, writer, request, http.StatusForbidden, "invalid claim")
@@ -118,6 +130,19 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		deny(logger, writer, request, http.StatusForbidden, "claim refused")
 		return
+	}
+	if claimRequest.WorkflowRunID > 0 {
+		logger.InfoContext(ctx, "job correlation accepted",
+			telemetryattrs.InstanceName, claimRequest.InstanceName,
+			telemetryattrs.RunnerName, claimRequest.RunnerName,
+			telemetryattrs.GitHubRepository, claimRequest.Repository,
+			telemetryattrs.GitHubRepositoryID, claimRequest.RepositoryID,
+			telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
+			telemetryattrs.GitHubRunAttempt, claimRequest.RunAttempt,
+			telemetryattrs.GitHubJobName, claimRequest.JobName,
+			telemetryattrs.GitHubWorkflowRef, claimRequest.WorkflowRef,
+			telemetryattrs.GitHubCommitSHA, claimRequest.CommitSHA,
+		)
 	}
 	repositoryConfig, identity, exists := h.Config.Delivery(claimRequest.Repository, claim.Role)
 	if !exists {
@@ -144,6 +169,30 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err := json.NewEncoder(writer).Encode(delivery); err != nil {
 		logger.ErrorContext(ctx, "encode cache delivery", "error", err)
 	}
+}
+
+func validateJobCorrelation(request ClaimRequest) error {
+	present := request.RepositoryID != 0 || request.WorkflowRunID != 0 || request.RunAttempt != 0 ||
+		request.JobName != "" || request.WorkflowRef != "" || request.CommitSHA != ""
+	if !present {
+		return nil
+	}
+	if request.RepositoryID <= 0 || request.WorkflowRunID <= 0 || request.RunAttempt <= 0 ||
+		!boundedText(request.JobName) || !boundedText(request.WorkflowRef) ||
+		len(request.CommitSHA) != 40 {
+		return errors.New("job correlation is incomplete")
+	}
+	for _, character := range request.CommitSHA {
+		if !strings.ContainsRune("0123456789abcdef", character) {
+			return errors.New("commit sha is invalid")
+		}
+	}
+	return nil
+}
+
+func boundedText(value string) bool {
+	return value != "" && len(value) <= 1024 && strings.TrimSpace(value) == value &&
+		!strings.ContainsAny(value, "\r\n\x00")
 }
 
 func loadDelivery(config Config, bucket string, identity Identity, instance string) (Delivery, error) {
