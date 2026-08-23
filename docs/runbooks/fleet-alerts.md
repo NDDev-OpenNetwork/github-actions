@@ -38,6 +38,9 @@ gha-fleet reconcile-openobserve-alerts \
 - Platform, lifecycle or diagnostics pages: stop promotion work, preserve
   journals and diagnostic bundles, identify the oldest exact identity, and use
   only the bounded recovery operation that matches authoritative evidence.
+- GitHub correlation pages: inspect only the age-qualified metrics. Raw
+  unbound/missing counters describe normal pre-`JobAssigned` transitions and
+  are diagnostic context, not a recovery trigger.
 - Collector queue pages: preserve the queue directory, restore the private
   OpenObserve route/backend, and verify queue drain plus exact record recovery.
 - OOM or pressure pages: close admission; never stop an already running worker

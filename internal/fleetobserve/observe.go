@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	// 15 separates transient pre-JobAssigned correlation gaps from identities
+	// that remain incomplete beyond the bounded convergence window.
 	// 14 separates first-observed created-to-deleting inventory convergence from
 	// persistent missing ownership. 13 adds bounded GitHub run/request/runner correlation completeness. 12 separates bounded successful-delete convergence from persistent missing
 	// runner ownership. 11 separated exact image builder/smoke inventory from orphan job runners.
@@ -25,7 +27,8 @@ const (
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 14
+	SchemaVersion                   = 15
+	queueCorrelationGracePeriod     = 2 * time.Minute
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 	deletingVisibilityGrace         = 30 * time.Second
@@ -192,23 +195,25 @@ type JournalSummary struct {
 }
 
 type QueueSummary struct {
-	Generation                   uint64           `json:"generation"`
-	Stored                       int              `json:"stored"`
-	Active                       int              `json:"active"`
-	Expired                      int              `json:"expired"`
-	InFlight                     int              `json:"in_flight"`
-	OldestQueueAgeSeconds        int64            `json:"oldest_queue_age_seconds"`
-	UncoveredRunning             int              `json:"uncovered_running"`
-	RunningWithoutRunnerIdentity int              `json:"running_without_runner_identity"`
-	UnboundRepository            int              `json:"unbound_repository"`
-	MissingRunnerRequestID       int              `json:"missing_runner_request_id"`
-	DirectJITWithoutRequestID    int              `json:"direct_jit_without_runner_request_id"`
-	MissingWorkflowRunID         int              `json:"missing_workflow_run_id"`
-	RunningMissingGitHubRunnerID int              `json:"running_missing_github_runner_id"`
-	ByState                      map[string]int   `json:"by_state"`
-	OldestStateAgeSeconds        map[string]int64 `json:"oldest_state_age_seconds"`
-	ByPriority                   map[int]int      `json:"by_priority"`
-	ByScaleSet                   map[string]int   `json:"by_scale_set"`
+	Generation                      uint64           `json:"generation"`
+	Stored                          int              `json:"stored"`
+	Active                          int              `json:"active"`
+	Expired                         int              `json:"expired"`
+	InFlight                        int              `json:"in_flight"`
+	OldestQueueAgeSeconds           int64            `json:"oldest_queue_age_seconds"`
+	UncoveredRunning                int              `json:"uncovered_running"`
+	RunningWithoutRunnerIdentity    int              `json:"running_without_runner_identity"`
+	UnboundRepository               int              `json:"unbound_repository"`
+	UnboundRepositoryBeyondGrace    int              `json:"unbound_repository_beyond_grace"`
+	MissingRunnerRequestID          int              `json:"missing_runner_request_id"`
+	DirectJITWithoutRequestID       int              `json:"direct_jit_without_runner_request_id"`
+	MissingWorkflowRunID            int              `json:"missing_workflow_run_id"`
+	MissingWorkflowRunIDBeyondGrace int              `json:"missing_workflow_run_id_beyond_grace"`
+	RunningMissingGitHubRunnerID    int              `json:"running_missing_github_runner_id"`
+	ByState                         map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds           map[string]int64 `json:"oldest_state_age_seconds"`
+	ByPriority                      map[int]int      `json:"by_priority"`
+	ByScaleSet                      map[string]int   `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -584,8 +589,12 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		}
 		summary.ByPriority[intent.Priority]++
 		summary.ByScaleSet[intent.ScaleSetName]++
+		correlationAge := now.Sub(intent.QueueTime)
 		if !strings.Contains(intent.Repository, "/") {
 			summary.UnboundRepository++
+			if correlationAge >= queueCorrelationGracePeriod {
+				summary.UnboundRepositoryBeyondGrace++
+			}
 		}
 		if intent.RunnerRequestID == 0 {
 			if intent.State == queueintent.StateRunning && intent.GitHubRunnerID > 0 && intent.WorkflowRunID > 0 && intent.RunnerName != "" {
@@ -596,6 +605,9 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		}
 		if intent.WorkflowRunID == 0 {
 			summary.MissingWorkflowRunID++
+			if correlationAge >= queueCorrelationGracePeriod {
+				summary.MissingWorkflowRunIDBeyondGrace++
+			}
 		}
 		if intent.State == queueintent.StateRunning && intent.GitHubRunnerID == 0 {
 			summary.RunningMissingGitHubRunnerID++

@@ -50,6 +50,22 @@ rules:
     summary: The authoritative fleet observer reports an unhealthy platform.
     action: Stop promotion work and inspect exact collection errors and service states.
     recovery: Platform health remains one and all correlated gap metrics are zero.
+  - id: github_correlation_persistent
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_queue_missing_workflow_run_id_beyond_grace
+    expression: max(gha_fleet_queue_missing_workflow_run_id_beyond_grace) or max(gha_fleet_queue_unbound_repository_beyond_grace)
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: GitHub run or repository identity has not converged within two minutes.
+    action: Correlate the exact queue UUID with JobAssigned, workflow run, provider lease and runner identity without recovering a transient pre-assignment gap.
+    recovery: Both age-qualified correlation metrics remain zero while raw transition counters may continue to change.
   - id: host_oom_detected
     severity: page
     query_language: promql
