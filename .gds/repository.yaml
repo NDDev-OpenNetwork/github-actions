@@ -75,6 +75,8 @@ verification:
     - "lint"
     - "test"
     - "build"
+  required_contexts:
+    - "Gate"
 
 agent:
   context_profile: "project-default"
