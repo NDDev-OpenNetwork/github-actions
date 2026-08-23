@@ -7,6 +7,12 @@ Versioning.
 
 ### Added
 
+- Extended the existing one-job start hook and cache claim with bounded GitHub
+  repository, workflow run, attempt, job, workflow-ref and commit identities.
+  The cache broker validates the all-or-nothing correlation envelope only after
+  authenticating the one-use instance token and emits stable semantic fields
+  for OpenObserve. Older hooks remain accepted, and missing correlation degrades
+  observability without blocking the job or its optional cache fallback.
 - Added a bidirectional repository contract proving that actionlint's runner
   labels exactly equal all ten published fleet classes; missing, extra and
   duplicate labels now fail together.
@@ -30,6 +36,8 @@ Versioning.
 
 ### Changed
 
+- Added provider derivative `v0.1.5-nddev.67`, reproducibly bound to the
+  job-start correlation hook and its exact binary digest.
 - Added observer schema v14 with a stateful first-observed horizon for created
   leases temporarily absent from Incus during terminal teardown. One
   cross-source sample no longer flaps platform health; absence beyond 30

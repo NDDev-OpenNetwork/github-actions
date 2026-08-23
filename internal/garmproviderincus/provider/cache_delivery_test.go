@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -316,10 +317,15 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	response := workerCacheAssignment{SchemaVersion: 1, DeliveryID: strings.Repeat("b", 64), Role: delivery.Role, Mode: delivery.Mode, Endpoint: delivery.Endpoint, Region: delivery.Region, Bucket: delivery.Bucket, PrefixRoot: delivery.Prefix, AccessKey: delivery.AccessKey, SecretKeyB64: base64.StdEncoding.EncodeToString(delivery.SecretKey), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
 	responseRaw, _ := json.Marshal(response)
 	fakeCurl := filepath.Join(directory, "curl")
-	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '"+string(responseRaw)+"'\n"), 0o700))
+	requestPath := filepath.Join(directory, "claim-request.json")
+	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >'"+requestPath+"'\nprintf '%s' '"+string(responseRaw)+"'\n"), 0o700))
 	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
 	command := exec.Command("bash", "-c", hook)
-	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv, "GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv,
+		"GITHUB_REPOSITORY=example-org/example-actions", "GITHUB_REPOSITORY_ID=123",
+		"GITHUB_RUN_ID=456", "GITHUB_RUN_ATTEMPT=2", "GITHUB_JOB=test",
+		"GITHUB_WORKFLOW_REF=example-org/example-actions/.github/workflows/ci.yml@refs/heads/main",
+		"GITHUB_SHA="+strings.Repeat("a", 40), "RUNNER_NAME=runner-example")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("claim hook failed: %v\n%s", err, output)
@@ -327,6 +333,15 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	environment, _ := os.ReadFile(githubEnv)
 	require.Contains(t, string(environment), "NDDEV_CACHE_ROLE=trusted-writer")
 	require.Contains(t, string(environment), "AWS_ACCESS_KEY_ID="+delivery.AccessKey)
+	requestRaw, err := os.ReadFile(requestPath)
+	require.NoError(t, err)
+	var claimRequest map[string]any
+	require.NoError(t, json.Unmarshal(requestRaw, &claimRequest))
+	require.Equal(t, float64(123), claimRequest["repository_id"])
+	require.Equal(t, float64(456), claimRequest["workflow_run_id"])
+	require.Equal(t, float64(2), claimRequest["run_attempt"])
+	require.Equal(t, "test", claimRequest["job_name"])
+	require.Equal(t, strings.Repeat("a", 40), claimRequest["commit_sha"])
 	consumed, _ := os.ReadFile(consumedPath)
 	require.Equal(t, response.DeliveryID+"\n", string(consumed))
 }
@@ -346,13 +361,23 @@ func TestJobStartedHookDegradesToUncachedWhenRepositoryClaimFails(t *testing.T) 
 	require.NoError(t, os.WriteFile(caPath, delivery.CAPEM, 0o400))
 	require.NoError(t, os.WriteFile(githubEnv, nil, 0o600))
 	fakeCurl := filepath.Join(directory, "curl")
-	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'claim denied\\n' >&2\nexit 22\n"), 0o700))
+	requestPath := filepath.Join(directory, "claim-request.json")
+	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >'"+requestPath+"'\nprintf 'claim denied\\n' >&2\nexit 22\n"), 0o700))
 	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
 	command := exec.Command("bash", "-c", hook)
-	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv, "GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
+	command.Env = append(environmentWithout(
+		"GITHUB_REPOSITORY_ID", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "GITHUB_WORKFLOW_REF", "GITHUB_SHA",
+	), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv,
+		"GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s", output)
+	require.Contains(t, string(output), "job correlation is incomplete")
 	require.Contains(t, string(output), "continuing without cache")
+	requestRaw, err := os.ReadFile(requestPath)
+	require.NoError(t, err)
+	var claimRequest map[string]any
+	require.NoError(t, json.Unmarshal(requestRaw, &claimRequest))
+	require.Equal(t, []string{"claim_token", "instance_name", "repository", "runner_name"}, sortedMapKeys(claimRequest))
 	environment, err := os.ReadFile(githubEnv)
 	require.NoError(t, err)
 	require.Empty(t, environment)
@@ -362,6 +387,30 @@ func TestJobStartedHookDegradesToUncachedWhenRepositoryClaimFails(t *testing.T) 
 	require.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Lstat(consumedPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func sortedMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func environmentWithout(names ...string) []string {
+	removed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		removed[name] = struct{}{}
+	}
+	environment := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, exists := removed[name]; !exists {
+			environment = append(environment, entry)
+		}
+	}
+	return environment
 }
 
 func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {

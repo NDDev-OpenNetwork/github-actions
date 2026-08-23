@@ -177,9 +177,15 @@ func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := Config{SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", Bucket: "github-actions-cache", CAFile: "/tmp/ca", JournalFile: store.Path, JournalLock: store.LockPath, Repositories: []Repository{{Name: "example-org/example-actions", Roles: []Identity{{Role: "trusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/trusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "untrusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/untrusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "release-reader", Mode: "read-only", Prefix: "example-org/example-actions/trust/promoted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}}}}}
-	body, _ := json.Marshal(ClaimRequest{InstanceName: "runner-three", RunnerName: "runner-three", Repository: "other/repo", Token: base64.RawURLEncoding.EncodeToString(token)})
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "runner-three", RunnerName: "runner-three", Repository: "other/repo",
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1, JobName: "test",
+		WorkflowRef: "other/repo/.github/workflows/ci.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("a", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
 	response := httptest.NewRecorder()
-	Handler{Config: config, Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	var logs bytes.Buffer
+	Handler{Config: config, Store: store, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("status=%d", response.Code)
 	}
@@ -189,5 +195,49 @@ func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 	}
 	if journal.Claims["runner-three"].ClaimedRepository != "other/repo" {
 		t.Fatalf("optional miss did not bind exact repository: %+v", journal.Claims["runner-three"])
+	}
+	var entries []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, entry)
+	}
+	if len(entries) < 2 || entries[0]["msg"] != "job correlation accepted" ||
+		entries[0]["github.repository"] != "other/repo" ||
+		entries[0]["github.workflow_run_id"] != float64(456) ||
+		entries[0]["runner.name"] != "runner-three" {
+		t.Fatalf("correlation log=%v", entries)
+	}
+}
+
+func TestJobCorrelationIsAllOrNothingAndBounded(t *testing.T) {
+	legacy := ClaimRequest{}
+	if err := validateJobCorrelation(legacy); err != nil {
+		t.Fatalf("legacy request rejected: %v", err)
+	}
+	complete := ClaimRequest{
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1,
+		JobName: "test", WorkflowRef: "example/repo/.github/workflows/ci.yml@refs/heads/main",
+		CommitSHA: strings.Repeat("a", 40),
+	}
+	if err := validateJobCorrelation(complete); err != nil {
+		t.Fatalf("complete correlation rejected: %v", err)
+	}
+	incomplete := complete
+	incomplete.WorkflowRunID = 0
+	if err := validateJobCorrelation(incomplete); err == nil {
+		t.Fatal("incomplete correlation accepted")
+	}
+	invalidSHA := complete
+	invalidSHA.CommitSHA = strings.Repeat("g", 40)
+	if err := validateJobCorrelation(invalidSHA); err == nil {
+		t.Fatal("non-hex commit accepted")
+	}
+	oversized := complete
+	oversized.JobName = strings.Repeat("x", 1025)
+	if err := validateJobCorrelation(oversized); err == nil {
+		t.Fatal("oversized job identity accepted")
 	}
 }
