@@ -105,6 +105,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateObservabilityDashboards(args[1:], stdout, stderr)
 	case "render-openobserve-dashboards":
 		return runRenderOpenObserveDashboards(args[1:], stdout, stderr)
+	case "reconcile-openobserve-dashboards":
+		return runReconcileOpenObserveDashboards(args[1:], stdout, stderr)
 	case "render-openobserve-alerts":
 		return runRenderOpenObserveAlerts(args[1:], stdout, stderr)
 	case "reconcile-openobserve-alerts":
@@ -291,6 +293,62 @@ func runRenderOpenObserveDashboards(args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 	return 0
+}
+
+func runReconcileOpenObserveDashboards(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("reconcile-openobserve-dashboards", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "config/observability-dashboards.yaml", "strict observability dashboard bundle")
+	folder := flags.String("folder", "default", "exact reviewed OpenObserve folder identity")
+	endpoint := flags.String("endpoint", "", "OpenObserve HTTP(S) origin")
+	usernameFile := flags.String("username-file", "", "absolute file containing only the OpenObserve username")
+	passwordFile := flags.String("password-file", "", "absolute file containing only the OpenObserve password")
+	apply := flags.Bool("apply", false, "apply the exact current plan and verify read-back")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" || *folder == "" || *endpoint == "" || *usernameFile == "" || *passwordFile == "" {
+		fmt.Fprintln(stderr, "gha-fleet: reconcile-openobserve-dashboards requires --config, --folder, --endpoint, --username-file, and --password-file")
+		return 2
+	}
+	bundle, err := observabilitydashboards.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	desired, err := observabilitydashboards.RenderOpenObserve(bundle)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	username, err := readOpenObserveCredential(*usernameFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve username: %v\n", err)
+		return 1
+	}
+	password, err := readOpenObserveCredential(*passwordFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve password: %v\n", err)
+		return 1
+	}
+	client, err := observabilitydashboards.NewOpenObserveClient(*endpoint, username, password)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var plan observabilitydashboards.ReconcilePlan
+	if *apply {
+		plan, err = client.Apply(ctx, bundle.Organization, *folder, desired)
+	} else {
+		plan, err = client.Plan(ctx, bundle.Organization, *folder, desired)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, plan)
 }
 
 func runRenderOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
@@ -1768,5 +1826,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
 }
