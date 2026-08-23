@@ -399,6 +399,17 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 	}
 }
 
+func TestIntegrationBrowserVersionNormalizesVendorPaddingBeforeExactComparison(t *testing.T) {
+	script, err := scripts.ReadFile("assets/smoke-integration.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	if !strings.Contains(text, `--version | xargs`) || !strings.Contains(text, `== "Google Chrome for Testing ${GHA_BROWSER_SMOKE_VERSION}"`) {
+		t.Fatal("browser smoke does not normalize Chrome's padded version line before exact comparison")
+	}
+}
+
 func TestDockerStorageDriverMatchesIsolationBackend(t *testing.T) {
 	t.Parallel()
 	vm := testImagePlan(t)

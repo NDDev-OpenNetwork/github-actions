@@ -132,7 +132,8 @@ if [[ "${GHA_BROWSER}" == "chromium" ]]; then
   browser_binary="${browser_root}/${GHA_BROWSER_SMOKE_BINARY}"
   test -x "${browser_binary}"
   chown -R runner:runner "${browser_root}"
-  [[ "$(runuser -u runner -- "${browser_binary}" --version)" == "Google Chrome for Testing ${GHA_BROWSER_SMOKE_VERSION}" ]]
+  actual_browser_version="$(runuser -u runner -- "${browser_binary}" --version | xargs)"
+  [[ "${actual_browser_version}" == "Google Chrome for Testing ${GHA_BROWSER_SMOKE_VERSION}" ]]
   browser_dom="$(runuser -u runner -- env HOME=/home/runner "${browser_binary}" \
     --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --no-first-run --no-default-browser-check --user-data-dir="${browser_root}/profile" \
