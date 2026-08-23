@@ -420,6 +420,7 @@ func TestIntegrationBrowserLaunchIsLocalAndTimeBounded(t *testing.T) {
 		`timeout --signal=TERM --kill-after=5s 30s`,
 		`--dump-dom "file://${browser_page}"`,
 		`--disable-background-networking`,
+		`if runuser -u runner -- timeout`,
 		`browser_status=$?`,
 		`"${browser_status}" -ne 124`,
 		`pgrep -u runner -f -- "${browser_root}/profile"`,
