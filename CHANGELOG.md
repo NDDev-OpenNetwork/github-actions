@@ -40,6 +40,11 @@ Versioning.
 
 ### Changed
 
+- Classified a bounded Incus inventory record with missing expanded flavor and
+  no durable lease as capacity convergence rather than a provider defect. The
+  inventory remains fail-closed and the accepted job retries, but the transient
+  window cannot open a provider circuit or masquerade as permanent provider
+  corruption.
 - Split genuinely incomplete runner-request correlation from running direct-JIT
   jobs, for which GitHub never emits an AcquireJobs request ID. The observer
   retains a strict pre-execution gap metric and exposes the authoritative

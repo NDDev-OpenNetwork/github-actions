@@ -325,6 +325,8 @@ func nddevProviderErrorClass(err error) string {
 		strings.Contains(message, "storage-high-watermark"),
 		strings.Contains(message, "no eligible member"):
 		return "capacity"
+	case strings.Contains(message, "incomplete instance metadata"):
+		return "capacity"
 	case strings.Contains(message, "no active pre-acquirejobs"),
 		strings.Contains(message, "instance stopped during canceled create"),
 		strings.Contains(message, "instance is not running"):

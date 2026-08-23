@@ -146,6 +146,24 @@ func TestObservedAllocationsUseDurableLeaseForIncompleteIncusTransition(t *testi
 	}}, allocations)
 }
 
+func TestObservedAllocationsClassifyUnjournaledIncompleteMetadata(t *testing.T) {
+	cli := new(MockIncusServer)
+	admission := testNDDevAdmission()
+	directory := t.TempDir()
+	admission.controller.Store = providerjournal.Store{
+		Path: filepath.Join(directory, "provider-journal.json"), LockPath: filepath.Join(directory, "provider-journal.lock"),
+	}
+	_, err := admission.controller.Store.Update(context.Background(), func(*providerjournal.Journal) error { return nil })
+	require.NoError(t, err)
+	instance := ownedInstance("runner-incomplete")
+	delete(instance.ExpandedConfig, flavorKey)
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+
+	_, err = admission.observedAllocations(context.Background(), cli)
+	require.ErrorContains(t, err, "incomplete instance metadata")
+	require.ErrorContains(t, err, "no flavor and no active provider lease")
+}
+
 func TestReconcileRetainsDeletingLeaseUntilClusterTombstoneDisappears(t *testing.T) {
 	t.Parallel()
 	admission := testNDDevAdmission()
