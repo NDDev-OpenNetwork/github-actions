@@ -1485,6 +1485,19 @@ func finishProviderSpan(span trace.Span, err *error) {
 	span.End()
 }
 
+// setIncusMemberAttribute preserves the distinction between the services host
+// executing the provider process and the compute member owning the container.
+// Placement telemetry is best-effort: an absent or malformed location must not
+// turn an otherwise healthy job into a provider failure.
+func setIncusMemberAttribute(span trace.Span, member string) bool {
+	if span == nil || member == "" || len(member) > 255 || strings.TrimSpace(member) != member ||
+		strings.ContainsAny(member, "\r\n\x00") {
+		return false
+	}
+	span.SetAttributes(attribute.String(telemetryattrs.IncusMember, member))
+	return true
+}
+
 // GetInstance will return details about one instance.
 func (l *Incus) GetInstance(ctx context.Context, instanceName string) (commonParams.ProviderInstance, error) {
 	if l.admission == nil {
@@ -1499,6 +1512,7 @@ func (l *Incus) GetInstance(ctx context.Context, instanceName string) (commonPar
 	if err != nil {
 		return commonParams.ProviderInstance{}, err
 	}
+	setIncusMemberAttribute(trace.SpanFromContext(ctx), instance.Location)
 
 	return l.projectGARMInstanceIdentity(ctx, instance, incusInstanceToAPIInstance(instance))
 }
@@ -1567,6 +1581,7 @@ func (l *Incus) DeleteInstance(ctx context.Context, instance string) (err error)
 		}
 		return errors.Wrap(err, "authorizing instance deletion")
 	}
+	setIncusMemberAttribute(span, managedInstance.Location)
 	l.captureDiagnosticsBeforeTeardown(ctx, managedInstance)
 	span.AddEvent("diagnostics.capture_attempted")
 	if err := l.admission.MarkDeleting(ctx, instance); err != nil {

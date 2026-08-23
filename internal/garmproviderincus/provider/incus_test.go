@@ -39,6 +39,7 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -1537,4 +1538,13 @@ func TestListInstancesRejectsUnboundWarmIdentityProjection(t *testing.T) {
 func TestGetVersion(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
 	require.Equal(t, Version, provider.GetVersion(context.Background()))
+}
+
+func TestIncusMemberTelemetryIsBoundedAndNonBlocking(t *testing.T) {
+	_, span := trace.NewNoopTracerProvider().Tracer("test").Start(context.Background(), "test")
+	require.True(t, setIncusMemberAttribute(span, "gha-runner-1"))
+	require.False(t, setIncusMemberAttribute(span, ""))
+	require.False(t, setIncusMemberAttribute(span, " gha-runner-1"))
+	require.False(t, setIncusMemberAttribute(span, "gha-runner-1\nforged"))
+	require.False(t, setIncusMemberAttribute(span, strings.Repeat("x", 256)))
 }

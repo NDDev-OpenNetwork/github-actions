@@ -7,6 +7,7 @@ const (
 
 	RunnerName                = "runner.name"
 	InstanceName              = "instance.name"
+	IncusMember               = "incus.member"
 	RunnerPool                = "runner.pool"
 	RunnerWarmClaimed         = "runner.warm_claimed"
 	AdmissionReason           = "admission.reason"

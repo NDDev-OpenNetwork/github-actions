@@ -7,6 +7,10 @@ Versioning.
 
 ### Added
 
+- Added the actual `incus.member` placement identity to provider create and
+  delete spans while retaining the services host as the provider process
+  resource. Missing or malformed placement telemetry remains non-blocking for
+  a healthy job.
 - Extended the existing one-job start hook and cache claim with bounded GitHub
   repository, workflow run, attempt, job, workflow-ref and commit identities.
   The cache broker validates the all-or-nothing correlation envelope only after

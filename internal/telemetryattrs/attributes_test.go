@@ -8,7 +8,7 @@ import (
 func TestAttributeRegistryIsBoundedAndNamespaced(t *testing.T) {
 	pattern := regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 	for _, key := range []string{
-		RunnerName, InstanceName, RunnerPool, RunnerWarmClaimed, AdmissionReason,
+		RunnerName, InstanceName, IncusMember, RunnerPool, RunnerWarmClaimed, AdmissionReason,
 		AdmissionPreemptedWorkers, OperationOutcome, GitHubRepository,
 		GitHubRepositoryID, GitHubWorkflowRunID, GitHubRunAttempt, GitHubJobName,
 		GitHubWorkflowRef, GitHubCommitSHA,
