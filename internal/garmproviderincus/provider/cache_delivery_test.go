@@ -365,7 +365,9 @@ func TestJobStartedHookDegradesToUncachedWhenRepositoryClaimFails(t *testing.T) 
 	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >'"+requestPath+"'\nprintf 'claim denied\\n' >&2\nexit 22\n"), 0o700))
 	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
 	command := exec.Command("bash", "-c", hook)
-	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv,
+	command.Env = append(environmentWithout(
+		"GITHUB_REPOSITORY_ID", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "GITHUB_WORKFLOW_REF", "GITHUB_SHA",
+	), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv,
 		"GITHUB_REPOSITORY=example-org/example-actions", "RUNNER_NAME=runner-example")
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s", output)
@@ -394,6 +396,21 @@ func sortedMapKeys(values map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func environmentWithout(names ...string) []string {
+	removed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		removed[name] = struct{}{}
+	}
+	environment := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, exists := removed[name]; !exists {
+			environment = append(environment, entry)
+		}
+	}
+	return environment
 }
 
 func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {
