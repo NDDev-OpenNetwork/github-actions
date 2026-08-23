@@ -101,7 +101,7 @@ func PublishedScaleSets() []ScaleSetClass {
 	return []ScaleSetClass{
 		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 4096, 30, false),
 		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, 4, 6144, 50, false),
-		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 3072, 30, false),
+		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 3072, 30, false),
 		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, false),
 		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, false),
 		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, false),

@@ -195,20 +195,15 @@ pools:
       max_ready: 0
     capabilities:
       docker: false
-      credentials: none
-      # This asked for github-cache-only, which no bridge implements, so the
-      # pool could never be planned and has held zero capacity everywhere. The
-      # policy was also wrong for the work: a linter resolves dependencies from
-      # npm and PyPI, which GitHub and the local cache alone do not serve.
-      #
-      # The boundary this pool actually keeps is the one it can: no job
-      # credential, no Docker, and the same bounded public egress every pool
-      # gets, where the ACL rejects private, metadata, multicast and host
-      # ranges before any allow is considered.
+      credentials: repository
+      # Fast trusted jobs receive only a one-use, repository-bound cache claim.
+      # Fork and otherwise untrusted work is routed to the untrusted pool; this
+      # class keeps no Docker capability and no provider/deployment credential.
       network_policy: public-internet
-      # Fast lint/typecheck jobs do not compile release artifacts. Keeping this
-      # credential-free also removes guest file injection from their hot path.
-      cache_write_scope: none
+      # Immutable tools and package-manager archives use the same trust-scoped
+      # RustFS boundary as standard jobs, removing repeated external downloads
+      # without sharing mutable objects across repositories or trust lanes.
+      cache_write_scope: trusted
 
   - name: nddev-linux-standard
     backend: linux-amd64-incus-container

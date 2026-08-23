@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Advanced fleet contract v3: the trusted fast class now receives a one-use,
+  repository-scoped cache claim. Untrusted work remains isolated, fast retains
+  no Docker or deployment credential, and cache unavailability still degrades
+  to verified upstream downloads.
 - Added GARM derivative `v0.2.1-nddev.67` and provider derivative
   `v0.1.5-nddev.71`: shared-capacity wake ownership now
   intersects retry history with active durable queue intents by exact scale-set
