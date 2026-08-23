@@ -1,0 +1,41 @@
+name: NDDev immutable tool cache
+description: Restore a checksum-pinned tool artifact from the Drakkars cache, with a verified upstream fallback.
+
+inputs:
+  url:
+    description: Exact HTTPS upstream artifact URL.
+    required: true
+  sha256:
+    description: Expected lowercase SHA-256 of the artifact.
+    required: true
+  output:
+    description: Absolute destination below RUNNER_TEMP.
+    required: true
+  max-bytes:
+    description: Maximum accepted artifact size in bytes.
+    required: false
+    default: '1073741824'
+
+outputs:
+  source:
+    description: cache or upstream.
+    value: ${{ steps.fetch.outputs.source }}
+  bytes:
+    description: Verified artifact size.
+    value: ${{ steps.fetch.outputs.bytes }}
+  duration_ms:
+    description: End-to-end restore/fetch duration.
+    value: ${{ steps.fetch.outputs.duration_ms }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore or fetch immutable tool artifact
+      id: fetch
+      shell: bash
+      env:
+        NDDEV_TOOL_CACHE_URL: ${{ inputs.url }}
+        NDDEV_TOOL_CACHE_SHA256: ${{ inputs.sha256 }}
+        NDDEV_TOOL_CACHE_OUTPUT: ${{ inputs.output }}
+        NDDEV_TOOL_CACHE_MAX_BYTES: ${{ inputs.max-bytes }}
+      run: '"$GITHUB_ACTION_PATH/tool-cache.sh"'

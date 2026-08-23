@@ -7,6 +7,11 @@ Versioning.
 
 ### Added
 
+- Added `actions/tool-cache`, a checksum-addressed immutable artifact cache for
+  standalone CI tools. Private workers prefer their trust-scoped RustFS object;
+  missing, unavailable, incomplete or corrupt cache state falls back to the
+  exact HTTPS upstream with bounded retries and mandatory size/SHA validation.
+  GitHub-hosted jobs use the same verified upstream path without fleet secrets.
 - Added the actual `incus.member` placement identity to provider create and
   delete spans while retaining the services host as the provider process
   resource. Missing or malformed placement telemetry remains non-blocking for

@@ -37,6 +37,8 @@ whole-pipeline performance standard implemented by this engine.
 - Private Linux jobs can use the [trust-scoped package cache](docs/package-cache.md)
   over their existing one-job RustFS identity; compiler and package caches
   remain separate, measurable layers.
+- Checksum-pinned standalone tools can use the [immutable tool cache](docs/tool-cache.md),
+  which prefers the VPC-local object and falls back to the exact upstream URL.
 - Configuration examples use documentation identities and address ranges.
 
 ## Development
