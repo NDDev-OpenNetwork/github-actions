@@ -137,14 +137,27 @@ if [[ "${GHA_BROWSER}" == "chromium" ]]; then
   browser_page="${browser_root}/browser-smoke.html"
   printf '<!doctype html><title>nddev-browser-smoke</title><body>browser-ok</body>\n' >"${browser_page}"
   chown runner:runner "${browser_page}"
-  browser_dom="$(runuser -u runner -- timeout --signal=TERM --kill-after=5s 30s \
+  browser_dom="${browser_root}/browser-smoke-dom.html"
+  set +e
+  runuser -u runner -- timeout --signal=TERM --kill-after=5s 30s \
     env HOME=/home/runner "${browser_binary}" \
     --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --disable-background-networking --disable-component-update --disable-sync \
     --metrics-recording-only --no-pings --no-first-run --no-default-browser-check \
-    --user-data-dir="${browser_root}/profile" --dump-dom "file://${browser_page}")"
-  grep -Fq '<title>nddev-browser-smoke</title>' <<<"${browser_dom}"
-  grep -Fq '<body>browser-ok</body>' <<<"${browser_dom}"
+    --user-data-dir="${browser_root}/profile" --dump-dom "file://${browser_page}" \
+    >"${browser_dom}"
+  browser_status=$?
+  set -e
+  if [[ "${browser_status}" -ne 0 && "${browser_status}" -ne 124 ]]; then
+    echo "browser smoke exited with unexpected status ${browser_status}" >&2
+    exit 1
+  fi
+  grep -Fq '<title>nddev-browser-smoke</title>' "${browser_dom}"
+  grep -Fq '<body>browser-ok</body>' "${browser_dom}"
+  if pgrep -u runner -f -- "${browser_root}/profile" >/dev/null; then
+    echo "browser smoke left a process behind after bounded cleanup" >&2
+    exit 1
+  fi
   browser_launch=ok
 fi
 

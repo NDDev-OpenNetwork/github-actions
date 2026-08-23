@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Browser image qualification now accepts Chromium's bounded timeout only
+  after the unprivileged process rendered the exact local smoke document and
+  left no profile-bound process behind. Clean exits still pass; missing DOM,
+  unexpected statuses and incomplete cleanup remain hard failures.
 - Advanced fleet contract v4: integration and priority-integration now declare
   Chromium OS compatibility. The b5 image bakes Playwright's Ubuntu 24.04
   Chromium dependencies, launch-tests SHA-pinned disposable Chrome bytes, and

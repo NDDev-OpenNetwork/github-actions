@@ -420,6 +420,11 @@ func TestIntegrationBrowserLaunchIsLocalAndTimeBounded(t *testing.T) {
 		`timeout --signal=TERM --kill-after=5s 30s`,
 		`--dump-dom "file://${browser_page}"`,
 		`--disable-background-networking`,
+		`browser_status=$?`,
+		`"${browser_status}" -ne 124`,
+		`pgrep -u runner -f -- "${browser_root}/profile"`,
+		`<title>nddev-browser-smoke</title>`,
+		`<body>browser-ok</body>`,
 	} {
 		if !strings.Contains(text, wanted) {
 			t.Fatalf("browser smoke lacks %q", wanted)
