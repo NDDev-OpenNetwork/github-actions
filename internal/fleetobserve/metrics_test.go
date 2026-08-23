@@ -43,6 +43,8 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_queue_intents_active 0\n",
 		"gha_fleet_queue_intents_in_flight 0\n",
 		"gha_fleet_queue_uncovered_running 0\n",
+		"gha_fleet_queue_missing_runner_request_id 0\n",
+		"gha_fleet_queue_direct_jit_without_runner_request_id 0\n",
 		`gha_fleet_queue_intents_by_state{state="queued"} 0`,
 		`gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"} 0`,
 		`gha_fleet_queue_intents_by_priority{priority="0"} 0`,

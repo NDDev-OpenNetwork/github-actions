@@ -40,6 +40,11 @@ Versioning.
 
 ### Changed
 
+- Split genuinely incomplete runner-request correlation from running direct-JIT
+  jobs, for which GitHub never emits an AcquireJobs request ID. The observer
+  retains a strict pre-execution gap metric and exposes the authoritative
+  direct-JIT count separately instead of reporting every healthy running job as
+  missing identity.
 - Added provider derivative `v0.1.5-nddev.68`, reproducibly bound to Incus
   member placement telemetry and its exact binary digest.
 - Added provider derivative `v0.1.5-nddev.67`, reproducibly bound to the

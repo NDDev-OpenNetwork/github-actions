@@ -202,6 +202,7 @@ type QueueSummary struct {
 	RunningWithoutRunnerIdentity int              `json:"running_without_runner_identity"`
 	UnboundRepository            int              `json:"unbound_repository"`
 	MissingRunnerRequestID       int              `json:"missing_runner_request_id"`
+	DirectJITWithoutRequestID    int              `json:"direct_jit_without_runner_request_id"`
 	MissingWorkflowRunID         int              `json:"missing_workflow_run_id"`
 	RunningMissingGitHubRunnerID int              `json:"running_missing_github_runner_id"`
 	ByState                      map[string]int   `json:"by_state"`
@@ -587,7 +588,11 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			summary.UnboundRepository++
 		}
 		if intent.RunnerRequestID == 0 {
-			summary.MissingRunnerRequestID++
+			if intent.State == queueintent.StateRunning && intent.GitHubRunnerID > 0 && intent.WorkflowRunID > 0 && intent.RunnerName != "" {
+				summary.DirectJITWithoutRequestID++
+			} else {
+				summary.MissingRunnerRequestID++
+			}
 		}
 		if intent.WorkflowRunID == 0 {
 			summary.MissingWorkflowRunID++
