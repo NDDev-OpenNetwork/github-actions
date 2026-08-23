@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,5 +132,41 @@ func TestInspectCountsOnlyTerminalFailureDomains(t *testing.T) {
 		snapshot.OldestTerminalAgeSeconds != 600 || snapshot.NextRetryDelaySeconds != 30 ||
 		snapshot.ByErrorClass["provider"] != 2 || snapshot.ByErrorClass["capacity"] != 1 || snapshot.ByErrorClass["unknown"] != 1 {
 		t.Fatalf("unexpected retry snapshot: %#v", snapshot)
+	}
+}
+
+func TestInspectExposesBoundedSharedCapacityProbeState(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	now := time.Date(2026, 8, 23, 5, 0, 0, 0, time.UTC)
+	state := journal{SchemaVersion: 1, Generation: 43, UpdatedAt: now, Records: map[string]record{
+		"capacity-domain:measured-fleet": {
+			JobID: "capacity-domain:measured-fleet", Attempts: 3, LastErrorClass: "capacity",
+			UpdatedAt: now.Add(-12 * time.Second), NextAllowedAt: now.Add(108 * time.Second),
+			ProbeOwner: "scale-set:private-entity:17:instance:runner-secret", WakeReason: "probe-leased",
+		},
+		"scale-set:private-entity:17": {
+			JobID: "scale-set:private-entity:17", Attempts: 2, LastErrorClass: "capacity",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(time.Minute),
+		},
+	}}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(journalPath, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.SharedCapacitySaturated || !snapshot.SharedCapacityProbeOwned || !snapshot.SharedCapacityProbeActive ||
+		snapshot.SharedCapacityWaiters != 1 || snapshot.SharedCapacityAgeSeconds != 12 || snapshot.SharedCapacityWakeReason != "probe-leased" {
+		t.Fatalf("shared capacity snapshot = %#v", snapshot)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-entity") || strings.Contains(string(encoded), "runner-secret") {
+		t.Fatalf("dynamic probe owner leaked from bounded observation: %s", encoded)
 	}
 }

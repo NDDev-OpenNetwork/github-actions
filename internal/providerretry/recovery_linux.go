@@ -26,6 +26,8 @@ type record struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	NextAllowedAt  time.Time `json:"next_allowed_at"`
 	TerminalUntil  time.Time `json:"terminal_until,omitempty"`
+	ProbeOwner     string    `json:"probe_owner,omitempty"`
+	WakeReason     string    `json:"wake_reason,omitempty"`
 }
 
 type journal struct {
@@ -51,14 +53,20 @@ type RecoveryResult struct {
 // provider-create retry journal. Dynamic tenant, scale-set, job and runner
 // identities deliberately stay out of metrics.
 type Snapshot struct {
-	Generation               uint64         `json:"generation"`
-	Records                  int            `json:"records"`
-	DeferredRecords          int            `json:"deferred_records"`
-	TerminalCircuits         int            `json:"terminal_circuits"`
-	ByErrorClass             map[string]int `json:"by_error_class"`
-	DeferredByErrorClass     map[string]int `json:"deferred_by_error_class"`
-	OldestTerminalAgeSeconds int64          `json:"oldest_terminal_age_seconds"`
-	NextRetryDelaySeconds    int64          `json:"next_retry_delay_seconds"`
+	Generation                uint64         `json:"generation"`
+	Records                   int            `json:"records"`
+	DeferredRecords           int            `json:"deferred_records"`
+	TerminalCircuits          int            `json:"terminal_circuits"`
+	ByErrorClass              map[string]int `json:"by_error_class"`
+	DeferredByErrorClass      map[string]int `json:"deferred_by_error_class"`
+	OldestTerminalAgeSeconds  int64          `json:"oldest_terminal_age_seconds"`
+	NextRetryDelaySeconds     int64          `json:"next_retry_delay_seconds"`
+	SharedCapacitySaturated   bool           `json:"shared_capacity_saturated"`
+	SharedCapacityProbeOwned  bool           `json:"shared_capacity_probe_owned"`
+	SharedCapacityProbeActive bool           `json:"shared_capacity_probe_active"`
+	SharedCapacityWaiters     int            `json:"shared_capacity_waiters"`
+	SharedCapacityAgeSeconds  int64          `json:"shared_capacity_age_seconds"`
+	SharedCapacityWakeReason  string         `json:"shared_capacity_wake_reason,omitempty"`
 }
 
 // Inspect returns a read-only summary. A terminal domain is counted once even
@@ -80,6 +88,16 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 		DeferredByErrorClass: retryClassCounts(),
 	}
 	for key, retry := range state.Records {
+		if key == "capacity-domain:measured-fleet" {
+			result.SharedCapacitySaturated = true
+			result.SharedCapacityProbeOwned = retry.ProbeOwner != ""
+			result.SharedCapacityProbeActive = retry.WakeReason == "probe-leased" && retry.NextAllowedAt.After(now)
+			result.SharedCapacityAgeSeconds = max(int64(0), int64(now.Sub(retry.UpdatedAt)/time.Second))
+			result.SharedCapacityWakeReason = retry.WakeReason
+		}
+		if key != "capacity-domain:measured-fleet" && retryDomainKey(key) == key && retry.LastErrorClass == "capacity" {
+			result.SharedCapacityWaiters++
+		}
 		class := retry.LastErrorClass
 		if _, known := result.ByErrorClass[class]; !known {
 			class = "unknown"

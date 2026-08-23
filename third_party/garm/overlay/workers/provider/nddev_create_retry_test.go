@@ -217,21 +217,20 @@ func TestNDDevCapacityReleaseGrantsOneOldestCapacityDomain(t *testing.T) {
 	oldestCapacityKey := "scale-set:entity-one:17:instance:capacity-oldest"
 	newerCapacityKey := "scale-set:entity-one:19:instance:capacity-newer"
 	providerKey := "scale-set:entity-one:18:instance:provider"
-	for key, failure := range map[string]error{
-		oldestCapacityKey: errors.New("provider admission rejected pool: insufficient-cpu"),
-		providerKey:       errors.New("provider transport failed"),
-	} {
+	// These provider calls were all admitted before the first one proved the
+	// shared physical domain saturated, so the initial burst remains parallel.
+	for _, key := range []string{oldestCapacityKey, providerKey, newerCapacityKey} {
 		if err := nddevBeforeProviderCreate(context.Background(), key); err != nil {
 			t.Fatal(err)
 		}
-		if err := nddevRecordProviderCreateFailure(context.Background(), key, failure); err != nil {
-			t.Fatal(err)
-		}
 	}
-	now = now.Add(time.Second)
-	if err := nddevBeforeProviderCreate(context.Background(), newerCapacityKey); err != nil {
+	if err := nddevRecordProviderCreateFailure(context.Background(), oldestCapacityKey, errors.New("provider admission rejected pool: insufficient-cpu")); err != nil {
 		t.Fatal(err)
 	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), providerKey, errors.New("provider transport failed")); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
 	if err := nddevRecordProviderCreateFailure(context.Background(), newerCapacityKey, errors.New("insufficient-memory")); err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +309,131 @@ func TestNDDevCapacityRetryReservesOneDomainAttempt(t *testing.T) {
 	}
 	if !journal.Records[domainKey].NextAllowedAt.After(now) {
 		t.Fatal("failed reserved retry did not restore capacity backoff")
+	}
+}
+
+func TestNDDevCapacityRetrySerializesEveryScaleSetInTheMeasuredFleet(t *testing.T) {
+	now := time.Date(2026, 8, 23, 3, 30, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	oldest := "scale-set:entity-one:17:instance:oldest"
+	newer := "scale-set:entity-two:19:instance:newer"
+	parallel := "scale-set:entity-three:21:instance:already-in-flight"
+
+	if err := nddevBeforeProviderCreate(context.Background(), oldest); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), parallel); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), oldest, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := journal.Records[nddevCapacityDomainKey]
+	if shared.LastErrorClass != "capacity" || shared.WakeReason != "capacity-refused" || shared.ProbeOwner != "" {
+		t.Fatalf("shared saturation record = %#v", shared)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), newer); err == nil || !strings.Contains(err.Error(), "oldest owner") {
+		t.Fatalf("a second scale set bypassed shared saturation: %v", err)
+	}
+
+	now = shared.NextAllowedAt
+	if concreteNext := journal.Records[oldest].NextAllowedAt; concreteNext.After(now) {
+		now = concreteNext
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), newer); err == nil || !strings.Contains(err.Error(), "oldest owner") {
+		t.Fatalf("newer scale set displaced the oldest waiter: %v", err)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), oldest); err != nil {
+		t.Fatalf("oldest fleet waiter did not acquire the shared probe: %v", err)
+	}
+	journal, err = nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared = journal.Records[nddevCapacityDomainKey]
+	if shared.ProbeOwner != oldest || shared.WakeReason != "probe-leased" || shared.NextAllowedAt != now.Add(nddevRetryAttemptLease) {
+		t.Fatalf("shared probe lease = %#v", shared)
+	}
+	if err := nddevRecordProviderCreateSuccess(context.Background(), parallel); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := journal.Records[nddevCapacityDomainKey].ProbeOwner; owner != oldest {
+		t.Fatalf("unrelated initial success stole the shared probe lease: %q", owner)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), newer); err == nil {
+		t.Fatal("parallel scale-set probe ignored the durable shared lease")
+	}
+}
+
+func TestNDDevCapacityDeleteWakesExactlyOneFleetDomainAcrossRestart(t *testing.T) {
+	now := time.Date(2026, 8, 23, 4, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	oldest := "scale-set:entity-one:17:instance:oldest"
+	newer := "scale-set:entity-two:19:instance:newer"
+	for _, key := range []string{oldest, newer} {
+		if err := nddevBeforeProviderCreate(context.Background(), key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []string{oldest, newer} {
+		if err := nddevRecordProviderCreateFailure(context.Background(), key, errors.New("insufficient-cpu")); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Second)
+	}
+	if err := NDDevProviderCapacityReleased(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-reading the file models a fresh GARM process: ownership must live in
+	// the journal, not in process memory.
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := journal.Records[nddevCapacityDomainKey]
+	oldestDomain := nddevRetryDomainKey(oldest)
+	if shared.ProbeOwner != oldestDomain || shared.WakeReason != "worker-deleted" || shared.NextAllowedAt != shared.UpdatedAt {
+		t.Fatalf("delete wake = %#v", shared)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), newer); err == nil {
+		t.Fatal("delete woke more than one fleet domain")
+	}
+	replacement := oldestDomain + ":instance:replacement"
+	if err := nddevBeforeProviderCreate(context.Background(), replacement); err != nil {
+		t.Fatalf("granted domain could not consume released capacity: %v", err)
+	}
+	if err := nddevRecordProviderCreateSuccess(context.Background(), replacement); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared = journal.Records[nddevCapacityDomainKey]
+	if shared.ProbeOwner != "" || shared.WakeReason != "probe-succeeded" || !shared.NextAllowedAt.After(now) {
+		t.Fatalf("successful probe did not retain shared saturation: %#v", shared)
+	}
+	if _, exists := journal.Records[nddevRetryDomainKey(newer)]; !exists {
+		t.Fatal("successful oldest probe erased another scale set waiter")
 	}
 }
 

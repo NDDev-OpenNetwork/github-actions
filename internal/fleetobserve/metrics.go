@@ -105,6 +105,19 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_provider_terminal_circuits", "Terminal scale-set provider-create circuits currently blocking new capacity.", float64(snapshot.ProviderRetry.TerminalCircuits))
 	gauge(&output, "gha_fleet_provider_terminal_circuit_oldest_age_seconds", "Age of the oldest terminal scale-set provider-create circuit.", float64(snapshot.ProviderRetry.OldestTerminalAgeSeconds))
 	gauge(&output, "gha_fleet_provider_retry_next_delay_seconds", "Delay until the earliest deferred provider-create retry may proceed.", float64(snapshot.ProviderRetry.NextRetryDelaySeconds))
+	gauge(&output, "gha_fleet_shared_capacity_saturated", "Whether a provider refusal has proven the shared measured-capacity domain saturated.", boolFloat(snapshot.ProviderRetry.SharedCapacitySaturated))
+	gauge(&output, "gha_fleet_shared_capacity_probe_owned", "Whether one oldest waiting domain durably owns the next shared-capacity probe.", boolFloat(snapshot.ProviderRetry.SharedCapacityProbeOwned))
+	gauge(&output, "gha_fleet_shared_capacity_probe_active", "Whether the shared-capacity owner currently holds the bounded provider-call lease.", boolFloat(snapshot.ProviderRetry.SharedCapacityProbeActive))
+	gauge(&output, "gha_fleet_shared_capacity_waiters", "Scale-set capacity domains waiting behind the shared saturation record.", float64(snapshot.ProviderRetry.SharedCapacityWaiters))
+	gauge(&output, "gha_fleet_shared_capacity_state_age_seconds", "Age of the current shared-capacity decision.", float64(snapshot.ProviderRetry.SharedCapacityAgeSeconds))
+	labeledGaugeHeader(&output, "gha_fleet_shared_capacity_wake_reason", "Current shared-capacity transition by bounded wake reason.")
+	for _, reason := range []string{"capacity-refused", "worker-deleted", "probe-leased", "probe-succeeded", "none"} {
+		active := snapshot.ProviderRetry.SharedCapacityWakeReason == reason
+		if snapshot.ProviderRetry.SharedCapacityWakeReason == "" && reason == "none" {
+			active = true
+		}
+		metric(&output, "gha_fleet_shared_capacity_wake_reason", map[string]string{"reason": reason}, boolFloat(active))
+	}
 	labeledGaugeHeader(&output, "gha_fleet_provider_retry_records_by_error_class", "Provider-create retry records by bounded error class.")
 	for _, class := range []string{"capacity", "identity", "intent", "provider", "timeout", "unknown"} {
 		metric(&output, "gha_fleet_provider_retry_records_by_error_class", map[string]string{"error_class": class}, float64(snapshot.ProviderRetry.ByErrorClass[class]))
