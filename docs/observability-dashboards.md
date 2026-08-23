@@ -13,6 +13,22 @@ gha-fleet render-openobserve-dashboards \
   --config config/observability-dashboards.yaml
 ```
 
+Plan a folder-scoped OpenObserve v8 reconciliation with credential files that
+are private regular files, then add `--apply` only after reviewing the plan:
+
+```bash
+gha-fleet reconcile-openobserve-dashboards \
+  --config config/observability-dashboards.yaml \
+  --folder default \
+  --endpoint https://openobserve.example.invalid \
+  --username-file /run/credentials/openobserve-username \
+  --password-file /run/credentials/openobserve-password
+```
+
+The reconciler owns only dashboards carrying the versioned `managed-by:gds`
+description marker. It preserves manually created dashboards, uses OpenObserve
+hash preconditions for updates, and requires a clean post-apply read-back.
+
 The six dashboards cover:
 
 - capacity and pressure;
