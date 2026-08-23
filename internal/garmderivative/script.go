@@ -108,6 +108,7 @@ var runtimeContractFields = []string{
 	"capacity_retry_wake_after_delete",
 	"capacity_retry_single_domain_lease",
 	"shared_capacity_probe_domain",
+	"shared_capacity_probe_requires_active_queue",
 	"bounded_scale_up_capacity_probe",
 	"authoritative_job_reconciliation",
 	"authoritative_queue_intent_reconciliation",

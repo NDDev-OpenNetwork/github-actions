@@ -30,6 +30,7 @@ const (
 	nddevCapacityRetryCap   = 5 * time.Minute
 	nddevRetryFileEnv       = "GARM_NDDEV_CREATE_RETRY_FILE"
 	nddevRetryLockEnv       = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
+	nddevQueueIntentFileEnv = "GARM_NDDEV_QUEUE_INTENT_FILE"
 	nddevCapacityDomainKey  = "capacity-domain:measured-fleet"
 )
 
@@ -44,6 +45,7 @@ type nddevRetryRecord struct {
 	TerminalUntil  time.Time `json:"terminal_until,omitempty"`
 	ProbeOwner     string    `json:"probe_owner,omitempty"`
 	WakeReason     string    `json:"wake_reason,omitempty"`
+	ScaleSetName   string    `json:"scale_set_name,omitempty"`
 }
 
 type nddevRetryJournal struct {
@@ -92,7 +94,7 @@ func NDDevScaleSetCreateAllowed(ctx context.Context, scaleSet params.ScaleSet, e
 		return nil
 	}
 	return nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
-		if err := nddevSharedCapacityCreateAllowed(journal, now, key, false); err != nil {
+		if err := nddevSharedCapacityCreateAllowed(journal, now, key, scaleSet.Name, false); err != nil {
 			return err
 		}
 		record, exists := journal.Records[key]
@@ -109,13 +111,17 @@ func NDDevScaleSetCreateAllowed(ctx context.Context, scaleSet params.ScaleSet, e
 	})
 }
 
-func nddevBeforeProviderCreate(ctx context.Context, key string) error {
+func nddevBeforeProviderCreate(ctx context.Context, key string, scaleSetNames ...string) error {
 	if key == "" {
 		return nil
 	}
 	return nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
 		domainKey := nddevRetryDomainKey(key)
-		if err := nddevSharedCapacityCreateAllowed(journal, now, key, true); err != nil {
+		scaleSetName := ""
+		if len(scaleSetNames) > 0 {
+			scaleSetName = strings.TrimSpace(scaleSetNames[0])
+		}
+		if err := nddevSharedCapacityCreateAllowed(journal, now, key, scaleSetName, true); err != nil {
 			return err
 		}
 		if domain := journal.Records[domainKey]; domainKey != key {
@@ -155,6 +161,9 @@ func nddevBeforeProviderCreate(ctx context.Context, key string) error {
 			return fmt.Errorf("provider create circuit opened after %d attempts", record.Attempts)
 		}
 		record.JobID = key
+		if scaleSetName != "" {
+			record.ScaleSetName = scaleSetName
+		}
 		if record.Attempts < nddevRetryMaximum {
 			record.Attempts++
 		}
@@ -184,7 +193,7 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 			// the short fixed delay because no scarce resource must be awaited.
 			if record.LastErrorClass == "capacity" {
 				record.NextAllowedAt = now.Add(nddevCapacityRetryDelay(key, record.Attempts))
-				nddevRecordSharedCapacityFailure(journal, now)
+				nddevRecordSharedCapacityFailure(journal, now, record.ScaleSetName)
 			} else {
 				// A missing intent is a cancellation race, not load. Keep it cheap
 				// and responsive without teaching it capacity's accumulating delay.
@@ -197,6 +206,7 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 			if domainKey != key {
 				domain := journal.Records[domainKey]
 				domain.JobID = domainKey
+				domain.ScaleSetName = record.ScaleSetName
 				domain.LastErrorClass = record.LastErrorClass
 				domain.UpdatedAt = now
 				if record.LastErrorClass == "capacity" {
@@ -225,6 +235,7 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 		if domainKey != key {
 			domain := journal.Records[domainKey]
 			domain.JobID = domainKey
+			domain.ScaleSetName = record.ScaleSetName
 			if domain.Attempts < nddevRetryMaximum {
 				domain.Attempts++
 			}
@@ -250,24 +261,33 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 // identity, intent, and every other capacity backoff remain intact.
 func NDDevProviderCapacityReleased(ctx context.Context) error {
 	return nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
-		domainKey := nddevOldestCapacityRecord(journal, true, "")
+		activeScaleSets, filterActive, err := nddevActiveQueueScaleSets()
+		if err != nil {
+			return err
+		}
+		domainKey := nddevOldestEligibleCapacityDomain(journal, activeScaleSets, filterActive)
 		if domainKey == "" {
+			if filterActive {
+				nddevGrantSharedCapacityProbe(journal, now, "", "", "worker-deleted")
+				return nil
+			}
 			// Schema-v1 journals written before domain backoff existed may carry
 			// only concrete records. Releasing one of those remains bounded.
 			domainKey = nddevOldestCapacityRecord(journal, false, "")
 			if domainKey == "" {
-				delete(journal.Records, nddevCapacityDomainKey)
+				nddevGrantSharedCapacityProbe(journal, now, "", "", "worker-deleted")
 				return nil
 			}
-			nddevGrantSharedCapacityProbe(journal, now, nddevRetryDomainKey(domainKey), "worker-deleted")
+			nddevGrantSharedCapacityProbe(journal, now, nddevRetryDomainKey(domainKey), journal.Records[domainKey].ScaleSetName, "worker-deleted")
 			delete(journal.Records, domainKey)
 			return nil
 		}
+		scaleSetName := journal.Records[domainKey].ScaleSetName
 		delete(journal.Records, domainKey)
 		if concreteKey := nddevOldestCapacityRecord(journal, false, domainKey); concreteKey != "" {
 			delete(journal.Records, concreteKey)
 		}
-		nddevGrantSharedCapacityProbe(journal, now, domainKey, "worker-deleted")
+		nddevGrantSharedCapacityProbe(journal, now, domainKey, scaleSetName, "worker-deleted")
 		return nil
 	})
 }
@@ -302,6 +322,7 @@ func nddevRecordProviderCreateSuccess(ctx context.Context, key string) error {
 			ownerDomain := nddevRetryDomainKey(shared.ProbeOwner)
 			if shared.ProbeOwner == "" || shared.ProbeOwner == key || ownerDomain == nddevRetryDomainKey(key) {
 				shared.ProbeOwner = ""
+				shared.ScaleSetName = ""
 				shared.WakeReason = "probe-succeeded"
 				shared.UpdatedAt = now
 				shared.NextAllowedAt = now.Add(nddevCapacityRetryDelay(nddevCapacityDomainKey, shared.Attempts))
@@ -317,17 +338,28 @@ func nddevRecordProviderCreateSuccess(ctx context.Context, key string) error {
 // capacity refusal there is no shared record and independent cold creates stay
 // parallel. Afterwards the oldest waiting scale-set domain owns the next probe;
 // a completed deletion may grant that owner immediately.
-func nddevSharedCapacityCreateAllowed(journal *nddevRetryJournal, now time.Time, key string, reserve bool) error {
+func nddevSharedCapacityCreateAllowed(journal *nddevRetryJournal, now time.Time, key, scaleSetName string, reserve bool) error {
 	shared, saturated := journal.Records[nddevCapacityDomainKey]
 	if !saturated {
 		return nil
 	}
 	domainKey := nddevRetryDomainKey(key)
+	activeScaleSets, filterActive, err := nddevActiveQueueScaleSets()
+	if err != nil {
+		return err
+	}
 	owner := shared.ProbeOwner
+	if owner != "" && filterActive && (shared.ScaleSetName == "" || !activeScaleSets[shared.ScaleSetName]) {
+		owner = ""
+		shared.ProbeOwner = ""
+		shared.ScaleSetName = ""
+		journal.Records[nddevCapacityDomainKey] = shared
+	}
 	if owner == "" {
-		owner = nddevOldestCapacityRecord(journal, true, "")
+		owner = nddevOldestEligibleCapacityDomain(journal, activeScaleSets, filterActive)
 		if owner != "" && reserve {
 			shared.ProbeOwner = owner
+			shared.ScaleSetName = journal.Records[owner].ScaleSetName
 		}
 	}
 	ownerDomain := nddevRetryDomainKey(owner)
@@ -346,6 +378,7 @@ func nddevSharedCapacityCreateAllowed(journal *nddevRetryJournal, now time.Time,
 		}
 	}
 	shared.ProbeOwner = key
+	shared.ScaleSetName = scaleSetName
 	shared.WakeReason = "probe-leased"
 	shared.UpdatedAt = now
 	shared.NextAllowedAt = now.Add(nddevRetryAttemptLease)
@@ -353,7 +386,7 @@ func nddevSharedCapacityCreateAllowed(journal *nddevRetryJournal, now time.Time,
 	return nil
 }
 
-func nddevRecordSharedCapacityFailure(journal *nddevRetryJournal, now time.Time) {
+func nddevRecordSharedCapacityFailure(journal *nddevRetryJournal, now time.Time, scaleSetName string) {
 	shared := journal.Records[nddevCapacityDomainKey]
 	shared.JobID = nddevCapacityDomainKey
 	if shared.Attempts < nddevRetryMaximum {
@@ -364,11 +397,12 @@ func nddevRecordSharedCapacityFailure(journal *nddevRetryJournal, now time.Time)
 	shared.NextAllowedAt = now.Add(nddevCapacityRetryDelay(nddevCapacityDomainKey, shared.Attempts))
 	shared.TerminalUntil = time.Time{}
 	shared.ProbeOwner = ""
+	shared.ScaleSetName = scaleSetName
 	shared.WakeReason = "capacity-refused"
 	journal.Records[nddevCapacityDomainKey] = shared
 }
 
-func nddevGrantSharedCapacityProbe(journal *nddevRetryJournal, now time.Time, owner, reason string) {
+func nddevGrantSharedCapacityProbe(journal *nddevRetryJournal, now time.Time, owner, scaleSetName, reason string) {
 	shared := journal.Records[nddevCapacityDomainKey]
 	if shared.Attempts < 1 {
 		shared.Attempts = 1
@@ -379,8 +413,68 @@ func nddevGrantSharedCapacityProbe(journal *nddevRetryJournal, now time.Time, ow
 	shared.NextAllowedAt = now
 	shared.TerminalUntil = time.Time{}
 	shared.ProbeOwner = owner
+	shared.ScaleSetName = scaleSetName
 	shared.WakeReason = reason
 	journal.Records[nddevCapacityDomainKey] = shared
+}
+
+func nddevOldestEligibleCapacityDomain(journal *nddevRetryJournal, activeScaleSets map[string]bool, filterActive bool) string {
+	selected := ""
+	for key, record := range journal.Records {
+		if key == nddevCapacityDomainKey || nddevRetryDomainKey(key) != key || record.LastErrorClass != "capacity" {
+			continue
+		}
+		if filterActive && (record.ScaleSetName == "" || !activeScaleSets[record.ScaleSetName]) {
+			continue
+		}
+		if selected == "" || record.UpdatedAt.Before(journal.Records[selected].UpdatedAt) ||
+			(record.UpdatedAt.Equal(journal.Records[selected].UpdatedAt) && key < selected) {
+			selected = key
+		}
+	}
+	return selected
+}
+
+func nddevActiveQueueScaleSets() (map[string]bool, bool, error) {
+	path := strings.TrimSpace(os.Getenv(nddevQueueIntentFileEnv))
+	if path == "" {
+		return nil, false, nil
+	}
+	if !nddevBoundedAbsolutePath(path) {
+		return nil, true, fmt.Errorf("queue intent path is unavailable or unsafe")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, true, fmt.Errorf("open queue intent journal: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return nil, true, fmt.Errorf("queue intent journal must be a private regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, nddevRetryMaximumBytes+1))
+	if err != nil || len(data) > nddevRetryMaximumBytes {
+		return nil, true, fmt.Errorf("read queue intent journal: invalid bounded content")
+	}
+	var queue struct {
+		Intents map[string]struct {
+			ScaleSetName string `json:"scale_set_name"`
+			State        string `json:"state"`
+		} `json:"intents"`
+	}
+	if err := json.Unmarshal(data, &queue); err != nil {
+		return nil, true, fmt.Errorf("decode queue intent journal: %w", err)
+	}
+	active := map[string]bool{}
+	for _, intent := range queue.Intents {
+		switch intent.State {
+		case "queued", "acquiring", "acquired", "assigned":
+			if name := strings.TrimSpace(intent.ScaleSetName); name != "" {
+				active[name] = true
+			}
+		}
+	}
+	return active, true, nil
 }
 
 func nddevRetryDelay(key string, attempt int) time.Duration {
@@ -513,6 +607,10 @@ func (j nddevRetryJournal) Validate() error {
 		}
 		if record.WakeReason != "" && key != nddevCapacityDomainKey {
 			return fmt.Errorf("provider retry record %q carries shared wake state", key)
+		}
+		if len(record.ScaleSetName) > 128 || strings.TrimSpace(record.ScaleSetName) != record.ScaleSetName ||
+			strings.ContainsAny(record.ScaleSetName, "\r\n\t") {
+			return fmt.Errorf("provider retry record %q has invalid scale-set name", key)
 		}
 	}
 	return nil

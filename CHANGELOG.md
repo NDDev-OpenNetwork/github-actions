@@ -40,6 +40,11 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.67`: shared-capacity wake ownership now
+  intersects retry history with active durable queue intents by exact scale-set
+  name. A completed worker can no longer grant its only wake to a historical
+  domain with no waiting job; an empty active intersection remains unowned for
+  the next real waiter instead of blocking current work.
 - Added GARM derivative `v0.2.1-nddev.66` and provider derivative
   `v0.1.5-nddev.70`: once any scale set proves the
   measured fleet envelope saturated, a durable fleet-wide lease admits only

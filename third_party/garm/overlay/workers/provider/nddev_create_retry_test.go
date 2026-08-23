@@ -437,6 +437,84 @@ func TestNDDevCapacityDeleteWakesExactlyOneFleetDomainAcrossRestart(t *testing.T
 	}
 }
 
+func TestNDDevCapacityDeleteSkipsHistoricalDomainsWithoutActiveQueueWork(t *testing.T) {
+	now := time.Date(2026, 8, 23, 4, 15, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	queue := `{"schema_version":4,"intents":{"active":{"scale_set_name":"active-fast","state":"assigned"},"running":{"scale_set_name":"stale-standard","state":"running"}}}`
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := "scale-set:entity-one:17:instance:stale"
+	active := "scale-set:entity-two:19:instance:active"
+	if err := nddevBeforeProviderCreate(context.Background(), stale, "stale-standard"); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), active, "active-fast"); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), stale, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if err := nddevRecordProviderCreateFailure(context.Background(), active, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	if err := NDDevProviderCapacityReleased(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := journal.Records[nddevCapacityDomainKey]
+	if shared.ProbeOwner != nddevRetryDomainKey(active) || shared.ScaleSetName != "active-fast" || shared.WakeReason != "worker-deleted" {
+		t.Fatalf("delete woke historical rather than active capacity domain: %#v", shared)
+	}
+	if _, exists := journal.Records[nddevRetryDomainKey(stale)]; !exists {
+		t.Fatal("active selection deleted the historical domain instead of leaving it for garbage collection")
+	}
+}
+
+func TestNDDevCapacityDeleteLeavesAnUnownedWakeWhenNoHistoricalDomainIsActive(t *testing.T) {
+	now := time.Date(2026, 8, 23, 4, 20, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	if err := os.WriteFile(queuePath, []byte(`{"schema_version":4,"intents":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := "scale-set:entity-one:17:instance:stale"
+	if err := nddevBeforeProviderCreate(context.Background(), stale, "stale-standard"); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), stale, errors.New("insufficient-cpu")); err != nil {
+		t.Fatal(err)
+	}
+	if err := NDDevProviderCapacityReleased(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := journal.Records[nddevCapacityDomainKey]
+	if shared.ProbeOwner != "" || shared.ScaleSetName != "" || shared.WakeReason != "worker-deleted" {
+		t.Fatalf("inactive history captured a released-capacity wake: %#v", shared)
+	}
+}
+
 func TestNDDevMissingCanceledIntentNeverOpensCircuit(t *testing.T) {
 	now := time.Date(2026, 8, 19, 4, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow
