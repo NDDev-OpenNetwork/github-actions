@@ -1,0 +1,190 @@
+schema_version: 1
+backend: openobserve
+organization: default
+dashboards:
+  - id: capacity_pressure
+    title: Fleet capacity and pressure
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: host_memory_available
+        title: Available host memory
+        kind: timeseries
+        query: min by (host) (gha_fleet_host_memory_available_bytes)
+        unit: bytes
+        description: Hard memory currently available on each compute member.
+      - id: memory_psi
+        title: Memory PSI some
+        kind: timeseries
+        query: max by (host) (gha_fleet_host_psi_stall_percent{resource="memory",mode="some"})
+        unit: percent
+        description: Measured memory stall pressure used by the admission stop control.
+      - id: shared_capacity
+        title: Shared capacity state
+        kind: stat
+        query: max(gha_fleet_shared_capacity_saturated)
+        unit: state
+        description: Whether typed provider refusal has closed bounded parallel creates.
+      - id: visible_instances
+        title: Visible Incus instances
+        kind: timeseries
+        query: max(gha_fleet_incus_visible_instances)
+        unit: count
+        description: Current fleet workers visible through authoritative Incus inventory.
+  - id: correlation_integrity
+    title: Queue and runtime correlation integrity
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: missing_request_identity
+        title: Missing request identities
+        kind: timeseries
+        query: max(gha_fleet_queue_missing_runner_request_id)
+        unit: count
+        description: Assigned intents that lack the expected request identity.
+      - id: missing_workflow_run
+        title: Missing workflow-run identities
+        kind: timeseries
+        query: max(gha_fleet_queue_missing_workflow_run_id)
+        unit: count
+        description: Intents that cannot be joined to a GitHub workflow run.
+      - id: unbound_repository
+        title: Unbound repositories
+        kind: timeseries
+        query: max(gha_fleet_queue_unbound_repository)
+        unit: count
+        description: Active intents whose repository identity has not converged.
+      - id: uncovered_running
+        title: Uncovered running jobs
+        kind: timeseries
+        query: max(gha_fleet_queue_uncovered_running)
+        unit: count
+        description: GitHub running jobs absent from the durable queue model.
+  - id: lifecycle_latency
+    title: Job lifecycle latency
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: assigned_age
+        title: Oldest assigned phase
+        kind: timeseries
+        query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"})
+        unit: seconds
+        description: Time since the oldest admitted job entered assigned state.
+      - id: created_unbound_age
+        title: Oldest created-unbound worker
+        kind: timeseries
+        query: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds)
+        unit: seconds
+        description: Age of the oldest worker awaiting running-job identity convergence.
+      - id: queued_age
+        title: Oldest queued phase
+        kind: timeseries
+        query: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"})
+        unit: seconds
+        description: End-user wait before admission, separated from later lifecycle phases.
+      - id: state_counts
+        title: Intent state counts
+        kind: timeseries
+        query: max by (state) (gha_fleet_queue_intents_by_state)
+        unit: count
+        description: Active queue population split by bounded lifecycle state.
+  - id: provider_reliability
+    title: Provider reliability
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: deferred_errors
+        title: Deferred retries by class
+        kind: timeseries
+        query: sum by (error_class) (gha_fleet_provider_retry_deferred_records_by_error_class)
+        unit: count
+        description: Current deferred provider-create records, separated by bounded error class.
+      - id: inventory_gaps
+        title: Provider and Incus inventory gaps
+        kind: timeseries
+        query: max(gha_fleet_incus_orphan_instances) or max(gha_fleet_journal_missing_instances)
+        unit: count
+        description: Authoritative disagreements that require identity-first recovery.
+      - id: retry_records
+        title: Retry records by class
+        kind: timeseries
+        query: sum by (error_class) (gha_fleet_provider_retry_records_by_error_class)
+        unit: count
+        description: Durable provider retry history and currently owned attempts.
+      - id: terminal_circuits
+        title: Terminal provider circuits
+        kind: stat
+        query: max(gha_fleet_provider_terminal_circuits)
+        unit: count
+        description: Scale sets blocked by a fail-closed terminal provider error.
+  - id: queue_fairness
+    title: Queue priority and fairness
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: active_by_priority
+        title: Active intents by priority
+        kind: timeseries
+        query: sum by (priority) (gha_fleet_queue_intents_by_priority)
+        unit: count
+        description: Three-level priority demand without repository-cardinality labels.
+      - id: active_by_scale_set
+        title: Active intents by class
+        kind: timeseries
+        query: sum by (scale_set) (gha_fleet_queue_intents_by_scale_set)
+        unit: count
+        description: Demand mix by published worker class.
+      - id: active_total
+        title: Active intents
+        kind: timeseries
+        query: max(gha_fleet_queue_intents_active)
+        unit: count
+        description: All accepted work still owned by the durable queue.
+      - id: in_flight
+        title: In-flight intents
+        kind: timeseries
+        query: max(gha_fleet_queue_intents_in_flight)
+        unit: count
+        description: Assigned plus running work consuming or approaching fleet capacity.
+  - id: telemetry_pipeline
+    title: Telemetry durability
+    refresh_seconds: 30
+    default_range: 1h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: collection_errors
+        title: Observer collection errors
+        kind: timeseries
+        query: max(gha_fleet_collection_errors)
+        unit: count
+        description: Current authoritative collection failures by the fleet observer.
+      - id: collector_queue_ratio
+        title: Collector persistent queue ratio
+        kind: timeseries
+        query: max(otelcol_exporter_queue_size) / clamp_min(max(otelcol_exporter_queue_capacity), 1)
+        unit: percent
+        description: Buffered telemetry occupancy before backend delivery.
+      - id: snapshot_age
+        title: Observer snapshot age
+        kind: timeseries
+        query: max(gha_fleet_snapshot_age_seconds)
+        unit: seconds
+        description: Freshness of the correlated fleet snapshot feeding every dashboard.
+      - id: snapshot_stale
+        title: Snapshot stale
+        kind: stat
+        query: max(gha_fleet_snapshot_stale)
+        unit: state
+        description: Fail-closed indicator that other fleet metrics must not be trusted.
