@@ -36,6 +36,8 @@ Versioning.
 
 ### Changed
 
+- Added provider derivative `v0.1.5-nddev.67`, reproducibly bound to the
+  job-start correlation hook and its exact binary digest.
 - Added observer schema v14 with a stateful first-observed horizon for created
   leases temporarily absent from Incus during terminal teardown. One
   cross-source sample no longer flaps platform health; absence beyond 30
