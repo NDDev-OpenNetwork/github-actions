@@ -40,7 +40,8 @@ Versioning.
 
 ### Changed
 
-- Added GARM derivative `v0.2.1-nddev.66`: once any scale set proves the
+- Added GARM derivative `v0.2.1-nddev.66` and provider derivative
+  `v0.1.5-nddev.70`: once any scale set proves the
   measured fleet envelope saturated, a durable fleet-wide lease admits only
   the oldest waiting capacity domain. One completed worker deletion wakes one
   domain, successful replacement retains saturation, and unrelated in-flight
