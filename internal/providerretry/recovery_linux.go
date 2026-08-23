@@ -28,6 +28,7 @@ type record struct {
 	TerminalUntil  time.Time `json:"terminal_until,omitempty"`
 	ProbeOwner     string    `json:"probe_owner,omitempty"`
 	WakeReason     string    `json:"wake_reason,omitempty"`
+	ScaleSetName   string    `json:"scale_set_name,omitempty"`
 }
 
 type journal struct {

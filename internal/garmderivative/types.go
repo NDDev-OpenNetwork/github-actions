@@ -91,6 +91,7 @@ type RuntimeContract struct {
 	CapacityRetryWakeAfterDelete             bool `json:"capacity_retry_wake_after_delete" yaml:"capacity_retry_wake_after_delete"`
 	CapacityRetrySingleDomainLease           bool `json:"capacity_retry_single_domain_lease" yaml:"capacity_retry_single_domain_lease"`
 	SharedCapacityProbeDomain                bool `json:"shared_capacity_probe_domain" yaml:"shared_capacity_probe_domain"`
+	SharedCapacityProbeRequiresActiveQueue   bool `json:"shared_capacity_probe_requires_active_queue" yaml:"shared_capacity_probe_requires_active_queue"`
 	BoundedScaleUpCapacityProbe              bool `json:"bounded_scale_up_capacity_probe" yaml:"bounded_scale_up_capacity_probe"`
 	AuthoritativeJobReconciliation           bool `json:"authoritative_job_reconciliation" yaml:"authoritative_job_reconciliation"`
 	AuthoritativeQueueIntentReconciliation   bool `json:"authoritative_queue_intent_reconciliation" yaml:"authoritative_queue_intent_reconciliation"`

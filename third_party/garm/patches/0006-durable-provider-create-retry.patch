@@ -7,7 +7,7 @@ index 6a1ccb3..817a4d5 100644
  	}
  
 +	retryKey := nddevProviderRetryKey(instance, i.scaleSet, i.scaleSetEntity)
-+	if err := nddevBeforeProviderCreate(i.ctx, retryKey); err != nil {
++	if err := nddevBeforeProviderCreate(i.ctx, retryKey, i.scaleSet.Name); err != nil {
 +		return fmt.Errorf("provider create retry policy: %w", err)
 +	}
 +
