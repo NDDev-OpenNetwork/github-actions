@@ -418,21 +418,26 @@ func TestIntegrationBrowserLaunchIsLocalAndTimeBounded(t *testing.T) {
 	text := string(script)
 	for _, wanted := range []string{
 		`timeout --signal=TERM --kill-after=5s 30s`,
-		`--dump-dom "file://${browser_page}"`,
+		`--screenshot="${browser_screenshot}" "file://${browser_page}"`,
+		`--window-size=800,600`,
+		`--disable-field-trial-config`,
 		`--disable-background-networking`,
+		`--disable-component-extensions-with-background-pages`,
+		`--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync`,
+		`--enable-features=CDPScreenshotNewSurface`,
 		`if runuser -u runner -- timeout`,
 		`browser_status=$?`,
 		`"${browser_status}" -ne 124`,
 		`pgrep -u runner -f -- "${browser_root}/profile"`,
-		`<title>nddev-browser-smoke</title>`,
-		`<body>browser-ok</body>`,
+		`89504e470d0a1a0a`,
+		`stat --format=%s "${browser_screenshot}"`,
 	} {
 		if !strings.Contains(text, wanted) {
 			t.Fatalf("browser smoke lacks %q", wanted)
 		}
 	}
-	if strings.Contains(text, `--dump-dom 'data:`) {
-		t.Fatal("browser smoke retained the non-terminating data URL")
+	if strings.Contains(text, `--dump-dom`) {
+		t.Fatal("browser smoke retained stdout-buffered DOM qualification")
 	}
 }
 

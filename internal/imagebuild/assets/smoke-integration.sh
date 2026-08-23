@@ -137,15 +137,29 @@ if [[ "${GHA_BROWSER}" == "chromium" ]]; then
   browser_page="${browser_root}/browser-smoke.html"
   printf '<!doctype html><title>nddev-browser-smoke</title><body>browser-ok</body>\n' >"${browser_page}"
   chown runner:runner "${browser_page}"
-  browser_dom="${browser_root}/browser-smoke-dom.html"
+  browser_screenshot="${browser_root}/browser-smoke.png"
   browser_status=0
   if runuser -u runner -- timeout --signal=TERM --kill-after=5s 30s \
     env HOME=/home/runner "${browser_binary}" \
-    --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
-    --disable-background-networking --disable-component-update --disable-sync \
-    --metrics-recording-only --no-pings --no-first-run --no-default-browser-check \
-    --user-data-dir="${browser_root}/profile" --dump-dom "file://${browser_page}" \
-    >"${browser_dom}"; then
+    --headless --no-sandbox --disable-field-trial-config \
+    --disable-background-networking --disable-background-timer-throttling \
+    --disable-backgrounding-occluded-windows --disable-back-forward-cache \
+    --disable-breakpad --disable-client-side-phishing-detection \
+    --disable-component-extensions-with-background-pages --disable-component-update \
+    --no-default-browser-check --disable-default-apps --disable-dev-shm-usage \
+    --disable-extensions \
+    --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion \
+    --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input \
+    --disable-hang-monitor --disable-ipc-flooding-protection \
+    --disable-popup-blocking --disable-prompt-on-repost \
+    --disable-renderer-backgrounding --disable-updater-scheduler \
+    --force-color-profile=srgb --metrics-recording-only --no-first-run \
+    --password-store=basic --use-mock-keychain --no-service-autorun \
+    --export-tagged-pdf --disable-search-engine-choice-screen \
+    --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch \
+    --disable-infobars --disable-sync \
+    --user-data-dir="${browser_root}/profile" --window-size=800,600 \
+    --screenshot="${browser_screenshot}" "file://${browser_page}"; then
     :
   else
     browser_status=$?
@@ -154,8 +168,9 @@ if [[ "${GHA_BROWSER}" == "chromium" ]]; then
     echo "browser smoke exited with unexpected status ${browser_status}" >&2
     exit 1
   fi
-  grep -Fq '<title>nddev-browser-smoke</title>' "${browser_dom}"
-  grep -Fq '<body>browser-ok</body>' "${browser_dom}"
+  test -s "${browser_screenshot}"
+  [[ "$(od -An -tx1 -N8 "${browser_screenshot}" | tr -d '[:space:]')" == "89504e470d0a1a0a" ]]
+  [[ "$(stat --format=%s "${browser_screenshot}")" -ge 1024 ]]
   if pgrep -u runner -f -- "${browser_root}/profile" >/dev/null; then
     echo "browser smoke left a process behind after bounded cleanup" >&2
     exit 1
