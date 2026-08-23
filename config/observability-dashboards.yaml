@@ -49,15 +49,15 @@ dashboards:
       - id: missing_workflow_run
         title: Missing workflow-run identities
         kind: timeseries
-        query: max(gha_fleet_queue_missing_workflow_run_id)
+        query: max(gha_fleet_queue_missing_workflow_run_id_beyond_grace)
         unit: count
-        description: Intents that cannot be joined to a GitHub workflow run.
+        description: Intents that still cannot be joined to a GitHub workflow run after the bounded convergence window.
       - id: unbound_repository
         title: Unbound repositories
         kind: timeseries
-        query: max(gha_fleet_queue_unbound_repository)
+        query: max(gha_fleet_queue_unbound_repository_beyond_grace)
         unit: count
-        description: Active intents whose repository identity has not converged.
+        description: Active intents whose repository identity has not converged after the bounded convergence window.
       - id: uncovered_running
         title: Uncovered running jobs
         kind: timeseries

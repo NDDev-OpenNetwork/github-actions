@@ -260,6 +260,30 @@ func TestQueueSummarySeparatesDirectJITFromMissingCorrelation(t *testing.T) {
 	}
 }
 
+func TestQueueSummarySeparatesTransientAndPersistentCorrelationGaps(t *testing.T) {
+	transient := queueintent.Intent{
+		Key: "transient", ScaleSetID: 11, JobID: "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+		ScaleSetName: "nddev-linux-standard", Repository: "owner",
+		WorkflowRef: "unavailable-before-job-available", EventName: "unavailable-before-job-available",
+		QueueTime: observationTime.Add(-queueCorrelationGracePeriod + time.Second),
+		State:     queueintent.StateAssigned, Priority: 1,
+		StateEnteredAt: observationTime.Add(-time.Minute), UpdatedAt: observationTime.Add(-time.Second),
+		ExpiresAt: observationTime.Add(time.Minute),
+	}
+	persistent := transient
+	persistent.Key = "persistent"
+	persistent.JobID = "6c3077ba-3664-5824-b2cf-e22a31b25f44"
+	persistent.QueueTime = observationTime.Add(-queueCorrelationGracePeriod)
+	summary, err := summarizeQueue(queueintent.Snapshot{Active: []queueintent.Intent{transient, persistent}}, testPlatform(t), observationTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.UnboundRepository != 2 || summary.MissingWorkflowRunID != 2 ||
+		summary.UnboundRepositoryBeyondGrace != 1 || summary.MissingWorkflowRunIDBeyondGrace != 1 {
+		t.Fatalf("correlation convergence classification = %#v", summary)
+	}
+}
+
 func TestCollectorMarksRunningIntentWithoutExecutionLeaseUnhealthy(t *testing.T) {
 	collector := healthyCollector(t)
 	collector.Journal = func(context.Context) (providerjournal.Journal, error) {
