@@ -1,0 +1,70 @@
+schema_version: 1
+backend: openobserve
+organization: default
+
+queries:
+  - id: job-correlation-latest
+    title: Latest correlated project jobs
+    stream: fleet_logs
+    search_type: logs
+    parameters: []
+    sql: >-
+      SELECT github_repository, github_repository_id, github_workflow_run_id,
+      github_run_attempt, github_job_name, github_workflow_ref,
+      github_commit_sha, runner_name, instance_name, _timestamp
+      FROM "fleet_logs"
+      WHERE systemd_unit = 'gha-cache-broker.service'
+      AND msg = 'job correlation accepted'
+      ORDER BY _timestamp DESC
+
+  - id: runner-causal-timeline
+    title: Queue, provider and member timeline for one runner
+    stream: fleet_traces
+    search_type: traces
+    parameters: [RUNNER_NAME]
+    sql: >-
+      SELECT operation_name, runner_name, queue_job_uuid,
+      github_workflow_run_id, github_runner_id, incus_member,
+      service_service_version, duration, _timestamp
+      FROM "fleet_traces"
+      WHERE runner_name = '${RUNNER_NAME}'
+      ORDER BY _timestamp ASC
+
+  - id: queue-phase-summary
+    title: Queue phase duration summary
+    stream: fleet_traces
+    search_type: traces
+    parameters: []
+    sql: >-
+      SELECT operation_name, COUNT(*) AS spans,
+      AVG(duration) AS avg_duration_us, MAX(duration) AS max_duration_us
+      FROM "fleet_traces"
+      WHERE operation_name LIKE 'queue.%'
+      GROUP BY operation_name
+      ORDER BY operation_name
+
+  - id: member-provisioning-summary
+    title: Provider provisioning by Incus member
+    stream: fleet_traces
+    search_type: traces
+    parameters: []
+    sql: >-
+      SELECT incus_member, COUNT(*) AS creates,
+      AVG(duration) AS avg_duration_us, MAX(duration) AS max_duration_us
+      FROM "fleet_traces"
+      WHERE operation_name = 'provider.create_instance'
+      AND incus_member IS NOT NULL
+      GROUP BY incus_member
+      ORDER BY incus_member
+
+dashboards:
+  - id: fleet-job-correlation
+    title: Fleet job correlation and critical path
+    panels:
+      - query: job-correlation-latest
+        visualization: table
+      - query: queue-phase-summary
+        visualization: table
+      - query: member-provisioning-summary
+        visualization: table
+
