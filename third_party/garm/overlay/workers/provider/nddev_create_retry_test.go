@@ -500,12 +500,15 @@ func TestNDDevCapacityDeleteWakesExactlyOneFleetDomainAcrossRestart(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared = journal.Records[nddevCapacityDomainKey]
-	if shared.ProbeOwner != "" || shared.WakeReason != "probe-succeeded" || !shared.NextAllowedAt.After(now) {
-		t.Fatalf("successful probe did not retain shared saturation: %#v", shared)
+	if _, exists := journal.Records[nddevCapacityDomainKey]; exists {
+		t.Fatalf("successful probe retained shared saturation: %#v", journal.Records[nddevCapacityDomainKey])
 	}
 	if _, exists := journal.Records[nddevRetryDomainKey(newer)]; !exists {
 		t.Fatal("successful oldest probe erased another scale set waiter")
+	}
+	fresh := "scale-set:entity-three:23:instance:fresh"
+	if err := nddevBeforeProviderCreate(context.Background(), fresh); err != nil {
+		t.Fatalf("successful probe did not reopen unsaturated parallel creates: %v", err)
 	}
 }
 

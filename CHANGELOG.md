@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.70`: a successful shared-capacity
+  probe now removes the saturated-domain record and restores bounded parallel
+  creates. The next typed capacity refusal recreates single-probe mode, avoiding
+  permanent one-at-a-time provisioning after capacity has returned.
 - Added GARM derivative `v0.2.1-nddev.69`: every concrete shared-capacity
   owner is released after its two-minute lease expires, including a create
   interrupted by control-plane restart before it could record success or
