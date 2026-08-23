@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.68
+derivative_version: v0.2.1-nddev.69
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -87,11 +87,11 @@ overlays:
     sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
     purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: d457aa2421492105c24312fbafe00b68a8d5eaf390f82d690c5887b69b192d0a
-    purpose: Fsync-backed per-instance attempt leases with saturating parallel counters, complete capacity classification, one oldest actively queued fleet-wide probe after proven saturation, safe release of an expired concrete probe only after its own retry record proves failure or disappearance, five-minute fallback with immediate single-domain deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
+    sha256: 2f9071207cd0d5e6181f92166eb33172f6915118aca34a4f0902d8c65ccbdbf8
+    purpose: Fsync-backed per-instance attempt leases with saturating parallel counters, complete capacity classification, one oldest actively queued fleet-wide probe after proven saturation, unconditional release of a concrete owner only after its two-minute lease expires, five-minute fallback with immediate single-domain deletion wake, bounded provider-failure circuits and one-hour garbage collection of expired non-terminal records.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: dfb33b0af09feca48d503c6d0c055cf180eb4e2aae4dd7dcc29e5bf4856023a0
-    purpose: Prove attempts and a shared probe owner survive process recreation, concurrent failures saturate without corruption, only an actively queued oldest domain retries, failed or absent expired concrete owners release while an owner without a recorded failure remains protected, historical domains cannot capture deletion wakes, one deletion wakes exactly one domain, success retains saturation, and stale state is collected.
+    sha256: 1feae3706afa9431f748f038dffefec23eba25f5febfb6934735ab7e3cc1b478
+    purpose: Prove attempts and a shared probe owner survive process recreation, concurrent failures saturate without corruption, only an actively queued oldest domain retries, every expired concrete owner releases while an unexpired owner remains protected, historical domains cannot capture deletion wakes, one deletion wakes exactly one domain, success retains saturation, and stale state is collected.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 3ab5df2f0108b829abadfe5f34929aa9072d9ee4e54507511ecc2e31e84fcbdd
+  binary_sha256: 007700c0645310cb9216ab4ae2fd94e3e0180c1aaec6759a6e76a2e39d44cd59
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true

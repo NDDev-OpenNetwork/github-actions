@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.69`: every concrete shared-capacity
+  owner is released after its two-minute lease expires, including a create
+  interrupted by control-plane restart before it could record success or
+  failure. Unexpired ownership remains exclusive.
 - Added GARM derivative `v0.2.1-nddev.68`: an expired shared-capacity probe
   owned by a concrete create is released only when that owner's own durable
   retry record proves failure or has disappeared. A still-tracked owner without

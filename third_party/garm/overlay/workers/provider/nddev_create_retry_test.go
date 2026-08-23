@@ -378,7 +378,7 @@ func TestNDDevCapacityRetrySerializesEveryScaleSetInTheMeasuredFleet(t *testing.
 	}
 }
 
-func TestNDDevExpiredFailedConcreteProbeOwnerIsReleased(t *testing.T) {
+func TestNDDevExpiredConcreteProbeOwnerWithoutFailureIsReleased(t *testing.T) {
 	now := time.Date(2026, 8, 23, 8, 18, 54, 0, time.UTC)
 	oldOwner := "scale-set:entity-one:5:instance:failed"
 	newOwner := "scale-set:entity-one:5:instance:replacement"
@@ -396,12 +396,11 @@ func TestNDDevExpiredFailedConcreteProbeOwnerIsReleased(t *testing.T) {
 				WakeReason:     "probe-leased",
 			},
 			oldOwner: {
-				JobID:          oldOwner,
-				Attempts:       1,
-				LastErrorClass: "provider",
-				UpdatedAt:      now.Add(-3 * time.Minute),
-				NextAllowedAt:  now.Add(-2 * time.Minute),
-				ScaleSetName:   "nddev-linux-integration",
+				JobID:         oldOwner,
+				Attempts:      1,
+				UpdatedAt:     now.Add(-3 * time.Minute),
+				NextAllowedAt: now.Add(-2 * time.Minute),
+				ScaleSetName:  "nddev-linux-integration",
 			},
 		},
 	}
@@ -415,7 +414,7 @@ func TestNDDevExpiredFailedConcreteProbeOwnerIsReleased(t *testing.T) {
 	}
 }
 
-func TestNDDevExpiredConcreteProbeOwnerWithoutFailureRemainsOwned(t *testing.T) {
+func TestNDDevConcreteProbeOwnerRemainsOwnedBeforeLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 8, 23, 8, 18, 54, 0, time.UTC)
 	activeOwner := "scale-set:entity-one:5:instance:creating"
 	newOwner := "scale-set:entity-one:5:instance:replacement"
@@ -427,7 +426,7 @@ func TestNDDevExpiredConcreteProbeOwnerWithoutFailureRemainsOwned(t *testing.T) 
 				Attempts:       1,
 				LastErrorClass: "capacity",
 				UpdatedAt:      now.Add(-3 * time.Minute),
-				NextAllowedAt:  now.Add(-time.Minute),
+				NextAllowedAt:  now.Add(time.Minute),
 				ProbeOwner:     activeOwner,
 				ScaleSetName:   "nddev-linux-integration",
 				WakeReason:     "probe-leased",
@@ -436,15 +435,15 @@ func TestNDDevExpiredConcreteProbeOwnerWithoutFailureRemainsOwned(t *testing.T) 
 				JobID:         activeOwner,
 				Attempts:      1,
 				UpdatedAt:     now.Add(-3 * time.Minute),
-				NextAllowedAt: now.Add(-2 * time.Minute),
+				NextAllowedAt: now.Add(time.Minute),
 				ScaleSetName:  "nddev-linux-integration",
 			},
 		},
 	}
 
 	err := nddevSharedCapacityCreateAllowed(&journal, now, newOwner, "nddev-linux-integration", true)
-	if err == nil || !strings.Contains(err.Error(), activeOwner) {
-		t.Fatalf("replacement displaced an owner without a recorded failure: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "deferred until") {
+		t.Fatalf("replacement bypassed an unexpired concrete probe lease: %v", err)
 	}
 	if got := journal.Records[nddevCapacityDomainKey].ProbeOwner; got != activeOwner {
 		t.Fatalf("active owner changed to %q", got)
