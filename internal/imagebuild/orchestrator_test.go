@@ -410,6 +410,26 @@ func TestIntegrationBrowserVersionNormalizesVendorPaddingBeforeExactComparison(t
 	}
 }
 
+func TestIntegrationBrowserLaunchIsLocalAndTimeBounded(t *testing.T) {
+	script, err := scripts.ReadFile("assets/smoke-integration.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	for _, wanted := range []string{
+		`timeout --signal=TERM --kill-after=5s 30s`,
+		`--dump-dom "file://${browser_page}"`,
+		`--disable-background-networking`,
+	} {
+		if !strings.Contains(text, wanted) {
+			t.Fatalf("browser smoke lacks %q", wanted)
+		}
+	}
+	if strings.Contains(text, `--dump-dom 'data:`) {
+		t.Fatal("browser smoke retained the non-terminating data URL")
+	}
+}
+
 func TestDockerStorageDriverMatchesIsolationBackend(t *testing.T) {
 	t.Parallel()
 	vm := testImagePlan(t)
