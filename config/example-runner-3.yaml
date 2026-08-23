@@ -237,6 +237,7 @@ pools:
       max_ready: 0
     capabilities:
       docker: true
+      browser: true
       credentials: repository
       network_policy: public-internet
       cache_write_scope: trusted

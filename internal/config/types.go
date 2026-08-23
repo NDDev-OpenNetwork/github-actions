@@ -215,6 +215,7 @@ type WarmPool struct {
 
 type Capabilities struct {
 	Docker          bool   `json:"docker" yaml:"docker"`
+	Browser         bool   `json:"browser,omitempty" yaml:"browser,omitempty"`
 	Credentials     string `json:"credentials" yaml:"credentials"`
 	NetworkPolicy   string `json:"network_policy" yaml:"network_policy"`
 	CacheWriteScope string `json:"cache_write_scope" yaml:"cache_write_scope"`

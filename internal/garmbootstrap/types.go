@@ -36,9 +36,9 @@ const (
 	DefaultPoolBalancerType           = "roundrobin"
 	DefaultProviderName               = "nddev-incus"
 	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
-	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b2"
+	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b5"
 	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b10"
-	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b4"
+	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b5"
 	// Every Linux class is an ephemeral Incus container. Docker-capable classes
 	// use their nested-runtime image; release uses a separately stage-smoked
 	// standard image so OIDC authority does not inherit Docker/nesting.
@@ -86,6 +86,7 @@ type ScaleSetClass struct {
 	NetworkPolicy    string
 	CacheWriteScope  string
 	Docker           bool
+	Browser          bool
 	VCPU             int
 	MemoryMiB        int
 	DiskGiB          int
@@ -99,24 +100,24 @@ type ScaleSetClass struct {
 // fails every create with a pool that has no pinned worker image.
 func PublishedScaleSets() []ScaleSetClass {
 	return []ScaleSetClass{
-		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 4096, 30, false),
-		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, 4, 6144, 50, false),
-		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, 2, 3072, 30, false),
-		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, false),
-		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, 4, 6144, 40, false),
-		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, 2, 2048, 20, false),
-		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, 2, 4096, 30, false),
-		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, 2, 4096, 30, true),
-		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, 4, 6144, 50, true),
-		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, 4, 6144, 50, true),
+		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, false, 2, 4096, 30, false),
+		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, true, 4, 6144, 50, false),
+		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, false, 2, 3072, 30, false),
+		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, false),
+		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, false, 4, 6144, 40, false),
+		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, false, 2, 2048, 20, false),
+		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, false, 2, 4096, 30, false),
+		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, false, 2, 4096, 30, true),
+		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, true, 4, 6144, 50, true),
+		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, true),
 	}
 }
 
-func class(name, image, flavor string, maxRunners uint, trust, credentials, networkPolicy, cacheWriteScope string, docker bool, vcpu, memoryMiB, diskGiB int, repositoryScoped bool) ScaleSetClass {
+func class(name, image, flavor string, maxRunners uint, trust, credentials, networkPolicy, cacheWriteScope string, docker, browser bool, vcpu, memoryMiB, diskGiB int, repositoryScoped bool) ScaleSetClass {
 	return ScaleSetClass{
 		Name: name, Image: image, Flavor: flavor, MaxRunners: maxRunners, RepositoryScoped: repositoryScoped,
 		Trust: trust, Credentials: credentials, NetworkPolicy: networkPolicy,
-		CacheWriteScope: cacheWriteScope, Docker: docker,
+		CacheWriteScope: cacheWriteScope, Docker: docker, Browser: browser,
 		VCPU: vcpu, MemoryMiB: memoryMiB, DiskGiB: diskGiB,
 	}
 }

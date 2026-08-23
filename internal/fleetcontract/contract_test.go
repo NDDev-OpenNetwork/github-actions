@@ -32,7 +32,7 @@ func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 		len(contract.Tenants) == 0 || len(contract.Merge.RequiredContexts) != 1 || contract.Merge.RequiredContexts[0] != "Gate" {
 		t.Fatalf("public contract = %#v", contract)
 	}
-	if contract.SchemaVersion != 2 || contract.ContractVersion != 3 || contract.Execution.WorkerKind != "incus-container" ||
+	if contract.SchemaVersion != 2 || contract.ContractVersion != 4 || contract.Execution.WorkerKind != "incus-container" ||
 		!contract.Execution.Ephemeral || contract.Execution.JobsPerWorker != 1 || !contract.ResourceSemantics.HardMemoryExcludesEmergencySwap ||
 		contract.ResourceSemantics.EmergencySwapSchedulable || contract.ResourceSemantics.CPUMode != "weighted-overcommit" {
 		t.Fatalf("contract v2 semantics = %#v", contract)

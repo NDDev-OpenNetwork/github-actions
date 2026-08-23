@@ -220,6 +220,21 @@ func (m Manifest) Validate() error {
 	} else if m.Guest.DockerActionBaseRef != "" {
 		add("guest.docker_action_base_ref", "must be empty for the standard image")
 	}
+	if m.Guest.Browser != "" && m.Guest.Browser != "chromium" {
+		add("guest.browser", "must be empty or chromium")
+	}
+	if m.Guest.BrowserCapable() {
+		if variant != "integration" {
+			add("guest.browser", "chromium capability belongs to the integration image")
+		}
+		if m.BrowserSmoke == nil {
+			add("browser_smoke", "is required for the chromium-capable image")
+		} else {
+			validateBrowserSmoke(add, *m.BrowserSmoke)
+		}
+	} else if m.BrowserSmoke != nil {
+		add("browser_smoke", "must be empty when the image has no browser capability")
+	}
 	validatePackages(add, m.Guest.Packages, m.Guest.PackageVersions, variant)
 
 	if len(issues) == 0 {
@@ -232,6 +247,27 @@ func (m Manifest) Validate() error {
 		return issues[i].Path < issues[j].Path
 	})
 	return &ValidationError{Issues: issues}
+}
+
+func validateBrowserSmoke(add func(string, string), smoke BrowserSmoke) {
+	if smoke.Version != "151.0.7922.34" {
+		add("browser_smoke.version", "must pin the reviewed Chrome-for-Testing smoke version")
+	}
+	if smoke.UpstreamRef != "playwright/v1.62.1:chromium:1234:ubuntu24.04-x64" {
+		add("browser_smoke.upstream_ref", "must bind the Playwright dependency and browser registry source")
+	}
+	wantedArchive := "playwright-chrome-" + smoke.Version + "-linux64.zip"
+	if smoke.Archive != wantedArchive || !filePattern.MatchString(smoke.Archive) || path.Base(smoke.Archive) != smoke.Archive {
+		add("browser_smoke.archive", "must be the exact plain Chrome-for-Testing archive name")
+	}
+	wantedURL := "https://cdn.playwright.dev/builds/cft/" + smoke.Version + "/linux64/chrome-linux64.zip"
+	if smoke.DownloadURL != wantedURL {
+		add("browser_smoke.download_url", "must be the exact Playwright CDN Chrome-for-Testing URL")
+	}
+	validateSHA(add, "browser_smoke.archive_sha256", smoke.ArchiveSHA256)
+	if smoke.BinaryPath != "chrome-linux64/chrome" {
+		add("browser_smoke.binary_path", "must be the reviewed relative Chrome executable")
+	}
 }
 
 func validateCompilerCache(add func(string, string), tool Tool) {

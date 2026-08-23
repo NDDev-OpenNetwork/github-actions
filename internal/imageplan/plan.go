@@ -11,25 +11,27 @@ import (
 )
 
 type Plan struct {
-	ManifestFingerprint string                    `json:"manifest_fingerprint"`
-	IncusVersion        string                    `json:"incus_version"`
-	Project             string                    `json:"project"`
-	Profile             string                    `json:"profile"`
-	PublicHostAddress   string                    `json:"public_host_address"`
-	BuilderName         string                    `json:"builder_name"`
-	SmokeName           string                    `json:"smoke_name"`
-	InstanceConfig      map[string]string         `json:"instance_config"`
-	BuilderDiskGiB      int                       `json:"builder_disk_gib"`
-	SmokeRootDiskGiB    int                       `json:"smoke_root_disk_gib"`
-	Image               imagemanifest.Image       `json:"image"`
-	Source              imagemanifest.Source      `json:"source"`
-	Runner              imagemanifest.Runner      `json:"runner"`
-	CompilerCache       imagemanifest.Tool        `json:"compiler_cache"`
-	Toolchains          []imagemanifest.Toolchain `json:"toolchains"`
-	Packages            []string                  `json:"packages"`
-	PackageInstallSpecs []string                  `json:"package_install_specs"`
-	Variant             string                    `json:"variant"`
-	DockerActionBaseRef string                    `json:"docker_action_base_ref,omitempty"`
+	ManifestFingerprint string                      `json:"manifest_fingerprint"`
+	IncusVersion        string                      `json:"incus_version"`
+	Project             string                      `json:"project"`
+	Profile             string                      `json:"profile"`
+	PublicHostAddress   string                      `json:"public_host_address"`
+	BuilderName         string                      `json:"builder_name"`
+	SmokeName           string                      `json:"smoke_name"`
+	InstanceConfig      map[string]string           `json:"instance_config"`
+	BuilderDiskGiB      int                         `json:"builder_disk_gib"`
+	SmokeRootDiskGiB    int                         `json:"smoke_root_disk_gib"`
+	Image               imagemanifest.Image         `json:"image"`
+	Source              imagemanifest.Source        `json:"source"`
+	Runner              imagemanifest.Runner        `json:"runner"`
+	CompilerCache       imagemanifest.Tool          `json:"compiler_cache"`
+	Toolchains          []imagemanifest.Toolchain   `json:"toolchains"`
+	BrowserSmoke        *imagemanifest.BrowserSmoke `json:"browser_smoke,omitempty"`
+	Packages            []string                    `json:"packages"`
+	PackageInstallSpecs []string                    `json:"package_install_specs"`
+	Variant             string                      `json:"variant"`
+	DockerActionBaseRef string                      `json:"docker_action_base_ref,omitempty"`
+	Browser             string                      `json:"browser,omitempty"`
 }
 
 func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (Plan, error) {
@@ -63,6 +65,9 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 			manifest.Guest.EffectiveVariant(),
 			profile,
 		)
+	}
+	if pool.Capabilities.Browser && !manifest.Guest.BrowserCapable() {
+		return Plan{}, fmt.Errorf("image browser capability does not match profile %q", profile)
 	}
 	if pool.Capabilities.NetworkPolicy != "public-internet" {
 		return Plan{}, fmt.Errorf("image profile %q must use the reconciled public-internet pilot bridge", profile)
@@ -118,9 +123,11 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		Runner:              manifest.Runner,
 		CompilerCache:       manifest.CompilerCache,
 		Toolchains:          toolchains,
+		BrowserSmoke:        manifest.BrowserSmoke,
 		Packages:            append([]string(nil), manifest.Guest.Packages...),
 		PackageInstallSpecs: installSpecs,
 		Variant:             manifest.Guest.EffectiveVariant(),
 		DockerActionBaseRef: manifest.Guest.DockerActionBaseRef,
+		Browser:             manifest.Guest.Browser,
 	}, nil
 }

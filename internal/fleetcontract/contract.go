@@ -84,7 +84,7 @@ func ValidateConfig(contract Contract, platform platformconfig.Config) error {
 		}
 		if pool.Trust != class.Trust || pool.Capabilities.Credentials != class.Credentials ||
 			pool.Capabilities.NetworkPolicy != class.NetworkPolicy || pool.Capabilities.CacheWriteScope != class.CacheWriteScope ||
-			pool.Capabilities.Docker != class.Docker || pool.Resources.VCPU < class.Resources.VCPUMin ||
+			pool.Capabilities.Docker != class.Docker || pool.Capabilities.Browser != class.Browser || pool.Resources.VCPU < class.Resources.VCPUMin ||
 			pool.Resources.VCPU > class.Resources.VCPUMax ||
 			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB ||
 			pool.Warm.TargetReady != class.Warm.TargetReady || pool.Warm.MaxReady != class.Warm.MaxReady {
@@ -175,6 +175,7 @@ type RunnerClass struct {
 	// Docker reports whether a job of this class can run containers and service
 	// containers. It is the one capability difference a consumer chooses on.
 	Docker    bool      `json:"docker"`
+	Browser   bool      `json:"browser"`
 	Resources Resources `json:"resources"`
 	Warm      Warm      `json:"warm"`
 }
@@ -263,7 +264,7 @@ func Build(sources Sources, commit string) (Contract, error) {
 			JobsPerWorker: declaration.Execution.JobsPerWorker,
 			Trust:         class.Trust, Credentials: class.Credentials,
 			NetworkPolicy: class.NetworkPolicy, CacheWriteScope: class.CacheWriteScope,
-			Docker: class.Docker,
+			Docker: class.Docker, Browser: class.Browser,
 			Resources: Resources{
 				VCPU: class.VCPU, VCPUMin: tunableVCPUMin(class.VCPU), VCPUMax: class.VCPU,
 				MemoryMiB: class.MemoryMiB, DiskGiB: class.DiskGiB,

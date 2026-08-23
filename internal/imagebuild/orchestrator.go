@@ -251,7 +251,7 @@ func (o *Orchestrator) ApplyWithOptions(ctx context.Context, plan imageplan.Plan
 	}
 	result.ImageFingerprint = targetFingerprint
 
-	smoke, err := o.smoke(ctx, plan, targetFingerprint)
+	smoke, err := o.smoke(ctx, plan, targetFingerprint, artifacts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -307,6 +307,12 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 	} else {
 		wanted["disk"] = plan.Source.DiskFile
 		actual["disk"] = artifacts.Disk
+	}
+	if plan.BrowserSmoke != nil {
+		wanted["browser-smoke"] = plan.BrowserSmoke.Archive
+		actual["browser-smoke"] = artifacts.BrowserSmoke
+	} else if artifacts.BrowserSmoke != "" {
+		return fmt.Errorf("unexpected browser smoke artifact was fetched")
 	}
 	for _, toolchain := range plan.Toolchains {
 		path, ok := artifacts.Toolchains[toolchain.Name]
@@ -563,6 +569,7 @@ exit 1`); err != nil {
 		if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, map[string]string{
 			"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
 			"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
+			"GHA_BROWSER":                plan.Browser,
 		}, string(dockerProvision)); err != nil {
 			return "", "", fmt.Errorf("provision Docker integration image: %w", err)
 		}
@@ -609,6 +616,13 @@ exit 1`); err != nil {
 	if plan.Variant == "integration" {
 		properties = append(properties,
 			"user.nddev.docker-action-base="+plan.DockerActionBaseRef,
+		)
+	}
+	if plan.Browser != "" {
+		properties = append(properties,
+			"user.nddev.browser="+plan.Browser,
+			"user.nddev.browser-smoke.version="+plan.BrowserSmoke.Version,
+			"user.nddev.browser-smoke.archive_sha256="+plan.BrowserSmoke.ArchiveSHA256,
 		)
 	}
 	for key, value := range toolchainProperties(plan) {
@@ -665,6 +679,11 @@ func verifyTargetImage(image imageState, plan imageplan.Plan, recipe string) err
 	if plan.Variant == "integration" {
 		wanted["user.nddev.docker-action-base"] = plan.DockerActionBaseRef
 	}
+	if plan.Browser != "" {
+		wanted["user.nddev.browser"] = plan.Browser
+		wanted["user.nddev.browser-smoke.version"] = plan.BrowserSmoke.Version
+		wanted["user.nddev.browser-smoke.archive_sha256"] = plan.BrowserSmoke.ArchiveSHA256
+	}
 	for key, value := range toolchainProperties(plan) {
 		wanted[key] = value
 	}
@@ -682,7 +701,7 @@ func verifyTargetImage(image imageState, plan imageplan.Plan, recipe string) err
 	return nil
 }
 
-func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprint string) (result map[string]any, err error) {
+func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprint string, artifacts Artifacts) (result map[string]any, err error) {
 	created := false
 	defer func() {
 		if created {
@@ -701,6 +720,12 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 	if err = o.waitAgent(ctx, plan.Project, plan.SmokeName); err != nil {
 		return nil, err
 	}
+	if plan.Browser != "" {
+		destination := plan.SmokeName + "/var/tmp/" + plan.BrowserSmoke.Archive
+		if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.BrowserSmoke, destination, "--mode", "0600")...); err != nil {
+			return nil, fmt.Errorf("push verified browser smoke archive: %w", err)
+		}
+	}
 	smokeName := "assets/smoke.sh"
 	if plan.Variant == "integration" {
 		smokeName = "assets/smoke-integration.sh"
@@ -718,7 +743,7 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 	if err != nil {
 		return nil, err
 	}
-	output, err := o.runGuest(ctx, plan.Project, plan.SmokeName, map[string]string{
+	smokeEnvironment := map[string]string{
 		"GHA_INSTANCE_TYPE":          imageType(plan),
 		"GHA_RUNNER_VERSION":         plan.Runner.Version,
 		"GHA_SCCACHE_VERSION":        plan.CompilerCache.Version,
@@ -728,7 +753,15 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		"GHA_EXPECTED_ROOT_DISK_GIB": fmt.Sprintf("%d", plan.SmokeRootDiskGiB),
 		"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
 		"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
-	}, string(smoke))
+		"GHA_BROWSER":                plan.Browser,
+	}
+	if plan.Browser != "" {
+		smokeEnvironment["GHA_BROWSER_SMOKE_VERSION"] = plan.BrowserSmoke.Version
+		smokeEnvironment["GHA_BROWSER_SMOKE_ARCHIVE"] = "/var/tmp/" + plan.BrowserSmoke.Archive
+		smokeEnvironment["GHA_BROWSER_SMOKE_SHA256"] = plan.BrowserSmoke.ArchiveSHA256
+		smokeEnvironment["GHA_BROWSER_SMOKE_BINARY"] = plan.BrowserSmoke.BinaryPath
+	}
+	output, err := o.runGuest(ctx, plan.Project, plan.SmokeName, smokeEnvironment, string(smoke))
 	if err != nil {
 		return nil, fmt.Errorf("execute image smoke test: %w", err)
 	}

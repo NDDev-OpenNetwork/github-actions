@@ -28,6 +28,7 @@ type Artifacts struct {
 	Rootfs        string `json:"rootfs,omitempty"`
 	Runner        string `json:"runner"`
 	CompilerCache string `json:"compiler_cache"`
+	BrowserSmoke  string `json:"browser_smoke,omitempty"`
 	// Toolchains maps each pinned toolchain name to its verified local archive.
 	Toolchains map[string]string `json:"toolchains"`
 	VerifiedBy string            `json:"verified_by"`
@@ -69,6 +70,9 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = filepath.Join(directory, toolchain.Archive)
+	}
+	if plan.BrowserSmoke != nil {
+		artifacts.BrowserSmoke = filepath.Join(directory, plan.BrowserSmoke.Archive)
 	}
 	failed := true
 	defer func() {
@@ -123,6 +127,11 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 			return Artifacts{}, fmt.Errorf("download %s toolchain: %w", toolchain.Name, err)
 		}
 	}
+	if plan.BrowserSmoke != nil {
+		if _, err := download(ctx, client, plan.BrowserSmoke.DownloadURL, artifacts.BrowserSmoke, plan.BrowserSmoke.ArchiveSHA256, 256<<20); err != nil {
+			return Artifacts{}, fmt.Errorf("download browser smoke artifact: %w", err)
+		}
+	}
 	artifacts.VerifiedBy = plan.Source.SignerFingerprint
 	failed = false
 	return artifacts, nil
@@ -157,7 +166,7 @@ func allowedDownloadHost(host string) bool {
 	// is Rust's own release host. Both are reached only for a manifest-pinned
 	// archive whose SHA-256 is verified before it is used.
 	case "cloud-images.ubuntu.com", "github.com", "objects.githubusercontent.com",
-		"go.dev", "dl.google.com", "static.rust-lang.org":
+		"go.dev", "dl.google.com", "static.rust-lang.org", "cdn.playwright.dev", "storage.googleapis.com":
 		return true
 	}
 	return strings.HasSuffix(host, ".githubusercontent.com")

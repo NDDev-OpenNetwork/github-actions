@@ -79,8 +79,9 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 	// Image holds the artifact's own names; Guest holds the capability delta.
 	// Both are compared field by field rather than wholesale, above and below.
 	delta := map[string]string{
-		"Image": "aliases name the artifact, and the two artifacts are different images",
-		"Guest": "the Docker capability is the delta these variants exist to express",
+		"Image":        "aliases name the artifact, and the two artifacts are different images",
+		"Guest":        "Docker and browser OS capability are the integration-image delta",
+		"BrowserSmoke": "only the browser-capable image carries disposable launch-test bytes",
 	}
 
 	manifest := reflect.TypeOf(Manifest{})
@@ -106,6 +107,7 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 		"PackageVersions":     true,
 		"Variant":             true,
 		"DockerActionBaseRef": true,
+		"Browser":             true,
 	}
 	for index := 0; index < guest.NumField(); index++ {
 		name := guest.Field(index).Name

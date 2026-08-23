@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Advanced fleet contract v4: integration and priority-integration now declare
+  Chromium OS compatibility. The b5 image bakes Playwright's Ubuntu 24.04
+  Chromium dependencies, launch-tests SHA-pinned disposable Chrome bytes, and
+  retains no browser so consumers continue to own their lockfile version.
 - Advanced fleet contract v3: the trusted fast class now receives a one-use,
   repository-scoped cache claim. Untrusted work remains isolated, fast retains
   no Docker or deployment credential, and cache unavailability still degrades

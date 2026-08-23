@@ -19,7 +19,7 @@ schema_version: 2
 # a runner class withdrawn, a tenancy boundary narrowed, an admission rule
 # changed. Adding a class or a tenant does not bump it -- that only widens what
 # is on offer.
-contract_version: 3
+contract_version: 4
 
 execution:
   worker_kind: incus-container
@@ -103,6 +103,11 @@ guarantees:
       Trusted fast jobs receive only a one-use repository-scoped cache claim.
       Untrusted work remains on its isolated class; fast has no Docker or
       deployment credential, and cache failure always falls back upstream.
+  - subject: browser-capability
+    promise: >-
+      Integration and priority-integration declare Chromium OS compatibility.
+      The image contains Playwright's Ubuntu 24.04 Chromium dependency set but
+      no consumer browser bytes; each project installs its lockfile version.
 
 # What may change without a contract_version bump, stated so a consumer does not
 # build on it by accident.
