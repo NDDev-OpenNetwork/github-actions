@@ -7,7 +7,7 @@ import (
 
 const managedDescriptionPrefix = "managed-by:gds;dashboard-contract:v1;"
 
-var metricPattern = regexp.MustCompile(`[a-zA-Z_:][a-zA-Z0-9_:]*`)
+var metricPattern = regexp.MustCompile(`(?:gha_fleet_|otelcol_exporter_)[a-zA-Z0-9_:]*`)
 
 type OpenObserveDashboard struct {
 	Version                 int              `json:"version"`
@@ -63,15 +63,13 @@ type OpenObserveQuery struct {
 }
 
 type PanelFields struct {
-	Stream           string      `json:"stream"`
-	StreamType       string      `json:"stream_type"`
-	X                []any       `json:"x"`
-	Y                []any       `json:"y"`
-	Z                []any       `json:"z"`
-	Breakdown        []any       `json:"breakdown"`
-	Filter           PanelFilter `json:"filter"`
-	PromQLLabels     []any       `json:"promql_labels"`
-	PromQLOperations []any       `json:"promql_operations"`
+	Stream     string      `json:"stream"`
+	StreamType string      `json:"stream_type"`
+	X          []any       `json:"x"`
+	Y          []any       `json:"y"`
+	Z          []any       `json:"z"`
+	Breakdown  []any       `json:"breakdown"`
+	Filter     PanelFilter `json:"filter"`
 }
 
 type PanelFilter struct {
@@ -118,7 +116,7 @@ func RenderOpenObserve(bundle Bundle) ([]OpenObserveDashboard, error) {
 				Queries: []OpenObserveQuery{{
 					Query: panel.Query, CustomQuery: true,
 					Fields: PanelFields{Stream: metric, StreamType: "metrics", X: []any{}, Y: []any{}, Z: []any{}, Breakdown: []any{},
-						Filter: PanelFilter{FilterType: "group", LogicalOperator: "AND", Conditions: []any{}}, PromQLLabels: []any{}, PromQLOperations: []any{}},
+						Filter: PanelFilter{FilterType: "group", LogicalOperator: "AND", Conditions: []any{}}},
 					Config: QueryConfig{LayerType: "scatter"},
 				}},
 				Layout: PanelLayout{X: (index % 2) * 96, Y: (index / 2) * 9, W: 96, H: 9, I: index + 1},
