@@ -281,7 +281,7 @@ func TestIncusConfigAcceptsAClusterMemberInsideThePrivateNetwork(t *testing.T) {
 	cfg := testConfig(t)
 	for _, inside := range []string{
 		"https://10.200.0.9:8443",
-		"https://10.110.0.5:8443",
+		"https://10.99.0.5:8443",
 		"https://172.16.20.5:8443",
 		"https://192.168.50.5:8443",
 	} {

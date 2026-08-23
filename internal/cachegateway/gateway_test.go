@@ -43,7 +43,7 @@ func TestBoundaries(t *testing.T) {
 	if ValidateListen("192.0.2.1:9003") != nil {
 		t.Fatal("valid listen rejected")
 	}
-	for _, raw := range []string{"https://10.110.0.5:9102", "http://10.110.0.5:9002", "http://host:9102/path"} {
+	for _, raw := range []string{"https://10.99.0.5:9102", "http://10.99.0.5:9002", "http://host:9102/path"} {
 		parsed, _ := url.Parse(raw)
 		if ValidateUpstream(parsed) == nil {
 			t.Fatalf("upstream %q accepted", raw)
