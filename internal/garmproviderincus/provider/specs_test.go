@@ -291,6 +291,7 @@ func TestTrustedBootstrapVerifiesPreMaterializedRunnerCache(t *testing.T) {
 	require.Contains(t, script, "/opt/cache/actions-runner/latest")
 	require.Contains(t, script, "pre-materialized runner tree")
 	require.Contains(t, script, "Runner.Listener\" --version")
+	require.Contains(t, script, "install -d -o runner -g runner -m 0700 /home/runner/.cache")
 	require.NotContains(t, script, "cp -a --reflink=auto")
 	require.NotContains(t, script, "chown -R runner:runner")
 	require.Contains(t, script, "registration state")
