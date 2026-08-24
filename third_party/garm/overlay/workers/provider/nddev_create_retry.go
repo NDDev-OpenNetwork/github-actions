@@ -242,6 +242,17 @@ func NDDevScaleSetCreateAllowed(ctx context.Context, scaleSet params.ScaleSet, e
 		if !exists {
 			return nil
 		}
+		if record.LastErrorClass != "capacity" {
+			intents, err := nddevActiveQueueIntents(now)
+			if err != nil {
+				return err
+			}
+			for _, intent := range intents {
+				if intent.ScaleSetID == int64(scaleSet.ScaleSetID) && intent.ScaleSetName == scaleSet.Name {
+					return nil
+				}
+			}
+		}
 		if record.TerminalUntil.After(now) {
 			return fmt.Errorf("provider create circuit is open until %s after %d attempts", record.TerminalUntil.Format(time.RFC3339), record.Attempts)
 		}
@@ -265,7 +276,7 @@ func nddevBeforeProviderCreate(ctx context.Context, key string, scaleSetNames ..
 		if err := nddevSharedCapacityCreateAllowed(journal, now, key, scaleSetName, true); err != nil {
 			return err
 		}
-		if domain := journal.Records[domainKey]; domainKey != key {
+		if domain := journal.Records[domainKey]; domainKey != key && domain.LastErrorClass == "capacity" {
 			if domain.TerminalUntil.After(now) {
 				return fmt.Errorf("provider create circuit is open until %s after %d attempts", domain.TerminalUntil.Format(time.RFC3339), domain.Attempts)
 			}
@@ -379,7 +390,7 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 		journal.Records[key] = record
 
 		domainKey := nddevRetryDomainKey(key)
-		if domainKey != key {
+		if domainKey != key && !strings.Contains(key, ":job:") {
 			domain := journal.Records[domainKey]
 			domain.JobID = domainKey
 			domain.ScaleSetName = record.ScaleSetName
