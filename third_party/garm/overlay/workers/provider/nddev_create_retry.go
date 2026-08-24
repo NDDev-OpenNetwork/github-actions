@@ -101,6 +101,10 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 	if domain == "" {
 		return "", nil
 	}
+	owner := nddevRetryOwner(entity)
+	if owner == "" {
+		return "", fmt.Errorf("pre-job provider retry identity requires a forge owner")
+	}
 	selected := ""
 	err := nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
 		if reservation, exists := journal.Reservations[instanceName]; exists {
@@ -120,7 +124,7 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		candidates := make([]nddevQueueRetryIntent, 0)
 		for _, intent := range intents {
 			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name ||
-				(intent.Owner != "" && intent.Owner != entity.Owner) {
+				(intent.Owner != "" && intent.Owner != owner) {
 				continue
 			}
 			retryKey := domain + ":job:" + strings.TrimSpace(intent.JobID)
@@ -145,6 +149,18 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		return nil
 	})
 	return selected, err
+}
+
+func nddevRetryOwner(entity params.ForgeEntity) string {
+	if owner := strings.TrimSpace(entity.Owner); owner != "" {
+		return owner
+	}
+	name := strings.Trim(strings.TrimSpace(entity.Name), "/")
+	if name == "" {
+		return ""
+	}
+	owner, _, _ := strings.Cut(name, "/")
+	return strings.TrimSpace(owner)
 }
 
 func nddevReleaseProviderRetryReservation(ctx context.Context, instanceName string) error {

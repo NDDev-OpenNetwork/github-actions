@@ -121,7 +121,7 @@ func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
-	entity := params.ForgeEntity{ID: "entity-one", Owner: "example-org"}
+	entity := params.ForgeEntity{ID: "entity-one", Name: "example-org"}
 	first, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-one"}, scaleSet, entity)
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +139,24 @@ func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
 	}
 	if len(journal.Reservations) != 2 {
 		t.Fatalf("reservations = %#v", journal.Reservations)
+	}
+}
+
+func TestNDDevRetryOwnerReconstructsOrganizationAndRepositoryEntities(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		entity params.ForgeEntity
+		want   string
+	}{
+		{name: "explicit owner", entity: params.ForgeEntity{Owner: "example-org", Name: "repo"}, want: "example-org"},
+		{name: "organization reconstruction", entity: params.ForgeEntity{Name: "example-org"}, want: "example-org"},
+		{name: "repository reconstruction", entity: params.ForgeEntity{Name: "example-org/example-repo"}, want: "example-org"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nddevRetryOwner(test.entity); got != test.want {
+				t.Fatalf("owner = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
