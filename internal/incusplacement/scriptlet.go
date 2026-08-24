@@ -15,9 +15,9 @@ import (
 const ServerConfigKey = "instances.placement.scriptlet"
 
 // Render returns a portable Incus Starlark placement scriptlet derived only
-// from typed public platform policy. It uses best-fit decreasing placement:
-// every candidate must first pass pressure, disk and hard-memory checks, then
-// the worker is packed into the candidate with the least safe memory left.
+// from typed public platform policy. Every candidate must first pass pressure,
+// disk and hard-memory checks; the least loaded candidate wins, with best-fit
+// memory packing only as a tie-break between comparable CPU loads.
 func Render(cfg config.Config) (string, error) {
 	if err := cfg.Validate(); err != nil {
 		return "", err
@@ -70,8 +70,8 @@ func Render(cfg config.Config) (string, error) {
 const placementTemplate = `# Managed by NDDev github-actions. Do not edit live.
 #
 # Hard memory, pressure and disk checks are safety authorities. Eligible
-# workers use best-fit packing so small jobs do not fragment every member and
-# block a later large job while physical capacity remains idle.
+# workers prefer the least loaded member because CPU is the scarce resource;
+# best-fit memory packing breaks ties without overriding measured load.
 
 PROJECT = {{PROJECT}}
 POOL = {{POOL}}
@@ -81,6 +81,7 @@ MAX_WORKER_MEMORY_BYTES = {{MAX_WORKER_MEMORY_MIB}} * 1024 * 1024
 RESERVATION_BY_LIMIT_MIB = {{RESERVATION_BY_LIMIT}}
 PRESSURE_SCHEMA = {{PRESSURE_SCHEMA}}
 PRESSURE_OPEN = {{PRESSURE_OPEN}}
+LOAD_TIE_EPSILON = 0.05
 
 def memory_reserve_bytes(total):
     percent = (total * MINIMUM_MEMORY_PERCENT + 99) // 100
@@ -104,6 +105,21 @@ def committed_memory_bytes(member_name, pending_count):
         fail("fleet pending instance count is below committed records")
     return committed + pending_without_record * MAX_WORKER_MEMORY_BYTES
 
+def load_per_core(state, resources):
+    sysinfo = getattr(state, "sysinfo", None)
+    if sysinfo == None:
+        return 0.0
+    averages = getattr(sysinfo, "load_averages", None)
+    if averages == None or len(averages) == 0:
+        return 0.0
+    cpu = getattr(resources, "cpu", None)
+    if cpu == None:
+        return 0.0
+    cores = getattr(cpu, "total", 0)
+    if cores == None or cores <= 0:
+        return 0.0
+    return float(averages[0]) / float(cores)
+
 def instance_placement(request, candidate_members):
     if request.project != PROJECT:
         return
@@ -116,6 +132,7 @@ def instance_placement(request, candidate_members):
     chosen = ""
     chosen_remaining = -1
     chosen_count = -1
+    chosen_load = -1.0
 
     for member in candidate_members:
         name = member.server_name
@@ -137,17 +154,28 @@ def instance_placement(request, candidate_members):
         if remaining < 0:
             continue
 
-        # Best fit preserves the largest untouched member for a later large
-        # request. Pending count breaks equal-memory ties toward packing too.
-        if chosen == "" or remaining < chosen_remaining or (remaining == chosen_remaining and pending_count > chosen_count):
+        member_load = load_per_core(state, resources)
+        better = False
+        if chosen == "":
+            better = True
+        elif member_load < chosen_load - LOAD_TIE_EPSILON:
+            better = True
+        elif member_load <= chosen_load + LOAD_TIE_EPSILON:
+            if remaining < chosen_remaining:
+                better = True
+            elif remaining == chosen_remaining and pending_count > chosen_count:
+                better = True
+
+        if better:
             chosen = name
             chosen_remaining = remaining
             chosen_count = pending_count
+            chosen_load = member_load
 
     if chosen == "":
         log_warn("fleet placement refused: no member has safe capacity")
         fail("insufficient-memory: no fleet member has room for this worker")
 
-    log_info("fleet best-fit placement: ", chosen, " remaining_memory=", chosen_remaining, " pending_count=", chosen_count)
+    log_info("fleet placement: ", chosen, " load_per_core=", chosen_load, " remaining_memory=", chosen_remaining, " pending_count=", chosen_count)
     set_target(chosen)
 `

@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Placement now chooses the least one-minute load per CPU core among members
+  that pass disk, pressure and measured-memory gates. Best-fit memory remains a
+  tie-break within a 0.05/core jitter window, so abundant memory can no longer
+  concentrate work on the busiest host.
 - Added GARM derivative `v0.2.1-nddev.75`: when upstream recovery omits both
   forge owner and name, pre-job retry identity derives the owner only from one
   unique active queue owner matching the exact scale-set ID and name. Multiple
