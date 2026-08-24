@@ -120,7 +120,7 @@ func TestNDDevProviderRetryIsDurableBoundedAndClearedBySuccess(t *testing.T) {
 		}
 	}
 	if err := nddevBeforeProviderCreate(context.Background(), key); err == nil {
-		t.Fatal("ninth provider attempt passed an open circuit")
+		t.Fatal("fourth provider attempt passed an open circuit")
 	}
 	if err := nddevRecordProviderCreateSuccess(context.Background(), key); err != nil {
 		t.Fatal(err)
@@ -170,10 +170,46 @@ func TestNDDevProviderCapacityBackpressureNeverOpensCircuit(t *testing.T) {
 	}
 }
 
-func TestNDDevCapacityFallbackReachesFiveMinutesWhileDeleteWakeRemainsImmediate(t *testing.T) {
+func TestNDDevJobCapacityFailureStopsAfterTwoRetries(t *testing.T) {
+	now := time.Date(2026, 8, 24, 7, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	key := "scale-set:example-entity:17:job:example-job"
+
+	for attempt := 1; attempt <= nddevRetryMaximum; attempt++ {
+		if err := nddevBeforeProviderCreate(context.Background(), key); err != nil {
+			t.Fatalf("attempt %d preflight: %v", attempt, err)
+		}
+		if err := nddevRecordProviderCreateFailure(context.Background(), key, errors.New("provider admission rejected pool: insufficient-memory")); err != nil {
+			t.Fatalf("attempt %d failure: %v", attempt, err)
+		}
+		journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := journal.Records[key]
+		if record.Attempts != attempt || record.LastErrorClass != "capacity" {
+			t.Fatalf("attempt %d record=%#v", attempt, record)
+		}
+		if attempt < nddevRetryMaximum {
+			now = record.NextAllowedAt
+		} else if record.TerminalUntil.IsZero() {
+			t.Fatalf("third capacity failure did not terminate the job record: %#v", record)
+		}
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), key); err == nil {
+		t.Fatal("fourth capacity attempt passed an open job circuit")
+	}
+}
+
+func TestNDDevCapacityFallbackIsBoundedWhileDeleteWakeRemainsImmediate(t *testing.T) {
 	key := "scale-set:entity-one:17"
-	if delay := nddevCapacityRetryDelay(key, nddevRetryMaximum); delay <= time.Minute || delay > 5*time.Minute {
-		t.Fatalf("saturated fallback delay = %s, want (1m,5m]", delay)
+	if delay := nddevCapacityRetryDelay(key, nddevRetryMaximum); delay < nddevRetryBase || delay > nddevCapacityRetryCap {
+		t.Fatalf("saturated fallback delay = %s, want [%s,%s]", delay, nddevRetryBase, nddevCapacityRetryCap)
 	}
 
 	now := time.Date(2026, 8, 21, 14, 0, 0, 0, time.UTC)

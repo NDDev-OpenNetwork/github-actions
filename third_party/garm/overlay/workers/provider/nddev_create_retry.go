@@ -21,7 +21,7 @@ import (
 const (
 	nddevRetrySchemaVersion = 1
 	nddevRetryMaximumBytes  = 1024 * 1024
-	nddevRetryMaximum       = 8
+	nddevRetryMaximum       = 3
 	nddevRetryAttemptLease  = 2 * time.Minute
 	nddevRetryExecutionTTL  = 24 * time.Hour
 	nddevRetryStaleTTL      = time.Hour
@@ -154,7 +154,8 @@ func nddevBeforeProviderCreate(ctx context.Context, key string, scaleSetNames ..
 		if record.NextAllowedAt.After(now) {
 			return fmt.Errorf("provider create retry is deferred until %s", record.NextAllowedAt.Format(time.RFC3339))
 		}
-		if record.Attempts >= nddevRetryMaximum && record.LastErrorClass != "capacity" && record.LastErrorClass != "intent" {
+		capacityBackpressure := record.LastErrorClass == "capacity" && !strings.Contains(key, ":job:")
+		if record.Attempts >= nddevRetryMaximum && !capacityBackpressure && record.LastErrorClass != "intent" {
 			record.TerminalUntil = now.Add(nddevRetryExecutionTTL)
 			record.UpdatedAt = now
 			journal.Records[key] = record
@@ -191,7 +192,10 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 			// Capacity accumulates delay without ever opening a circuit; a completed
 			// provider deletion clears it immediately. Intent cancellation stays on
 			// the short fixed delay because no scarce resource must be awaited.
-			if record.LastErrorClass == "capacity" {
+			if record.LastErrorClass == "capacity" && strings.Contains(key, ":job:") && record.Attempts >= nddevRetryMaximum {
+				record.NextAllowedAt = now
+				record.TerminalUntil = now.Add(nddevRetryExecutionTTL)
+			} else if record.LastErrorClass == "capacity" {
 				record.NextAllowedAt = now.Add(nddevCapacityRetryDelay(key, record.Attempts))
 				nddevRecordSharedCapacityFailure(journal, now, record.ScaleSetName)
 			} else {
@@ -200,7 +204,9 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 				record.Attempts = 1
 				record.NextAllowedAt = now.Add(nddevRetryBase)
 			}
-			record.TerminalUntil = time.Time{}
+			if record.LastErrorClass != "capacity" || !strings.Contains(key, ":job:") || record.Attempts < nddevRetryMaximum {
+				record.TerminalUntil = time.Time{}
+			}
 			journal.Records[key] = record
 			domainKey := nddevRetryDomainKey(key)
 			if domainKey != key {

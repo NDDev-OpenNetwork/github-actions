@@ -45,6 +45,12 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.71`: bounded each job-bound provider
+  lifecycle to the original create plus at most
+  two fresh infrastructure retries, including capacity refusals. Shared
+  capacity remains a pool-level backpressure signal, while the affected job
+  receives an explicit durable terminal circuit instead of silently reaching a
+  fourth create attempt after restart or replay.
 - Added GARM derivative `v0.2.1-nddev.70`: a successful shared-capacity
   probe now removes the saturated-domain record and restores bounded parallel
   creates. The next typed capacity refusal recreates single-probe mode, avoiding
