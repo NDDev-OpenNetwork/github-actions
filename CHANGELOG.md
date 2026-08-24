@@ -7,6 +7,8 @@ Versioning.
 
 ### Added
 
+- Added the portable scheduler-recovery decision core: exact stuck-dispatch
+  detection, startup grace, cooldown, and duplicate-recovery exclusion.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
