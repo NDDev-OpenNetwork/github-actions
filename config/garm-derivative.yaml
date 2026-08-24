@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.71
+derivative_version: v0.2.1-nddev.72
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -23,8 +23,8 @@ patches:
     sha256: 49de677a1c483e58cc009ef8f23d301ef4647ea01aec4100a3e6c49376f7889f
     purpose: Emit secret-free structured phase boundaries and monotonic durations around GitHub AcquireJobs and external-provider creation without changing admission, execution or reconciliation semantics.
   - path: third_party/garm/patches/0006-durable-provider-create-retry.patch
-    sha256: 2e7994584d46b06d4d0b279d7b7415ebdeb7c66b9b4359b21ddd0304694a44d7
-    purpose: Reserve provider attempts by job identity when bound and otherwise by stable forge-entity plus Scale Set identity and name, apply bounded exponential backoff and open a durable job circuit after the original attempt plus two infrastructure retries across instance-manager recreation and GARM restart.
+    sha256: d5d0b8b359034b186b63835179b7ae67d563e1f7ec91370b0b1190e2ac4db6f0
+    purpose: Reserve a stable queue-intent retry identity before every pre-job provider create, release only the ephemeral instance mapping after each outcome, preserve the job attempt counter across fresh instance names, and open its durable circuit after the original attempt plus two infrastructure retries.
   - path: third_party/garm/patches/0007-fast-authoritative-job-reconciliation.patch
     sha256: 3c9631ee2c73eedee90fc2f26a7f87361021236b6a1bc7b7ffffa2f0d1c3c3a3
     purpose: Reconcile queued database jobs against the authoritative GitHub Jobs API after thirty seconds, checking ten per cycle with a one-minute repeat interval instead of leaving cancelled work active for an hour.
@@ -87,11 +87,11 @@ overlays:
     sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
     purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: 7a381ce3968d91e410041fc16aa722fbe1ab64779c49075b23e6ef6698dc8007
-    purpose: Fsync-backed per-job attempt leases capped at the original create plus two infrastructure retries, shared capacity backpressure that does not disable unrelated jobs, one oldest actively queued fleet-wide probe after proven saturation, immediate single-domain deletion wake, durable provider-failure circuits and one-hour garbage collection of expired non-terminal records.
+    sha256: d1de111d00aaf928ded3096d159c4cb2c679cc593bd83b29de256ca638a2b3a0
+    purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases capped at the original create plus two infrastructure retries, with lease-expiry recovery, one-to-one concurrent assignment and shared capacity backpressure that does not disable unrelated jobs.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: b9fe16457443b287c373c84d5666e0c45cec137474a8a1493b2a97e0c80ad8d5
-    purpose: Prove job-bound provider and capacity failures stop after two retries, attempts and a shared probe owner survive process recreation, concurrent failures saturate without corruption, only an actively queued oldest domain retries, one deletion wakes exactly one domain, successful probes reopen bounded parallel creates without erasing waiters, and stale state is collected.
+    sha256: 01103fbdd913ce785bb33c183bc2f0e3699af4c80c6aa8680a149f838d6c9236
+    purpose: Prove concurrent pre-job instances reserve distinct intents, fresh instance names retain one stable job budget and stop before attempt four, reservations and attempts survive process recreation, and shared capacity remains bounded without erasing unrelated waiters.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: a0d648f3f137cca005c63bbabc6e397352d1754e93411d4ce981f47e09ed685e
+  binary_sha256: 188d981b31134e5a6daf888d6be85445ddc249b66055b75fba3deadd9b3122c8
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
@@ -129,6 +129,8 @@ runtime_contract:
   direct_jit_provider_handoff: true
   direct_jit_phase_telemetry: true
   durable_provider_retry: true
+  provider_retry_journal_schema_version: 2
+  pre_job_retry_identity: durable-queue-intent
   provider_retry_maximum_attempts: 3
   provider_retry_backoff_cap_seconds: 300
   capacity_retry_backoff_cap_seconds: 300

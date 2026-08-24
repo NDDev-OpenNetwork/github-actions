@@ -45,6 +45,11 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.72`: pre-JobAvailable instances now
+  reserve one durable queue-intent retry identity before provider create.
+  Fresh ephemeral instance names continue the same job attempt counter across
+  capacity failure, deletion, restart and replay, so the original attempt plus
+  two retries is enforced before numeric GitHub job metadata is available.
 - Added GARM derivative `v0.2.1-nddev.71`: bounded each job-bound provider
   lifecycle to the original create plus at most
   two fresh infrastructure retries, including capacity refusals. Shared

@@ -2,11 +2,14 @@ diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_ma
 index 6a1ccb3..817a4d5 100644
 --- a/workers/provider/instance_manager.go
 +++ b/workers/provider/instance_manager.go
-@@ -246,6 +246,11 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -246,6 +246,14 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		},
  	}
  
-+	retryKey := nddevProviderRetryKey(instance, i.scaleSet, i.scaleSetEntity)
++	retryKey, err := nddevReserveProviderRetryKey(i.ctx, instance, i.scaleSet, i.scaleSetEntity)
++	if err != nil {
++		return fmt.Errorf("provider create retry identity: %w", err)
++	}
 +	if err := nddevBeforeProviderCreate(i.ctx, retryKey, i.scaleSet.Name); err != nil {
 +		return fmt.Errorf("provider create retry policy: %w", err)
 +	}
@@ -14,22 +17,28 @@ index 6a1ccb3..817a4d5 100644
  	providerStartedAt := time.Now()
  	slog.InfoContext(i.ctx, "direct JIT phase",
  		"phase", "provider-create-started",
-@@ -253,6 +258,9 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -253,6 +261,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		"provider", i.scaleSet.ProviderName)
  	providerInstance, err := i.provider.CreateInstance(i.ctx, bootstrapArgs, createInstanceParams)
  	if err != nil {
 +		if retryErr := nddevRecordProviderCreateFailure(i.ctx, retryKey, err); retryErr != nil {
 +			slog.ErrorContext(i.ctx, "recording provider create failure", "error", retryErr, "runner_name", instance.Name)
 +		}
++		if retryErr := nddevReleaseProviderRetryReservation(i.ctx, instance.Name); retryErr != nil {
++			slog.ErrorContext(i.ctx, "releasing provider retry reservation", "error", retryErr, "runner_name", instance.Name)
++		}
  		slog.InfoContext(i.ctx, "direct JIT phase",
  			"phase", "provider-create-failed",
  			"runner_name", instance.Name,
-@@ -261,6 +269,9 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -261,6 +275,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		instanceIDToDelete = instance.Name
  		return fmt.Errorf("creating instance in provider: %w", err)
  	}
 +	if retryErr := nddevRecordProviderCreateSuccess(i.ctx, retryKey); retryErr != nil {
 +		slog.ErrorContext(i.ctx, "clearing provider create retry state", "error", retryErr, "runner_name", instance.Name)
++	}
++	if retryErr := nddevReleaseProviderRetryReservation(i.ctx, instance.Name); retryErr != nil {
++		slog.ErrorContext(i.ctx, "releasing provider retry reservation", "error", retryErr, "runner_name", instance.Name)
 +	}
  	slog.InfoContext(i.ctx, "direct JIT phase",
  		"phase", "provider-create-completed",

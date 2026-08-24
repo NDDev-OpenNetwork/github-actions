@@ -102,6 +102,8 @@ var runtimeContractFields = []string{
 	"direct_jit_provider_handoff",
 	"direct_jit_phase_telemetry",
 	"durable_provider_retry",
+	"provider_retry_journal_schema_version",
+	"pre_job_retry_identity",
 	"provider_retry_maximum_attempts",
 	"provider_retry_backoff_cap_seconds",
 	"capacity_retry_backoff_cap_seconds",
