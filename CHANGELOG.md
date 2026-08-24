@@ -19,6 +19,10 @@ Versioning.
 
 ### Fixed
 
+- Provision the standard runner cache directory with runner ownership before
+  each job, preventing setup actions from exporting an unwritable home cache.
+- Refresh the grouped provider dependency set to smithy-go 1.27.9 and
+  testify 1.12.1 in provider derivative `v0.1.5-nddev.74`.
 - Grouped minor/patch Go dependency updates so one reviewed provider derivative
   release covers each Dependabot wave instead of producing several mutually
   overlapping, structurally incomplete PRs.
