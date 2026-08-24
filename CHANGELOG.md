@@ -10,6 +10,8 @@ Versioning.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
   surface, classifying immutable image inputs, cache traffic, VPC-local runner
   bootstrap, reviewed source builds and non-promoting smoke probes.
+- Added provider derivative `v0.1.5-nddev.73`, rebuilding the exact grouped AWS
+  SDK and OpenTelemetry dependency update twice with identical bytes.
 - Added GARM derivative `v0.2.1-nddev.76`: exact admitted jobs no longer
   inherit terminal provider circuits left by older work on the same scale set;
   generic retry state remains authoritative for shared capacity and legacy
