@@ -1,4 +1,4 @@
-package providerrelease
+package providerrollout
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"slices"
 )
 
-type RolloutContract struct {
+type Contract struct {
 	SchemaVersion int      `json:"schema_version"`
 	OrderedPhases []string `json:"ordered_phases"`
 	RestartUnits  []string `json:"restart_units"`
@@ -21,22 +21,22 @@ type RolloutContract struct {
 	} `json:"convergence"`
 }
 
-func LoadRolloutContract(path string) (RolloutContract, error) {
+func Load(path string) (Contract, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return RolloutContract{}, fmt.Errorf("read rollout contract: %w", err)
+		return Contract{}, fmt.Errorf("read rollout contract: %w", err)
 	}
-	var contract RolloutContract
+	var contract Contract
 	if err := json.Unmarshal(data, &contract); err != nil {
-		return RolloutContract{}, fmt.Errorf("decode rollout contract: %w", err)
+		return Contract{}, fmt.Errorf("decode rollout contract: %w", err)
 	}
 	if err := contract.Validate(); err != nil {
-		return RolloutContract{}, err
+		return Contract{}, err
 	}
 	return contract, nil
 }
 
-func (contract RolloutContract) Validate() error {
+func (contract Contract) Validate() error {
 	wantPhases := []string{
 		"platform-policies",
 		"provider-binary-and-config",

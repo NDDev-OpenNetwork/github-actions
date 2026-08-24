@@ -1,4 +1,4 @@
-package providerrelease
+package providerrollout
 
 import (
 	"path/filepath"
@@ -7,7 +7,7 @@ import (
 
 func TestProviderRolloutContract(t *testing.T) {
 	t.Parallel()
-	contract, err := LoadRolloutContract(filepath.Join("..", "..", "config", "provider-rollout-contract.json"))
+	contract, err := Load(filepath.Join("..", "..", "config", "provider-rollout-contract.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
