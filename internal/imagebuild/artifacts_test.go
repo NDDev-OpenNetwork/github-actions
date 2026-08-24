@@ -1,10 +1,63 @@
 package imagebuild
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestDownloadRetriesOnlyTransientResponses(t *testing.T) {
+	t.Parallel()
+	payload := []byte("verified artifact")
+	digestBytes := sha256.Sum256(payload)
+	expected := hex.EncodeToString(digestBytes[:])
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(writer, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = writer.Write(payload)
+	}))
+	defer server.Close()
+
+	destination := filepath.Join(t.TempDir(), "artifact")
+	digest, err := download(context.Background(), server.Client(), server.URL, destination, expected, 1024)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if attempts != 3 || digest != expected {
+		t.Fatalf("attempts=%d digest=%q", attempts, digest)
+	}
+}
+
+func TestDownloadDoesNotRetryPermanentResponse(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		attempts++
+		http.Error(writer, "missing", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := download(
+		context.Background(), server.Client(), server.URL,
+		filepath.Join(t.TempDir(), "artifact"), strings.Repeat("0", 64), 1024,
+	)
+	if err == nil {
+		t.Fatal("expected permanent download failure")
+	}
+	if attempts != 1 {
+		t.Fatalf("permanent failure retried %d times", attempts)
+	}
+}
 
 func TestParseChecksums(t *testing.T) {
 	t.Parallel()

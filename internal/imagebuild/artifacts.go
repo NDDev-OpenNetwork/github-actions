@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -182,17 +183,46 @@ func joinURL(base, name string) string {
 }
 
 func download(ctx context.Context, client *http.Client, rawURL, destination, expectedSHA string, maxBytes int64) (string, error) {
+	var last error
+	for attempt := 1; attempt <= 3; attempt++ {
+		digest, err := downloadOnce(ctx, client, rawURL, destination, expectedSHA, maxBytes)
+		if err == nil {
+			return digest, nil
+		}
+		last = err
+		var retryable retryableDownloadError
+		if !errors.As(err, &retryable) || attempt == 3 {
+			return "", err
+		}
+		timer := time.NewTimer(time.Duration(attempt) * 250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return "", last
+}
+
+type retryableDownloadError struct{ error }
+
+func downloadOnce(ctx context.Context, client *http.Client, rawURL, destination, expectedSHA string, maxBytes int64) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", err
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return "", err
+		return "", retryableDownloadError{err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GET %s returned %s", request.URL.Redacted(), response.Status)
+		err := fmt.Errorf("GET %s returned %s", request.URL.Redacted(), response.Status)
+		if response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
+			return "", retryableDownloadError{err}
+		}
+		return "", err
 	}
 	if response.ContentLength > maxBytes {
 		return "", fmt.Errorf("artifact Content-Length %d exceeds %d bytes", response.ContentLength, maxBytes)
@@ -205,10 +235,12 @@ func download(ctx context.Context, client *http.Client, rawURL, destination, exp
 	written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(response.Body, maxBytes+1))
 	closeErr := file.Close()
 	if copyErr != nil {
-		return "", copyErr
+		_ = os.Remove(destination)
+		return "", retryableDownloadError{copyErr}
 	}
 	if closeErr != nil {
-		return "", closeErr
+		_ = os.Remove(destination)
+		return "", retryableDownloadError{closeErr}
 	}
 	if written > maxBytes {
 		return "", fmt.Errorf("artifact exceeds %d bytes", maxBytes)
