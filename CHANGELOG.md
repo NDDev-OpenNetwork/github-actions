@@ -11,6 +11,8 @@ Versioning.
   detection, startup grace, cooldown, and duplicate-recovery exclusion.
 - Added checkpoint-first recovery orchestration with durable attempt identity,
   bounded progress verification, and concurrent duplicate restart suppression.
+- Added a cross-process, fsync-backed file store that suppresses replay after
+  process restart and retains bounded terminal recovery history.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
