@@ -10,7 +10,7 @@ import (
 func TestEvaluateRequiresExactStuckSignature(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
-	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute}
+	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute, HeartbeatStale: time.Minute}
 	base := Observation{
 		ObservedAt: now, ActiveIntents: 1, ManagerUptime: 3 * time.Minute,
 		PendingCreates: []PendingCreate{{ID: "instance-1", Age: 91 * time.Second}},
@@ -22,14 +22,19 @@ func TestEvaluateRequiresExactStuckSignature(t *testing.T) {
 	require.Equal(t, "no-admitted-demand", Evaluate(policy, withoutDemand).Reason)
 
 	alreadyAttempted := base
+	alreadyAttempted.PendingCreates = append([]PendingCreate(nil), base.PendingCreates...)
 	alreadyAttempted.PendingCreates[0].CreateAttempt = 1
 	require.Equal(t, "no-stale-undispatched-instance", Evaluate(policy, alreadyAttempted).Reason)
+
+	currentHeartbeat := base
+	currentHeartbeat.HeartbeatAt = now.Add(-30 * time.Second)
+	require.Equal(t, "dispatcher-heartbeat-current", Evaluate(policy, currentHeartbeat).Reason)
 }
 
 func TestEvaluatePreventsDuplicateRecovery(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
-	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute}
+	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute, HeartbeatStale: time.Minute}
 	observation := Observation{
 		ObservedAt: now, ActiveIntents: 1, ManagerUptime: time.Hour,
 		PendingCreates: []PendingCreate{{ID: "instance-1", Age: 2 * time.Minute}},

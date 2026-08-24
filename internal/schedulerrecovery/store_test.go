@@ -44,3 +44,16 @@ func TestFileStoreRejectsMalformedState(t *testing.T) {
 	_, err := store.Begin(context.Background(), NewAttempt(time.Now(), []string{"instance-1"}))
 	require.ErrorContains(t, err, "unsupported recovery state")
 }
+
+func TestFileStorePersistsMonotonicHeartbeat(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	store := FileStore{Path: filepath.Join(directory, "state.json"), LockPath: filepath.Join(directory, "state.lock")}
+	at := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, store.RecordHeartbeat(context.Background(), Heartbeat{At: at, Progress: "job-1"}))
+	reopened := FileStore{Path: store.Path, LockPath: store.LockPath}
+	heartbeat, err := reopened.ReadHeartbeat(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, Heartbeat{At: at, Progress: "job-1"}, heartbeat)
+	require.ErrorContains(t, reopened.RecordHeartbeat(context.Background(), Heartbeat{At: at.Add(-time.Second), Progress: "job-0"}), "moved backwards")
+}

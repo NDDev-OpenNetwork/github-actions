@@ -6,6 +6,7 @@ type Policy struct {
 	MinimumStuckAge time.Duration
 	MinimumUptime   time.Duration
 	Cooldown        time.Duration
+	HeartbeatStale  time.Duration
 }
 
 type PendingCreate struct {
@@ -20,6 +21,7 @@ type Observation struct {
 	PendingCreates  []PendingCreate
 	ManagerUptime   time.Duration
 	LastRecoveryAt  time.Time
+	HeartbeatAt     time.Time
 	RecoveryRunning bool
 }
 
@@ -44,6 +46,9 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	}
 	if len(stuck) == 0 {
 		return Decision{Reason: "no-stale-undispatched-instance"}
+	}
+	if !observation.HeartbeatAt.IsZero() && observation.ObservedAt.Sub(observation.HeartbeatAt) < policy.HeartbeatStale {
+		return Decision{Reason: "dispatcher-heartbeat-current", Stuck: stuck}
 	}
 	if observation.ManagerUptime < policy.MinimumUptime {
 		return Decision{Reason: "manager-startup-grace", Stuck: stuck}

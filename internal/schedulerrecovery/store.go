@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -15,6 +16,7 @@ const historyLimit = 64
 
 type fileState struct {
 	SchemaVersion int                `json:"schema_version"`
+	Heartbeat     Heartbeat          `json:"heartbeat"`
 	Active        map[string]Attempt `json:"active"`
 	Finished      []Result           `json:"finished"`
 }
@@ -22,6 +24,33 @@ type fileState struct {
 type FileStore struct {
 	Path     string
 	LockPath string
+}
+
+type Heartbeat struct {
+	At       time.Time `json:"at"`
+	Progress string    `json:"progress"`
+}
+
+func (store FileStore) RecordHeartbeat(_ context.Context, heartbeat Heartbeat) error {
+	if heartbeat.At.IsZero() || heartbeat.Progress == "" {
+		return fmt.Errorf("heartbeat time and progress identity are required")
+	}
+	return store.locked(func(state *fileState) error {
+		if !state.Heartbeat.At.IsZero() && heartbeat.At.Before(state.Heartbeat.At) {
+			return fmt.Errorf("heartbeat time moved backwards")
+		}
+		state.Heartbeat = heartbeat
+		return nil
+	})
+}
+
+func (store FileStore) ReadHeartbeat(_ context.Context) (Heartbeat, error) {
+	var heartbeat Heartbeat
+	err := store.locked(func(state *fileState) error {
+		heartbeat = state.Heartbeat
+		return nil
+	})
+	return heartbeat, err
 }
 
 func (store FileStore) Begin(_ context.Context, attempt Attempt) (bool, error) {
