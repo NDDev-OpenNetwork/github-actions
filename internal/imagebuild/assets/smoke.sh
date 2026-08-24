@@ -40,6 +40,7 @@ test -s /etc/nddev/image-build.json
 test "$(jq -er .go_cache_seed.bytes /etc/nddev/image-build.json)" -gt 0
 test -d /home/runner/.cache/go-build
 test -d /home/runner/go/pkg/mod
+test "$(stat --format='%U:%G' /home/runner/go /home/runner/go/bin /home/runner/go/pkg)" = $'runner:runner\nrunner:runner\nrunner:runner'
 test -n "$(find /home/runner/.cache/go-build -type f -print -quit)"
 [[ "$(sccache --version)" == "sccache ${GHA_SCCACHE_VERSION#v}" ]]
 echo "${GHA_SCCACHE_BINARY_SHA256}  /usr/local/bin/sccache" | sha256sum --check --strict --status

@@ -270,7 +270,8 @@ fi
 tar --extract --gzip --file "${GHA_GO_CACHE_SEED_ARCHIVE}" \
   --directory "${seed_root}" --strip-components=1 --no-same-owner --no-same-permissions
 chown -R runner:runner "${seed_root}"
-install -d -o runner -g runner -m 0755 /home/runner/.cache/go-build /home/runner/go/pkg/mod
+install -d -o runner -g runner -m 0755 \
+  /home/runner/.cache/go-build /home/runner/go /home/runner/go/bin /home/runner/go/pkg /home/runner/go/pkg/mod
 runuser -u runner -- env HOME=/home/runner GOCACHE=/home/runner/.cache/go-build \
   GOMODCACHE=/home/runner/go/pkg/mod GOPROXY=https://proxy.golang.org,direct \
   sh -c 'cd "$1" && exec go build -trimpath -o /var/tmp/gha-fleet-prewarm "$2"' \
@@ -280,7 +281,7 @@ find "${seed_root}" -mindepth 1 -delete
 rmdir "${seed_root}"
 go_cache_bytes="$(du -sb /home/runner/.cache/go-build /home/runner/go/pkg/mod | awk '{sum += $1} END {print sum}')"
 test "${go_cache_bytes}" -gt 0
-if find /home/runner/.cache/go-build /home/runner/go/pkg/mod ! -user runner -print -quit | grep -q .; then
+if find /home/runner/.cache/go-build /home/runner/go ! -user runner -print -quit | grep -q .; then
   echo "Go cache seed contains an entry the runner does not own" >&2
   exit 1
 fi

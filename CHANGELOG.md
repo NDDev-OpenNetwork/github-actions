@@ -12,6 +12,11 @@ Versioning.
   generic retry state remains authoritative for shared capacity and legacy
   no-intent scale-up.
 
+### Fixed
+
+- Made the entire baked Go workspace, including `GOPATH/bin`, runner-owned so
+  setup actions and project tools can install executables without root.
+
 - Added `actions/tool-cache`, a checksum-addressed immutable artifact cache for
   standalone CI tools. Private workers prefer their trust-scoped RustFS object;
   missing, unavailable, incomplete or corrupt cache state falls back to the
