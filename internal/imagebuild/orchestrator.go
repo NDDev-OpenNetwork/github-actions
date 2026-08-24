@@ -293,6 +293,7 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		"metadata":       plan.Source.MetadataFile,
 		"runner":         plan.Runner.Archive,
 		"compiler-cache": plan.CompilerCache.Archive,
+		"go-cache-seed":  plan.GoCacheSeed.Archive,
 	}
 	actual := map[string]string{
 		"checksums":      artifacts.Checksums,
@@ -300,6 +301,7 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		"metadata":       artifacts.Metadata,
 		"runner":         artifacts.Runner,
 		"compiler-cache": artifacts.CompilerCache,
+		"go-cache-seed":  artifacts.GoCacheSeed,
 	}
 	if imageType(plan) == "container" {
 		wanted["rootfs"] = plan.Source.RootfsFile
@@ -518,6 +520,10 @@ exit 1`); err != nil {
 	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.CompilerCache, compilerCacheDestination, "--mode", "0600")...); err != nil {
 		return "", "", fmt.Errorf("push verified compiler cache archive: %w", err)
 	}
+	goCacheSeedDestination := plan.BuilderName + "/var/tmp/" + plan.GoCacheSeed.Archive
+	if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.GoCacheSeed, goCacheSeedDestination, "--mode", "0600")...); err != nil {
+		return "", "", fmt.Errorf("push verified Go cache seed archive: %w", err)
+	}
 	toolchainRequests := make([]guestToolchain, 0, len(plan.Toolchains))
 	for _, toolchain := range plan.Toolchains {
 		destination := plan.BuilderName + "/var/tmp/" + toolchain.Archive
@@ -539,6 +545,7 @@ exit 1`); err != nil {
 	recipeSHA := strings.TrimPrefix(recipe, "sha256:")
 	guestArchive := "/var/tmp/" + plan.Runner.Archive
 	guestCompilerCacheArchive := "/var/tmp/" + plan.CompilerCache.Archive
+	guestGoCacheSeedArchive := "/var/tmp/" + plan.GoCacheSeed.Archive
 	environment := map[string]string{
 		"GHA_RUNNER_VERSION":         plan.Runner.Version,
 		"GHA_RUNNER_SHA256":          plan.Runner.SHA256,
@@ -554,6 +561,10 @@ exit 1`); err != nil {
 		"GHA_SCCACHE_BINARY_PATH":    plan.CompilerCache.BinaryPath,
 		"GHA_SCCACHE_BINARY_SHA256":  plan.CompilerCache.BinarySHA256,
 		"GHA_TOOLCHAINS_B64":         encodedToolchains,
+		"GHA_GO_CACHE_SEED_ARCHIVE":  guestGoCacheSeedArchive,
+		"GHA_GO_CACHE_SEED_SHA256":   plan.GoCacheSeed.ArchiveSHA256,
+		"GHA_GO_CACHE_SEED_COMMIT":   plan.GoCacheSeed.Commit,
+		"GHA_GO_CACHE_SEED_PACKAGES": strings.Join(plan.GoCacheSeed.Packages, " "),
 	}
 	if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, environment, string(provision)); err != nil {
 		return "", "", fmt.Errorf("provision image builder: %w", err)
@@ -749,6 +760,8 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		"GHA_SCCACHE_VERSION":        plan.CompilerCache.Version,
 		"GHA_SCCACHE_BINARY_SHA256":  plan.CompilerCache.BinarySHA256,
 		"GHA_TOOLCHAINS_B64":         encodedToolchains,
+		"GHA_GO_CACHE_SEED_COMMIT":   plan.GoCacheSeed.Commit,
+		"GHA_GO_CACHE_SEED_SHA256":   plan.GoCacheSeed.ArchiveSHA256,
 		"GHA_PUBLIC_HOST_ADDRESS":    plan.PublicHostAddress,
 		"GHA_EXPECTED_ROOT_DISK_GIB": fmt.Sprintf("%d", plan.SmokeRootDiskGiB),
 		"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,

@@ -200,6 +200,7 @@ func (m Manifest) Validate() error {
 	validateRunnerURL(add, m.Runner)
 	validateSHA(add, "runner.sha256", m.Runner.SHA256)
 	validateCompilerCache(add, m.CompilerCache)
+	validateGoCacheSeed(add, m.GoCacheSeed)
 	validateToolchains(add, m.Toolchains)
 	if m.Guest.BuilderDiskGiB < 12 || m.Guest.BuilderDiskGiB > 24 {
 		add("guest.builder_disk_gib", "must be between 12 and 24 GiB")
@@ -295,6 +296,27 @@ func validateCompilerCache(add func(string, string), tool Tool) {
 	wantedBinary := "sccache-" + tool.Version + "-x86_64-unknown-linux-musl/sccache"
 	if tool.BinaryPath != wantedBinary || path.Clean(tool.BinaryPath) != tool.BinaryPath || strings.HasPrefix(tool.BinaryPath, "/") {
 		add("compiler_cache.binary_path", "must be the exact relative sccache executable path")
+	}
+}
+
+func validateGoCacheSeed(add func(string, string), seed GoCacheSeed) {
+	if seed.Repository != "NDDev-OpenNetwork/github-actions" {
+		add("go_cache_seed.repository", "must be the reviewed public github-actions source")
+	}
+	if !commitPattern.MatchString(seed.Commit) {
+		add("go_cache_seed.commit", "must be a full lowercase commit SHA")
+	}
+	wantedArchive := "github-actions-" + seed.Commit[:min(len(seed.Commit), 8)] + ".tar.gz"
+	if seed.Archive != wantedArchive || path.Base(seed.Archive) != seed.Archive {
+		add("go_cache_seed.archive", "must encode the pinned source commit")
+	}
+	wantedURL := "https://codeload.github.com/NDDev-OpenNetwork/github-actions/tar.gz/" + seed.Commit
+	if seed.DownloadURL != wantedURL {
+		add("go_cache_seed.download_url", "must exactly match the pinned public source archive")
+	}
+	validateSHA(add, "go_cache_seed.archive_sha256", seed.ArchiveSHA256)
+	if len(seed.Packages) != 1 || seed.Packages[0] != "./cmd/gha-fleet" {
+		add("go_cache_seed.packages", "must build only the reviewed gha-fleet command")
 	}
 }
 

@@ -25,6 +25,7 @@ type Plan struct {
 	Source              imagemanifest.Source        `json:"source"`
 	Runner              imagemanifest.Runner        `json:"runner"`
 	CompilerCache       imagemanifest.Tool          `json:"compiler_cache"`
+	GoCacheSeed         imagemanifest.GoCacheSeed   `json:"go_cache_seed"`
 	Toolchains          []imagemanifest.Toolchain   `json:"toolchains"`
 	BrowserSmoke        *imagemanifest.BrowserSmoke `json:"browser_smoke,omitempty"`
 	Packages            []string                    `json:"packages"`
@@ -122,6 +123,7 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		Source:              manifest.Source,
 		Runner:              manifest.Runner,
 		CompilerCache:       manifest.CompilerCache,
+		GoCacheSeed:         manifest.GoCacheSeed,
 		Toolchains:          toolchains,
 		BrowserSmoke:        manifest.BrowserSmoke,
 		Packages:            append([]string(nil), manifest.Guest.Packages...),
