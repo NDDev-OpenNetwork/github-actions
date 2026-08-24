@@ -8,9 +8,22 @@ type Manifest struct {
 	Source        Source        `json:"source" yaml:"source"`
 	Runner        Runner        `json:"runner" yaml:"runner"`
 	CompilerCache Tool          `json:"compiler_cache" yaml:"compiler_cache"`
+	GoCacheSeed   GoCacheSeed   `json:"go_cache_seed" yaml:"go_cache_seed"`
 	Toolchains    []Toolchain   `json:"toolchains" yaml:"toolchains"`
 	BrowserSmoke  *BrowserSmoke `json:"browser_smoke,omitempty" yaml:"browser_smoke,omitempty"`
 	Guest         Guest         `json:"guest" yaml:"guest"`
+}
+
+// GoCacheSeed pins public source bytes compiled while the immutable worker
+// image is built. The source tree is removed after warming the runner-owned Go
+// module and build caches; its archive digest and commit remain attested.
+type GoCacheSeed struct {
+	Repository    string   `json:"repository" yaml:"repository"`
+	Commit        string   `json:"commit" yaml:"commit"`
+	Archive       string   `json:"archive" yaml:"archive"`
+	DownloadURL   string   `json:"download_url" yaml:"download_url"`
+	ArchiveSHA256 string   `json:"archive_sha256" yaml:"archive_sha256"`
+	Packages      []string `json:"packages" yaml:"packages"`
 }
 
 type Image struct {

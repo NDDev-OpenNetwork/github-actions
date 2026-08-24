@@ -160,6 +160,15 @@ Namespaces include tenant, repository, trust, purpose, toolchain and content
 identity. Untrusted work cannot write trusted cache, and release work consumes
 only explicitly promoted inputs.
 
+Managed worker images also carry an immutable Go cache seed for reviewed
+public platform code. The image manifest pins the source commit, archive URL,
+archive digest and bounded package set; the builder verifies those bytes,
+compiles as the runtime user into Go's standard module and build-cache paths,
+removes the source tree, and records the seed identity and resulting byte size
+in image provenance. Smoke validation rejects an empty, root-owned or drifted
+seed. This avoids slower per-job network restoration while preserving normal
+Go cache invalidation when toolchain or source content changes.
+
 ## Observability
 
 One trace covers GitHub event, queue, admission, reservation, placement,

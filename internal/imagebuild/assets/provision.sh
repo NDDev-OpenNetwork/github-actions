@@ -20,6 +20,10 @@ fi
 : "${GHA_SCCACHE_BINARY_PATH:?}"
 : "${GHA_SCCACHE_BINARY_SHA256:?}"
 : "${GHA_TOOLCHAINS_B64:?}"
+: "${GHA_GO_CACHE_SEED_ARCHIVE:?}"
+: "${GHA_GO_CACHE_SEED_SHA256:?}"
+: "${GHA_GO_CACHE_SEED_COMMIT:?}"
+: "${GHA_GO_CACHE_SEED_PACKAGES:?}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -251,6 +255,36 @@ if find "${runner_tool_cache}" -maxdepth 3 ! -user runner -print -quit | grep -q
   exit 1
 fi
 
+# Warm Go's native module and build caches once in the immutable image. The
+# public source archive is content-pinned, extracted without ownership or
+# permission inheritance, compiled as the runtime user, and then removed.
+[[ "${GHA_GO_CACHE_SEED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+[[ "${GHA_GO_CACHE_SEED_PACKAGES}" == "./cmd/gha-fleet" ]]
+echo "${GHA_GO_CACHE_SEED_SHA256}  ${GHA_GO_CACHE_SEED_ARCHIVE}" | sha256sum --check --strict
+seed_root="$(mktemp -d /var/tmp/gha-go-cache-seed.XXXXXXXXXX)"
+seed_prefix="github-actions-${GHA_GO_CACHE_SEED_COMMIT}/"
+if tar --list --gzip --file "${GHA_GO_CACHE_SEED_ARCHIVE}" | grep -Ev "^${seed_prefix//./\\.}([^/].*)?$" | grep -q .; then
+  echo "Go cache seed archive contains an unexpected path" >&2
+  exit 1
+fi
+tar --extract --gzip --file "${GHA_GO_CACHE_SEED_ARCHIVE}" \
+  --directory "${seed_root}" --strip-components=1 --no-same-owner --no-same-permissions
+chown -R runner:runner "${seed_root}"
+install -d -o runner -g runner -m 0755 /home/runner/.cache/go-build /home/runner/go/pkg/mod
+runuser -u runner -- env HOME=/home/runner GOCACHE=/home/runner/.cache/go-build \
+  GOMODCACHE=/home/runner/go/pkg/mod GOPROXY=https://proxy.golang.org,direct \
+  sh -c 'cd "$1" && exec go build -trimpath -o /var/tmp/gha-fleet-prewarm "$2"' \
+  sh "${seed_root}" "${GHA_GO_CACHE_SEED_PACKAGES}"
+rm -f /var/tmp/gha-fleet-prewarm "${GHA_GO_CACHE_SEED_ARCHIVE}"
+find "${seed_root}" -mindepth 1 -delete
+rmdir "${seed_root}"
+go_cache_bytes="$(du -sb /home/runner/.cache/go-build /home/runner/go/pkg/mod | awk '{sum += $1} END {print sum}')"
+test "${go_cache_bytes}" -gt 0
+if find /home/runner/.cache/go-build /home/runner/go/pkg/mod ! -user runner -print -quit | grep -q .; then
+  echo "Go cache seed contains an entry the runner does not own" >&2
+  exit 1
+fi
+
 install -d -m 0755 /etc/nddev
 dpkg-query --show --showformat='${Package}\t${Version}\n' | LC_ALL=C sort > /etc/nddev/packages.tsv
 package_sha="$(sha256sum /etc/nddev/packages.tsv | cut -d' ' -f1)"
@@ -267,7 +301,10 @@ jq -n \
   --arg sccache_binary_sha256 "${GHA_SCCACHE_BINARY_SHA256}" \
   --argjson toolchains "$(jq -c 'map({key:.name,value:{version:.version,archive_sha256:.archive_sha256}}) | from_entries' <<<"${toolchain_manifest}")" \
   --arg runner_tool_cache "${runner_tool_cache}" \
-  '{schema_version:3, manifest_fingerprint:$manifest, recipe_fingerprint:$recipe, runner_version:$runner_version, runner_sha256:$runner_sha256, source_release:$source_release, source_artifact_sha256:$source_artifact_sha256, package_manifest_sha256:$package_manifest_sha256, sccache_version:$sccache_version, sccache_archive_sha256:$sccache_archive_sha256, sccache_binary_sha256:$sccache_binary_sha256, runner_tool_cache:$runner_tool_cache, toolchains:$toolchains}' \
+  --arg go_cache_seed_commit "${GHA_GO_CACHE_SEED_COMMIT}" \
+  --arg go_cache_seed_sha256 "${GHA_GO_CACHE_SEED_SHA256}" \
+  --argjson go_cache_bytes "${go_cache_bytes}" \
+  '{schema_version:4, manifest_fingerprint:$manifest, recipe_fingerprint:$recipe, runner_version:$runner_version, runner_sha256:$runner_sha256, source_release:$source_release, source_artifact_sha256:$source_artifact_sha256, package_manifest_sha256:$package_manifest_sha256, sccache_version:$sccache_version, sccache_archive_sha256:$sccache_archive_sha256, sccache_binary_sha256:$sccache_binary_sha256, runner_tool_cache:$runner_tool_cache, toolchains:$toolchains, go_cache_seed:{commit:$go_cache_seed_commit,archive_sha256:$go_cache_seed_sha256,bytes:$go_cache_bytes}}' \
   > /etc/nddev/image-build.json
 chmod 0644 /etc/nddev/image-build.json /etc/nddev/packages.tsv
 

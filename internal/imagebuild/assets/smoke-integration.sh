@@ -21,6 +21,8 @@ trap 'report_error "$?" "${LINENO:-0}" "$BASH_COMMAND"' ERR
 : "${GHA_SCCACHE_VERSION:?}"
 : "${GHA_SCCACHE_BINARY_SHA256:?}"
 : "${GHA_TOOLCHAINS_B64:?}"
+: "${GHA_GO_CACHE_SEED_COMMIT:?}"
+: "${GHA_GO_CACHE_SEED_SHA256:?}"
 : "${GHA_BROWSER:=}"
 
 cleanup_paths=()
@@ -59,6 +61,13 @@ test -s /etc/nddev/image-build.json
 [[ "$(jq -er .docker_action_base_ref /etc/nddev/image-build.json)" == "${GHA_DOCKER_ACTION_BASE_REF}" ]]
 [[ "$(jq -er .sccache_version /etc/nddev/image-build.json)" == "${GHA_SCCACHE_VERSION}" ]]
 [[ "$(jq -er .sccache_binary_sha256 /etc/nddev/image-build.json)" == "${GHA_SCCACHE_BINARY_SHA256}" ]]
+[[ "$(jq -er .schema_version /etc/nddev/image-build.json)" == 4 ]]
+[[ "$(jq -er .go_cache_seed.commit /etc/nddev/image-build.json)" == "${GHA_GO_CACHE_SEED_COMMIT}" ]]
+[[ "$(jq -er .go_cache_seed.archive_sha256 /etc/nddev/image-build.json)" == "${GHA_GO_CACHE_SEED_SHA256}" ]]
+test "$(jq -er .go_cache_seed.bytes /etc/nddev/image-build.json)" -gt 0
+test -d /home/runner/.cache/go-build
+test -d /home/runner/go/pkg/mod
+test -n "$(find /home/runner/.cache/go-build -type f -print -quit)"
 [[ "$(sccache --version)" == "sccache ${GHA_SCCACHE_VERSION#v}" ]]
 echo "${GHA_SCCACHE_BINARY_SHA256}  /usr/local/bin/sccache" | sha256sum --check --strict --status
 

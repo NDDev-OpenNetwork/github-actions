@@ -38,6 +38,15 @@ compiler_cache:
   binary_path: sccache-v0.17.0-x86_64-unknown-linux-musl/sccache
   binary_sha256: 066c5a84c85044c8f48b3ab571ac114293ea717c3d36985db022af8206e21e63
 
+go_cache_seed:
+  repository: NDDev-OpenNetwork/github-actions
+  commit: 0a0cbe3f2854447d3f3511232d62d255f7292375
+  archive: github-actions-0a0cbe3f.tar.gz
+  download_url: https://codeload.github.com/NDDev-OpenNetwork/github-actions/tar.gz/0a0cbe3f2854447d3f3511232d62d255f7292375
+  archive_sha256: 0826f91e2b92eeefc0221b3a04b284e2e5823b6ee1dc5f5e8383e982ef463561
+  packages:
+    - ./cmd/gha-fleet
+
 toolchains:
   - name: bun
     version: 1.3.14

@@ -25,6 +25,11 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 		manifest.CompilerCache.BinarySHA256 != "066c5a84c85044c8f48b3ab571ac114293ea717c3d36985db022af8206e21e63" {
 		t.Fatalf("compiler cache is not exactly pinned: %#v", manifest.CompilerCache)
 	}
+	if manifest.GoCacheSeed.Commit != "0a0cbe3f2854447d3f3511232d62d255f7292375" ||
+		manifest.GoCacheSeed.ArchiveSHA256 != "0826f91e2b92eeefc0221b3a04b284e2e5823b6ee1dc5f5e8383e982ef463561" ||
+		len(manifest.GoCacheSeed.Packages) != 1 || manifest.GoCacheSeed.Packages[0] != "./cmd/gha-fleet" {
+		t.Fatalf("Go cache seed is not exactly pinned: %#v", manifest.GoCacheSeed)
+	}
 	if manifest.Guest.BuilderDiskGiB != 20 {
 		t.Fatalf("builder disk = %d GiB, want 20", manifest.Guest.BuilderDiskGiB)
 	}
@@ -36,7 +41,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:71db588293f5db847d978350d54ff2bc342cb8b7f7c0cc07fd794c0ec2bb5737" {
+	if fingerprint != "sha256:0ba4116ceef89fb13b4c56a7649696984eed60967878d026a63754950197b1a0" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -175,6 +180,9 @@ func TestValidationRejectsMutableOrUntrustedInputs(t *testing.T) {
 		{"runner redirect", func(m *Manifest) { m.Runner.DownloadURL = "https://example.com/runner.tar.gz" }, "runner.download_url"},
 		{"compiler cache redirect", func(m *Manifest) { m.CompilerCache.DownloadURL = "https://example.com/sccache.tar.gz" }, "compiler_cache.download_url"},
 		{"compiler cache binary traversal", func(m *Manifest) { m.CompilerCache.BinaryPath = "../sccache" }, "compiler_cache.binary_path"},
+		{"Go seed redirect", func(m *Manifest) { m.GoCacheSeed.DownloadURL = "https://example.com/source.tar.gz" }, "go_cache_seed.download_url"},
+		{"Go seed mutable commit", func(m *Manifest) { m.GoCacheSeed.Commit = "main" }, "go_cache_seed.commit"},
+		{"Go seed package expansion", func(m *Manifest) { m.GoCacheSeed.Packages = []string{"./..."} }, "go_cache_seed.packages"},
 		{"Incus alias over 64 bytes", func(m *Manifest) { m.Image.Alias = "a" + strings.Repeat("b", 64) }, "image.alias"},
 		{"unsafe archive", func(m *Manifest) { m.Runner.Archive = "../runner.tar.gz" }, "runner.archive"},
 		{"docker daemon", func(m *Manifest) { m.Guest.Packages = append(m.Guest.Packages, "docker.io") }, "forbidden"},

@@ -46,6 +46,10 @@ func TestImageVariantsShareOneBaseline(t *testing.T) {
 		t.Errorf("the two variants bake different compiler caches:\n base:        %#v\n integration: %#v",
 			base.CompilerCache, integration.CompilerCache)
 	}
+	if !reflect.DeepEqual(base.GoCacheSeed, integration.GoCacheSeed) {
+		t.Errorf("the two variants bake different Go cache seeds:\n base:        %#v\n integration: %#v",
+			base.GoCacheSeed, integration.GoCacheSeed)
+	}
 	if !reflect.DeepEqual(base.Toolchains, integration.Toolchains) {
 		t.Errorf("the two variants bake different toolchains:\n base:        %#v\n integration: %#v",
 			base.Toolchains, integration.Toolchains)
@@ -74,6 +78,7 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 		"Source":        true,
 		"Runner":        true,
 		"CompilerCache": true,
+		"GoCacheSeed":   true,
 		"Toolchains":    true,
 	}
 	// Image holds the artifact's own names; Guest holds the capability delta.

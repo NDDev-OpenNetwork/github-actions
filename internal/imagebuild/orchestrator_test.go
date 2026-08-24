@@ -89,6 +89,7 @@ func TestContainerBuilderUsesRootfsAndNeverRequestsVM(t *testing.T) {
 		Signature: "/var/tmp/gha-fleet-image-test/SHA256SUMS.gpg", Metadata: "/var/tmp/gha-fleet-image-test/" + plan.Source.MetadataFile,
 		Rootfs: "/var/tmp/gha-fleet-image-test/" + plan.Source.RootfsFile, Runner: "/var/tmp/gha-fleet-image-test/" + plan.Runner.Archive,
 		CompilerCache: "/var/tmp/gha-fleet-image-test/" + plan.CompilerCache.Archive, Toolchains: map[string]string{}, VerifiedBy: plan.Source.SignerFingerprint,
+		GoCacheSeed: "/var/tmp/gha-fleet-image-test/" + plan.GoCacheSeed.Archive,
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = artifacts.Directory + "/" + toolchain.Archive
@@ -112,7 +113,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:015597ce44ef82558b368ae421663974d130848162f67ab8843cae05185f3983" {
+	if first != "sha256:779640a6756b0289310f368bacaa0a7012eb07ca98048afaccfbb9968883fb1c" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -279,6 +280,16 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 			t.Fatalf("provision script misses compiler-cache invariant %s", cacheInvariant)
 		}
 	}
+	for _, prewarmInvariant := range []string{
+		"GHA_GO_CACHE_SEED_SHA256", "GHA_GO_CACHE_SEED_COMMIT", "GHA_GO_CACHE_SEED_PACKAGES",
+		"runuser -u runner", "GOCACHE=/home/runner/.cache/go-build", "GOMODCACHE=/home/runner/go/pkg/mod",
+		"go build -trimpath", `rm -f /var/tmp/gha-fleet-prewarm "${GHA_GO_CACHE_SEED_ARCHIVE}"`,
+		"go_cache_seed:{commit:$go_cache_seed_commit", "go_cache_bytes",
+	} {
+		if !strings.Contains(provisionText, prewarmInvariant) {
+			t.Fatalf("provision script misses Go cache prewarm invariant %s", prewarmInvariant)
+		}
+	}
 	for _, compatibilityInvariant := range []string{
 		"python3 -m pip --version", "/usr/local/bin/python", "/usr/local/bin/pip",
 		"/usr/local/bin/go", "/usr/local/bin/gofmt", "pnpm.cjs", "pnpx.cjs",
@@ -392,6 +403,8 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 		"GHA_SCCACHE_VERSION=v0.17.0",
 		"GHA_SCCACHE_BINARY_SHA256="+strings.Repeat("a", 64),
 		"GHA_TOOLCHAINS_B64="+base64.StdEncoding.EncodeToString([]byte("[]")),
+		"GHA_GO_CACHE_SEED_COMMIT="+strings.Repeat("a", 40),
+		"GHA_GO_CACHE_SEED_SHA256="+strings.Repeat("b", 64),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -487,6 +500,7 @@ func TestValidateArtifactPathsRejectsSubstitution(t *testing.T) {
 		Rootfs:        filepath.Join(directory, plan.Source.RootfsFile),
 		Runner:        filepath.Join(directory, plan.Runner.Archive),
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
+		GoCacheSeed:   filepath.Join(directory, plan.GoCacheSeed.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),
 		VerifiedBy:    plan.Source.SignerFingerprint,
 	}

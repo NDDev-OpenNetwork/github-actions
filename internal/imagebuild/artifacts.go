@@ -28,6 +28,7 @@ type Artifacts struct {
 	Rootfs        string `json:"rootfs,omitempty"`
 	Runner        string `json:"runner"`
 	CompilerCache string `json:"compiler_cache"`
+	GoCacheSeed   string `json:"go_cache_seed"`
 	BrowserSmoke  string `json:"browser_smoke,omitempty"`
 	// Toolchains maps each pinned toolchain name to its verified local archive.
 	Toolchains map[string]string `json:"toolchains"`
@@ -61,6 +62,7 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 		Metadata:      filepath.Join(directory, plan.Source.MetadataFile),
 		Runner:        filepath.Join(directory, plan.Runner.Archive),
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
+		GoCacheSeed:   filepath.Join(directory, plan.GoCacheSeed.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),
 	}
 	if plan.Image.EffectiveType() == "container" {
@@ -121,6 +123,9 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	}
 	if _, err := download(ctx, client, plan.CompilerCache.DownloadURL, artifacts.CompilerCache, plan.CompilerCache.ArchiveSHA256, 64<<20); err != nil {
 		return Artifacts{}, fmt.Errorf("download compiler cache: %w", err)
+	}
+	if _, err := download(ctx, client, plan.GoCacheSeed.DownloadURL, artifacts.GoCacheSeed, plan.GoCacheSeed.ArchiveSHA256, 16<<20); err != nil {
+		return Artifacts{}, fmt.Errorf("download Go cache seed: %w", err)
 	}
 	for _, toolchain := range plan.Toolchains {
 		if _, err := download(ctx, client, toolchain.DownloadURL, artifacts.Toolchains[toolchain.Name], toolchain.ArchiveSHA256, 768<<20); err != nil {
