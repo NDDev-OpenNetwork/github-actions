@@ -36,6 +36,7 @@ runner_root=/home/runner/actions-runner
 
 test -x "${source_root}/bin/Runner.Listener"
 test -x "${runner_root}/bin/Runner.Listener"
+install -d -o runner -g runner -m 0700 /home/runner/.cache
 if find "${source_root}" -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; then
   echo "registration state exists in the immutable runner cache" >&2
   exit 1
