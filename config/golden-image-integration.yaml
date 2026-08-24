@@ -1,7 +1,7 @@
 schema_version: 1
 
 image:
-  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b13
+  alias: nddev-ubuntu-24.04-amd64-docker-runner-2.336.0-r20260801-b14
   current_alias: nddev-ubuntu-24.04-amd64-docker-current
   previous_alias: nddev-ubuntu-24.04-amd64-docker-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-r20260801
@@ -39,10 +39,10 @@ compiler_cache:
 
 go_cache_seed:
   repository: NDDev-OpenNetwork/github-actions
-  commit: 0a0cbe3f2854447d3f3511232d62d255f7292375
-  archive: github-actions-0a0cbe3f.tar.gz
-  download_url: https://codeload.github.com/NDDev-OpenNetwork/github-actions/tar.gz/0a0cbe3f2854447d3f3511232d62d255f7292375
-  archive_sha256: 0826f91e2b92eeefc0221b3a04b284e2e5823b6ee1dc5f5e8383e982ef463561
+  commit: b4a49eecb836b2c97f15afe2c749d34f552f2ae4
+  archive: github-actions-b4a49eec.tar.gz
+  download_url: https://codeload.github.com/NDDev-OpenNetwork/github-actions/tar.gz/b4a49eecb836b2c97f15afe2c749d34f552f2ae4
+  archive_sha256: e2e2325f28743b645cd5fce8f520ffa5cbeed2662eada73e22d34f6a5c7472a3
   packages:
     - ./cmd/gha-fleet
 
@@ -122,6 +122,7 @@ guest:
     - pkg-config
     - python3-pip
     - python3-venv
+    - ripgrep
     - rsync
     - sudo
     - tar
