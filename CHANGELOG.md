@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.74`: reconstructed instance managers
+  recover the queue owner from the canonical forge entity name when upstream
+  omits `ForgeEntity.Owner`. Pre-job reservations now match the same owner that
+  the queue writer persisted for organization and repository scale sets.
 - Added GARM derivative `v0.2.1-nddev.73`: a shared-capacity or retry
   preflight defer now releases its ephemeral pre-job reservation immediately.
   Accepted jobs remain available to replacement instances instead of waiting
