@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "ordered_phases": [
+    "platform-policies",
+    "provider-binary-and-config",
+    "manager-restart",
+    "observer-restart",
+    "bounded-convergence"
+  ],
+  "restart_units": [
+    "garm.service",
+    "gha-fleet-observer.service"
+  ],
+  "convergence": {
+    "health_required": true,
+    "fresh_sample_required": true,
+    "collection_errors_must_equal": 0,
+    "visible_inventory_must_match_provider": true,
+    "queue_identity_must_be_preserved": true,
+    "natural_job_required": true
+  }
+}

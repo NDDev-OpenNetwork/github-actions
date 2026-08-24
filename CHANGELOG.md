@@ -7,6 +7,8 @@ Versioning.
 
 ### Added
 
+- Added a typed provider rollout contract that requires observer restart and
+  bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
   surface, classifying immutable image inputs, cache traffic, VPC-local runner
   bootstrap, reviewed source builds and non-promoting smoke probes.
