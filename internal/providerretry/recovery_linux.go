@@ -32,10 +32,17 @@ type record struct {
 }
 
 type journal struct {
-	SchemaVersion int               `json:"schema_version"`
-	Generation    uint64            `json:"generation"`
-	UpdatedAt     time.Time         `json:"updated_at"`
-	Records       map[string]record `json:"records"`
+	SchemaVersion int                    `json:"schema_version"`
+	Generation    uint64                 `json:"generation"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Records       map[string]record      `json:"records"`
+	Reservations  map[string]reservation `json:"reservations,omitempty"`
+}
+
+type reservation struct {
+	RetryKey     string    `json:"retry_key"`
+	ScaleSetName string    `json:"scale_set_name"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type RecoveryResult struct {
@@ -56,6 +63,7 @@ type RecoveryResult struct {
 type Snapshot struct {
 	Generation                uint64         `json:"generation"`
 	Records                   int            `json:"records"`
+	Reservations              int            `json:"reservations"`
 	DeferredRecords           int            `json:"deferred_records"`
 	TerminalCircuits          int            `json:"terminal_circuits"`
 	ByErrorClass              map[string]int `json:"by_error_class"`
@@ -85,6 +93,7 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 	result := Snapshot{
 		Generation:           state.Generation,
 		Records:              len(state.Records),
+		Reservations:         len(state.Reservations),
 		ByErrorClass:         retryClassCounts(),
 		DeferredByErrorClass: retryClassCounts(),
 	}
@@ -285,7 +294,8 @@ func readJournal(path string) (journal, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return journal{}, errors.New("retry journal has trailing data")
 	}
-	if state.SchemaVersion != 1 || state.Records == nil {
+	if (state.SchemaVersion != 1 && state.SchemaVersion != 2) || state.Records == nil ||
+		(state.SchemaVersion == 2 && state.Reservations == nil) {
 		return journal{}, errors.New("retry journal identity is invalid")
 	}
 	return state, nil

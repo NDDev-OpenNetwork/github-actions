@@ -88,6 +88,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_provider_journal_generation", "Current fsync-backed provider journal generation.", float64(snapshot.Journal.Generation))
 	gauge(&output, "gha_fleet_provider_retry_journal_generation", "Current fsync-backed provider-create retry journal generation.", float64(snapshot.ProviderRetry.Generation))
 	gauge(&output, "gha_fleet_provider_retry_records", "Stored durable provider-create retry records, including retained completed backoff history.", float64(snapshot.ProviderRetry.Records))
+	gauge(&output, "gha_fleet_provider_retry_reservations", "Active pre-job instance reservations bound to stable queue-intent retry identities.", float64(snapshot.ProviderRetry.Reservations))
 	gauge(&output, "gha_fleet_provider_retry_deferred_records", "Provider-create retry records whose backoff or terminal circuit is active now.", float64(snapshot.ProviderRetry.DeferredRecords))
 	gauge(&output, "gha_fleet_provider_terminal_circuits", "Terminal scale-set provider-create circuits currently blocking new capacity.", float64(snapshot.ProviderRetry.TerminalCircuits))
 	gauge(&output, "gha_fleet_provider_terminal_circuit_oldest_age_seconds", "Age of the oldest terminal scale-set provider-create circuit.", float64(snapshot.ProviderRetry.OldestTerminalAgeSeconds))

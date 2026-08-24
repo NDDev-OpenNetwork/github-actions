@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -19,19 +20,20 @@ import (
 )
 
 const (
-	nddevRetrySchemaVersion = 1
-	nddevRetryMaximumBytes  = 1024 * 1024
-	nddevRetryMaximum       = 3
-	nddevRetryAttemptLease  = 2 * time.Minute
-	nddevRetryExecutionTTL  = 24 * time.Hour
-	nddevRetryStaleTTL      = time.Hour
-	nddevRetryBase          = 5 * time.Second
-	nddevRetryCap           = 5 * time.Minute
-	nddevCapacityRetryCap   = 5 * time.Minute
-	nddevRetryFileEnv       = "GARM_NDDEV_CREATE_RETRY_FILE"
-	nddevRetryLockEnv       = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
-	nddevQueueIntentFileEnv = "GARM_NDDEV_QUEUE_INTENT_FILE"
-	nddevCapacityDomainKey  = "capacity-domain:measured-fleet"
+	nddevRetrySchemaVersion         = 2
+	nddevRetryPreviousSchemaVersion = 1
+	nddevRetryMaximumBytes          = 1024 * 1024
+	nddevRetryMaximum               = 3
+	nddevRetryAttemptLease          = 2 * time.Minute
+	nddevRetryExecutionTTL          = 24 * time.Hour
+	nddevRetryStaleTTL              = time.Hour
+	nddevRetryBase                  = 5 * time.Second
+	nddevRetryCap                   = 5 * time.Minute
+	nddevCapacityRetryCap           = 5 * time.Minute
+	nddevRetryFileEnv               = "GARM_NDDEV_CREATE_RETRY_FILE"
+	nddevRetryLockEnv               = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
+	nddevQueueIntentFileEnv         = "GARM_NDDEV_QUEUE_INTENT_FILE"
+	nddevCapacityDomainKey          = "capacity-domain:measured-fleet"
 )
 
 var nddevRetryNow = func() time.Time { return time.Now().UTC() }
@@ -49,10 +51,28 @@ type nddevRetryRecord struct {
 }
 
 type nddevRetryJournal struct {
-	SchemaVersion int                         `json:"schema_version"`
-	Generation    uint64                      `json:"generation"`
-	UpdatedAt     time.Time                   `json:"updated_at"`
-	Records       map[string]nddevRetryRecord `json:"records"`
+	SchemaVersion int                              `json:"schema_version"`
+	Generation    uint64                           `json:"generation"`
+	UpdatedAt     time.Time                        `json:"updated_at"`
+	Records       map[string]nddevRetryRecord      `json:"records"`
+	Reservations  map[string]nddevRetryReservation `json:"reservations"`
+}
+
+type nddevRetryReservation struct {
+	RetryKey     string    `json:"retry_key"`
+	ScaleSetName string    `json:"scale_set_name"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type nddevQueueRetryIntent struct {
+	Key          string    `json:"key"`
+	JobID        string    `json:"job_id"`
+	ScaleSetID   int64     `json:"scale_set_id"`
+	ScaleSetName string    `json:"scale_set_name"`
+	Owner        string    `json:"owner"`
+	State        string    `json:"state"`
+	QueueTime    time.Time `json:"queue_time"`
+	ExpiresAt    time.Time `json:"expires_at"`
 }
 
 func nddevProviderRetryKey(instance params.Instance, scaleSet params.ScaleSet, entity params.ForgeEntity) string {
@@ -67,6 +87,75 @@ func nddevProviderRetryKey(instance params.Instance, scaleSet params.ScaleSet, e
 		return domain + ":instance:" + name
 	}
 	return domain
+}
+
+func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance, scaleSet params.ScaleSet, entity params.ForgeEntity) (string, error) {
+	if key := nddevProviderRetryKey(instance, scaleSet, entity); instance.Job != nil || !strings.Contains(key, ":instance:") {
+		return key, nil
+	}
+	instanceName := strings.TrimSpace(instance.Name)
+	if instanceName == "" {
+		return "", fmt.Errorf("pre-job provider retry identity requires an instance name")
+	}
+	domain := nddevScaleSetRetryKey(scaleSet, entity)
+	if domain == "" {
+		return "", nil
+	}
+	selected := ""
+	err := nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
+		if reservation, exists := journal.Reservations[instanceName]; exists {
+			reservation.UpdatedAt = now
+			journal.Reservations[instanceName] = reservation
+			selected = reservation.RetryKey
+			return nil
+		}
+		intents, err := nddevActiveQueueIntents(now)
+		if err != nil {
+			return err
+		}
+		claimed := make(map[string]bool, len(journal.Reservations))
+		for _, reservation := range journal.Reservations {
+			claimed[reservation.RetryKey] = true
+		}
+		candidates := make([]nddevQueueRetryIntent, 0)
+		for _, intent := range intents {
+			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name ||
+				(intent.Owner != "" && intent.Owner != entity.Owner) {
+				continue
+			}
+			retryKey := domain + ":job:" + strings.TrimSpace(intent.JobID)
+			if intent.JobID == "" || claimed[retryKey] {
+				continue
+			}
+			candidates = append(candidates, intent)
+		}
+		sort.Slice(candidates, func(left, right int) bool {
+			if !candidates[left].QueueTime.Equal(candidates[right].QueueTime) {
+				return candidates[left].QueueTime.Before(candidates[right].QueueTime)
+			}
+			return candidates[left].Key < candidates[right].Key
+		})
+		if len(candidates) == 0 {
+			return fmt.Errorf("no unclaimed admitted queue intent can own pre-job provider create")
+		}
+		selected = domain + ":job:" + candidates[0].JobID
+		journal.Reservations[instanceName] = nddevRetryReservation{
+			RetryKey: selected, ScaleSetName: scaleSet.Name, UpdatedAt: now,
+		}
+		return nil
+	})
+	return selected, err
+}
+
+func nddevReleaseProviderRetryReservation(ctx context.Context, instanceName string) error {
+	instanceName = strings.TrimSpace(instanceName)
+	if instanceName == "" {
+		return nil
+	}
+	return nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, _ time.Time) error {
+		delete(journal.Reservations, instanceName)
+		return nil
+	})
 }
 
 func nddevScaleSetRetryKey(scaleSet params.ScaleSet, entity params.ForgeEntity) string {
@@ -451,6 +540,31 @@ func nddevOldestEligibleCapacityDomain(journal *nddevRetryJournal, activeScaleSe
 }
 
 func nddevActiveQueueScaleSets() (map[string]bool, bool, error) {
+	intents, configured, err := nddevReadQueueRetryIntents(nddevRetryNow().UTC())
+	if err != nil || !configured {
+		return nil, configured, err
+	}
+	active := map[string]bool{}
+	for _, intent := range intents {
+		if name := strings.TrimSpace(intent.ScaleSetName); name != "" {
+			active[name] = true
+		}
+	}
+	return active, true, nil
+}
+
+func nddevActiveQueueIntents(now time.Time) ([]nddevQueueRetryIntent, error) {
+	intents, configured, err := nddevReadQueueRetryIntents(now)
+	if err != nil {
+		return nil, err
+	}
+	if !configured {
+		return nil, fmt.Errorf("queue intent path is required for pre-job retry identity")
+	}
+	return intents, nil
+}
+
+func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, error) {
 	path := strings.TrimSpace(os.Getenv(nddevQueueIntentFileEnv))
 	if path == "" {
 		return nil, false, nil
@@ -472,20 +586,20 @@ func nddevActiveQueueScaleSets() (map[string]bool, bool, error) {
 		return nil, true, fmt.Errorf("read queue intent journal: invalid bounded content")
 	}
 	var queue struct {
-		Intents map[string]struct {
-			ScaleSetName string `json:"scale_set_name"`
-			State        string `json:"state"`
-		} `json:"intents"`
+		Intents map[string]nddevQueueRetryIntent `json:"intents"`
 	}
 	if err := json.Unmarshal(data, &queue); err != nil {
 		return nil, true, fmt.Errorf("decode queue intent journal: %w", err)
 	}
-	active := map[string]bool{}
-	for _, intent := range queue.Intents {
+	active := make([]nddevQueueRetryIntent, 0, len(queue.Intents))
+	for key, intent := range queue.Intents {
 		switch intent.State {
-		case "queued", "acquiring", "acquired", "assigned":
-			if name := strings.TrimSpace(intent.ScaleSetName); name != "" {
-				active[name] = true
+		case "acquiring", "acquired", "assigned":
+			if intent.Key == "" {
+				intent.Key = key
+			}
+			if intent.ExpiresAt.After(now) {
+				active = append(active, intent)
 			}
 		}
 	}
@@ -568,7 +682,11 @@ func nddevUpdateRetryJournal(ctx context.Context, mutate func(*nddevRetryJournal
 
 	journal, err := nddevReadRetryJournal(path)
 	if errors.Is(err, os.ErrNotExist) {
-		journal = nddevRetryJournal{SchemaVersion: nddevRetrySchemaVersion, Records: map[string]nddevRetryRecord{}}
+		journal = nddevRetryJournal{
+			SchemaVersion: nddevRetrySchemaVersion,
+			Records:       map[string]nddevRetryRecord{},
+			Reservations:  map[string]nddevRetryReservation{},
+		}
 	} else if err != nil {
 		return err
 	}
@@ -580,6 +698,11 @@ func nddevUpdateRetryJournal(ctx context.Context, mutate func(*nddevRetryJournal
 			!record.UpdatedAt.Add(nddevRetryStaleTTL).After(now)
 		if terminalExpired || staleNonTerminal {
 			delete(journal.Records, key)
+		}
+	}
+	for instanceName, reservation := range journal.Reservations {
+		if !reservation.UpdatedAt.Add(nddevRetryAttemptLease).After(now) {
+			delete(journal.Reservations, instanceName)
 		}
 	}
 	if err := mutate(&journal, now); err != nil {
@@ -598,7 +721,7 @@ func nddevUpdateRetryJournal(ctx context.Context, mutate func(*nddevRetryJournal
 }
 
 func (j nddevRetryJournal) Validate() error {
-	if j.SchemaVersion != nddevRetrySchemaVersion || j.Records == nil {
+	if j.SchemaVersion != nddevRetrySchemaVersion || j.Records == nil || j.Reservations == nil {
 		return fmt.Errorf("provider retry journal identity is invalid")
 	}
 	for key, record := range j.Records {
@@ -628,6 +751,20 @@ func (j nddevRetryJournal) Validate() error {
 			return fmt.Errorf("provider retry record %q has invalid scale-set name", key)
 		}
 	}
+	claimed := make(map[string]string, len(j.Reservations))
+	for instanceName, reservation := range j.Reservations {
+		if instanceName == "" || len(instanceName) > 128 || strings.TrimSpace(instanceName) != instanceName ||
+			strings.ContainsAny(instanceName, "\r\n\t") || reservation.UpdatedAt.IsZero() ||
+			!strings.Contains(reservation.RetryKey, ":job:") || len(reservation.RetryKey) > 256 ||
+			reservation.ScaleSetName == "" || len(reservation.ScaleSetName) > 128 ||
+			strings.TrimSpace(reservation.ScaleSetName) != reservation.ScaleSetName || strings.ContainsAny(reservation.ScaleSetName, "\r\n\t") {
+			return fmt.Errorf("provider retry reservation %q is invalid", instanceName)
+		}
+		if previous, exists := claimed[reservation.RetryKey]; exists && previous != instanceName {
+			return fmt.Errorf("provider retry key %q is reserved by multiple instances", reservation.RetryKey)
+		}
+		claimed[reservation.RetryKey] = instanceName
+	}
 	return nil
 }
 
@@ -650,6 +787,10 @@ func nddevReadRetryJournal(path string) (nddevRetryJournal, error) {
 	var journal nddevRetryJournal
 	if err := decoder.Decode(&journal); err != nil {
 		return nddevRetryJournal{}, fmt.Errorf("decode provider retry journal: %w", err)
+	}
+	if journal.SchemaVersion == nddevRetryPreviousSchemaVersion {
+		journal.SchemaVersion = nddevRetrySchemaVersion
+		journal.Reservations = map[string]nddevRetryReservation{}
 	}
 	if err := journal.Validate(); err != nil {
 		return nddevRetryJournal{}, err

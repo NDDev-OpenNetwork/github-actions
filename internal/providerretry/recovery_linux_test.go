@@ -170,3 +170,38 @@ func TestInspectExposesBoundedSharedCapacityProbeState(t *testing.T) {
 		t.Fatalf("dynamic probe owner leaked from bounded observation: %s", encoded)
 	}
 }
+
+func TestInspectCountsSchemaTwoReservationsWithoutExposingIdentity(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	now := time.Date(2026, 8, 24, 8, 30, 0, 0, time.UTC)
+	state := journal{
+		SchemaVersion: 2,
+		Generation:    44,
+		UpdatedAt:     now,
+		Records:       map[string]record{},
+		Reservations: map[string]reservation{
+			"private-runner": {
+				RetryKey: "scale-set:private-entity:17:job:private-job", ScaleSetName: "private-scale-set", UpdatedAt: now,
+			},
+		},
+	}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(journalPath, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Reservations != 1 {
+		t.Fatalf("reservation count = %d", snapshot.Reservations)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-runner") || strings.Contains(string(encoded), "private-job") {
+		t.Fatalf("reservation identity leaked from snapshot: %s", encoded)
+	}
+}

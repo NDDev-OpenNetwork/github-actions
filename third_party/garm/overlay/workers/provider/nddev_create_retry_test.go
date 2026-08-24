@@ -86,6 +86,119 @@ func TestNDDevProviderRetryKeyFallsBackToTheStableScaleSetFailureDomain(t *testi
 	}
 }
 
+func TestNDDevRetryJournalMigratesSchemaOneWithoutInventingReservations(t *testing.T) {
+	now := time.Date(2026, 8, 24, 8, 5, 0, 0, time.UTC)
+	directory := t.TempDir()
+	path := filepath.Join(directory, "retry.json")
+	content := fmt.Sprintf(`{"schema_version":1,"generation":7,"updated_at":%q,"records":{"scale-set:entity-one:17":{"job_id":"scale-set:entity-one:17","attempts":1,"updated_at":%q,"next_allowed_at":%q}}}`,
+		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Add(time.Minute).Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := nddevReadRetryJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.SchemaVersion != nddevRetrySchemaVersion || journal.Reservations == nil || len(journal.Reservations) != 0 {
+		t.Fatalf("migrated journal = %#v", journal)
+	}
+}
+
+func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
+	now := time.Date(2026, 8, 24, 8, 10, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"oldest":{"key":"oldest","job_id":"job-oldest","scale_set_id":17,"scale_set_name":"example-standard","owner":"","state":"assigned","queue_time":%q,"expires_at":%q},"newer":{"key":"newer","job_id":"job-newer","scale_set_id":17,"scale_set_name":"example-standard","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
+	entity := params.ForgeEntity{ID: "entity-one", Owner: "example-org"}
+	first, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-one"}, scaleSet, entity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-two"}, scaleSet, entity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != "scale-set:entity-one:17:job:job-oldest" || second != "scale-set:entity-one:17:job:job-newer" {
+		t.Fatalf("reserved keys = %q, %q", first, second)
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Reservations) != 2 {
+		t.Fatalf("reservations = %#v", journal.Reservations)
+	}
+}
+
+func TestNDDevPreJobCapacityRetryBudgetSurvivesFreshInstanceNames(t *testing.T) {
+	now := time.Date(2026, 8, 24, 8, 20, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"intent":{"key":"intent","job_id":"stable-job","scale_set_id":17,"scale_set_name":"example-standard","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
+	entity := params.ForgeEntity{ID: "entity-one", Owner: "example-org"}
+	stableKey := "scale-set:entity-one:17:job:stable-job"
+
+	for attempt := 1; attempt <= nddevRetryMaximum; attempt++ {
+		instanceName := fmt.Sprintf("runner-%d", attempt)
+		key, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: instanceName}, scaleSet, entity)
+		if err != nil || key != stableKey {
+			t.Fatalf("attempt %d reservation key=%q err=%v", attempt, key, err)
+		}
+		if err := nddevBeforeProviderCreate(context.Background(), key, scaleSet.Name); err != nil {
+			t.Fatalf("attempt %d preflight: %v", attempt, err)
+		}
+		if err := nddevRecordProviderCreateFailure(context.Background(), key, errors.New("insufficient-memory")); err != nil {
+			t.Fatalf("attempt %d failure: %v", attempt, err)
+		}
+		if err := nddevReleaseProviderRetryReservation(context.Background(), instanceName); err != nil {
+			t.Fatal(err)
+		}
+		journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempt < nddevRetryMaximum {
+			now = journal.Records[stableKey].NextAllowedAt
+			if domainNext := journal.Records[nddevRetryDomainKey(stableKey)].NextAllowedAt; domainNext.After(now) {
+				now = domainNext
+			}
+			if sharedNext := journal.Records[nddevCapacityDomainKey].NextAllowedAt; sharedNext.After(now) {
+				now = sharedNext
+			}
+		}
+	}
+	key, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-four"}, scaleSet, entity)
+	if err != nil || key != stableKey {
+		t.Fatalf("fourth reservation key=%q err=%v", key, err)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), key, scaleSet.Name); err == nil {
+		t.Fatal("fourth pre-job infrastructure attempt passed the stable job circuit")
+	}
+}
+
 func TestNDDevProviderRetryIsDurableBoundedAndClearedBySuccess(t *testing.T) {
 	now := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow
@@ -558,7 +671,7 @@ func TestNDDevCapacityDeleteSkipsHistoricalDomainsWithoutActiveQueueWork(t *test
 	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
 	queuePath := filepath.Join(directory, "queue.json")
 	t.Setenv(nddevQueueIntentFileEnv, queuePath)
-	queue := `{"schema_version":4,"intents":{"active":{"scale_set_name":"active-fast","state":"assigned"},"running":{"scale_set_name":"stale-standard","state":"running"}}}`
+	queue := `{"schema_version":4,"intents":{"active":{"scale_set_name":"active-fast","state":"assigned","expires_at":"2026-08-23T05:00:00Z"},"running":{"scale_set_name":"stale-standard","state":"running","expires_at":"2026-08-23T05:00:00Z"}}}`
 	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
 		t.Fatal(err)
 	}

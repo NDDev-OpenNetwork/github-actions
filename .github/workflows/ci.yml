@@ -56,7 +56,7 @@ jobs:
                 ;;
             esac
             case "${changed}" in
-              config/provider-derivative.yaml|cmd/garm-provider-incus-nddev/*|internal/cachenamespace/*|internal/config/*|internal/garmproviderincus/*|internal/provideradmission/*|internal/providerjournal/*|internal/providerrelease/*|internal/providerretry/*|internal/rustfscache/*|go.mod|go.sum)
+              config/provider-derivative.yaml|cmd/garm-provider-incus-nddev/*|internal/cachenamespace/*|internal/config/*|internal/garmproviderincus/*|internal/provideradmission/*|internal/providerjournal/*|internal/providerrelease/*|internal/rustfscache/*|go.mod|go.sum)
                 provider=true
                 ;;
             esac
@@ -157,7 +157,7 @@ jobs:
           while IFS= read -r changed; do
             case "${changed}" in
               *_test.go) ;;
-              go.mod|go.sum|cmd/garm-provider-incus-nddev/*.go|internal/cachenamespace/*.go|internal/config/*.go|internal/garmproviderincus/*.go|internal/garmproviderincus/*/*.go|internal/provideradmission/*.go|internal/providerjournal/*.go|internal/providerrelease/*.go|internal/providerretry/*.go|internal/rustfscache/*.go)
+              go.mod|go.sum|cmd/garm-provider-incus-nddev/*.go|internal/cachenamespace/*.go|internal/config/*.go|internal/garmproviderincus/*.go|internal/garmproviderincus/*/*.go|internal/provideradmission/*.go|internal/providerjournal/*.go|internal/providerrelease/*.go|internal/rustfscache/*.go)
                 printf 'provider release source drift: %s\n' "${changed}" >&2
                 drift=true
                 ;;
