@@ -14,6 +14,10 @@ Versioning.
 
 ### Fixed
 
+- Added bounded retries for transient image-materialization downloads. HTTP
+  408/429/5xx and transport/read failures receive at most three attempts with
+  context-aware backoff; trust, size, digest and permanent HTTP failures remain
+  terminal and are never retried.
 - Made the entire baked Go workspace, including `GOPATH/bin`, runner-owned so
   setup actions and project tools can install executables without root.
 
