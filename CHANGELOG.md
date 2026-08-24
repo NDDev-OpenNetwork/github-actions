@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.75`: when upstream recovery omits both
+  forge owner and name, pre-job retry identity derives the owner only from one
+  unique active queue owner matching the exact scale-set ID and name. Multiple
+  tenant owners remain fail-closed.
 - Added GARM derivative `v0.2.1-nddev.74`: reconstructed instance managers
   recover the queue owner from the canonical forge entity name when upstream
   omits `ForgeEntity.Owner`. Pre-job reservations now match the same owner that

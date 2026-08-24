@@ -121,7 +121,7 @@ func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
-	entity := params.ForgeEntity{ID: "entity-one", Name: "example-org"}
+	entity := params.ForgeEntity{ID: "entity-one"}
 	first, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-one"}, scaleSet, entity)
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +139,22 @@ func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
 	}
 	if len(journal.Reservations) != 2 {
 		t.Fatalf("reservations = %#v", journal.Reservations)
+	}
+}
+
+func TestNDDevUniqueActiveIntentOwnerFailsClosedOnTenantAmbiguity(t *testing.T) {
+	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
+	intents := []nddevQueueRetryIntent{
+		{ScaleSetID: 17, ScaleSetName: "example-standard", Owner: "example-a"},
+		{ScaleSetID: 17, ScaleSetName: "example-standard", Owner: "example-b"},
+	}
+	if _, err := nddevUniqueActiveIntentOwner(intents, scaleSet); err == nil {
+		t.Fatal("ambiguous active intent owners were accepted")
+	}
+	intents[1].Owner = "example-a"
+	owner, err := nddevUniqueActiveIntentOwner(intents, scaleSet)
+	if err != nil || owner != "example-a" {
+		t.Fatalf("unique owner=%q err=%v", owner, err)
 	}
 }
 

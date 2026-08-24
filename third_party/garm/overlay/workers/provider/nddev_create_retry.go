@@ -102,9 +102,6 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		return "", nil
 	}
 	owner := nddevRetryOwner(entity)
-	if owner == "" {
-		return "", fmt.Errorf("pre-job provider retry identity requires a forge owner")
-	}
 	selected := ""
 	err := nddevUpdateRetryJournal(ctx, func(journal *nddevRetryJournal, now time.Time) error {
 		if reservation, exists := journal.Reservations[instanceName]; exists {
@@ -116,6 +113,12 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		intents, err := nddevActiveQueueIntents(now)
 		if err != nil {
 			return err
+		}
+		if owner == "" {
+			owner, err = nddevUniqueActiveIntentOwner(intents, scaleSet)
+			if err != nil {
+				return err
+			}
 		}
 		claimed := make(map[string]bool, len(journal.Reservations))
 		for _, reservation := range journal.Reservations {
@@ -161,6 +164,25 @@ func nddevRetryOwner(entity params.ForgeEntity) string {
 	}
 	owner, _, _ := strings.Cut(name, "/")
 	return strings.TrimSpace(owner)
+}
+
+func nddevUniqueActiveIntentOwner(intents []nddevQueueRetryIntent, scaleSet params.ScaleSet) (string, error) {
+	owners := map[string]struct{}{}
+	for _, intent := range intents {
+		if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name {
+			continue
+		}
+		if owner := strings.TrimSpace(intent.Owner); owner != "" {
+			owners[owner] = struct{}{}
+		}
+	}
+	if len(owners) != 1 {
+		return "", fmt.Errorf("pre-job provider retry identity requires one unique active queue owner, got %d", len(owners))
+	}
+	for owner := range owners {
+		return owner, nil
+	}
+	panic("unreachable unique owner state")
 }
 
 func nddevReleaseProviderRetryReservation(ctx context.Context, instanceName string) error {
