@@ -19,6 +19,9 @@ Versioning.
 
 ### Fixed
 
+- Grouped minor/patch Go dependency updates so one reviewed provider derivative
+  release covers each Dependabot wave instead of producing several mutually
+  overlapping, structurally incomplete PRs.
 - Added bounded retries for transient image-materialization downloads. HTTP
   408/429/5xx and transport/read failures receive at most three attempts with
   context-aware backoff; trust, size, digest and permanent HTTP failures remain
