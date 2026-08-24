@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.75
+derivative_version: v0.2.1-nddev.76
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -87,11 +87,11 @@ overlays:
     sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
     purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: 88307dddcc96696597e5f83a3d09788af140c710e27aef83a3707e3ea7d7b002
-    purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases, using explicit or reconstructed forge owner when present and otherwise accepting only one unique active queue owner for the exact scale-set identity.
+    sha256: f00999a6a993c6d70fd8c311f62881e08de0764ea35cef1992164959805be82c
+    purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases, isolating exact-job provider failures from legacy generic scale-set circuits while preserving generic capacity backpressure and unique active-owner resolution.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: 94f05d51a64749437420d73ce646bc80bd694e8586e913bb29a06d4e479cea23
-    purpose: Prove empty reconstructed entities derive a unique active owner, ambiguous multi-owner matches fail closed, organization/repository owner reconstruction, deferred release and stable retry budgets.
+    sha256: e69040a007ea6bc1e0e2cd652764d2b1bc628c033c6c66152439a07efe44f2a1
+    purpose: Prove unique-owner reconstruction, stable per-job budgets, and that a new exact job cannot inherit a terminal generic provider circuit left by earlier work on the same scale set.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -106,7 +106,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 4ee0ec0a5f0e976e6d03fd2deb64245df1c05f930de99e03f3ff7fe50197ff71
+  binary_sha256: 64b8f292958c68c984aca833e191daac20669736f1dc8d6d95109cd36ff06f03
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true

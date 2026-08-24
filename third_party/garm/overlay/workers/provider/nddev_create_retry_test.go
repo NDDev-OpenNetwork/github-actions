@@ -970,3 +970,55 @@ func TestNDDevScaleSetFailureStillDefersEveryParallelAttempt(t *testing.T) {
 		t.Fatalf("a successful parallel attempt did not clear the domain: %v", err)
 	}
 }
+
+func TestNDDevNewExactJobIgnoresLegacyTerminalScaleSetProviderRecord(t *testing.T) {
+	now := time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-integration"}
+	entity := params.ForgeEntity{ID: "entity-one", Owner: "example-org"}
+	domain := nddevScaleSetRetryKey(scaleSet, entity)
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{domain: {
+			JobID: domain, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute), TerminalUntil: now.Add(24 * time.Hour),
+			ScaleSetName: scaleSet.Name,
+		}},
+		Reservations: map[string]nddevRetryReservation{},
+	}
+	if err := nddevWriteRetryJournal(os.Getenv(nddevRetryFileEnv), journal); err != nil {
+		t.Fatal(err)
+	}
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"fresh":{"key":"fresh","job_id":"fresh-job","scale_set_id":17,"scale_set_name":"example-integration","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := NDDevScaleSetCreateAllowed(context.Background(), scaleSet, entity); err != nil {
+		t.Fatalf("legacy generic provider terminal blocked a new exact job: %v", err)
+	}
+	key, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-fresh"}, scaleSet, entity)
+	if err != nil || key != domain+":job:fresh-job" {
+		t.Fatalf("fresh reservation key=%q err=%v", key, err)
+	}
+	if err := nddevBeforeProviderCreate(context.Background(), key, scaleSet.Name); err != nil {
+		t.Fatalf("legacy generic provider terminal blocked exact preflight: %v", err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), key, errors.New("provider transport failed")); err != nil {
+		t.Fatal(err)
+	}
+	after, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Records[domain].Attempts != nddevRetryMaximum || after.Records[domain].TerminalUntil != journal.Records[domain].TerminalUntil {
+		t.Fatalf("exact job rewrote legacy generic domain: before=%#v after=%#v", journal.Records[domain], after.Records[domain])
+	}
+}

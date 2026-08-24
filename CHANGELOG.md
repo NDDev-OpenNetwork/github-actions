@@ -7,6 +7,11 @@ Versioning.
 
 ### Added
 
+- Added GARM derivative `v0.2.1-nddev.76`: exact admitted jobs no longer
+  inherit terminal provider circuits left by older work on the same scale set;
+  generic retry state remains authoritative for shared capacity and legacy
+  no-intent scale-up.
+
 - Added `actions/tool-cache`, a checksum-addressed immutable artifact cache for
   standalone CI tools. Private workers prefer their trust-scoped RustFS object;
   missing, unavailable, incomplete or corrupt cache state falls back to the
