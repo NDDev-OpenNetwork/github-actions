@@ -45,6 +45,10 @@ Versioning.
 
 ### Changed
 
+- Added GARM derivative `v0.2.1-nddev.73`: a shared-capacity or retry
+  preflight defer now releases its ephemeral pre-job reservation immediately.
+  Accepted jobs remain available to replacement instances instead of waiting
+  for a leaked two-minute lease after the deferred instance is discarded.
 - Added GARM derivative `v0.2.1-nddev.72`: pre-JobAvailable instances now
   reserve one durable queue-intent retry identity before provider create.
   Fresh ephemeral instance names continue the same job attempt counter across

@@ -158,6 +158,20 @@ func nddevReleaseProviderRetryReservation(ctx context.Context, instanceName stri
 	})
 }
 
+func nddevPrepareProviderCreate(ctx context.Context, instance params.Instance, scaleSet params.ScaleSet, entity params.ForgeEntity) (string, error) {
+	retryKey, err := nddevReserveProviderRetryKey(ctx, instance, scaleSet, entity)
+	if err != nil {
+		return "", err
+	}
+	if err := nddevBeforeProviderCreate(ctx, retryKey, scaleSet.Name); err != nil {
+		if releaseErr := nddevReleaseProviderRetryReservation(ctx, instance.Name); releaseErr != nil {
+			return "", fmt.Errorf("provider create preflight failed: %v; release reservation: %w", err, releaseErr)
+		}
+		return "", err
+	}
+	return retryKey, nil
+}
+
 func nddevScaleSetRetryKey(scaleSet params.ScaleSet, entity params.ForgeEntity) string {
 	if entity.ID == "" || scaleSet.ScaleSetID == 0 {
 		return ""
