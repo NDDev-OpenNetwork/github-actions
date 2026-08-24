@@ -2,22 +2,19 @@ diff --git a/workers/provider/instance_manager.go b/workers/provider/instance_ma
 index 6a1ccb3..817a4d5 100644
 --- a/workers/provider/instance_manager.go
 +++ b/workers/provider/instance_manager.go
-@@ -246,6 +246,14 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -246,6 +246,11 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		},
  	}
  
-+	retryKey, err := nddevReserveProviderRetryKey(i.ctx, instance, i.scaleSet, i.scaleSetEntity)
++	retryKey, err := nddevPrepareProviderCreate(i.ctx, instance, i.scaleSet, i.scaleSetEntity)
 +	if err != nil {
-+		return fmt.Errorf("provider create retry identity: %w", err)
-+	}
-+	if err := nddevBeforeProviderCreate(i.ctx, retryKey, i.scaleSet.Name); err != nil {
 +		return fmt.Errorf("provider create retry policy: %w", err)
 +	}
 +
  	providerStartedAt := time.Now()
  	slog.InfoContext(i.ctx, "direct JIT phase",
  		"phase", "provider-create-started",
-@@ -253,6 +261,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -253,6 +258,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		"provider", i.scaleSet.ProviderName)
  	providerInstance, err := i.provider.CreateInstance(i.ctx, bootstrapArgs, createInstanceParams)
  	if err != nil {
@@ -30,7 +27,7 @@ index 6a1ccb3..817a4d5 100644
  		slog.InfoContext(i.ctx, "direct JIT phase",
  			"phase", "provider-create-failed",
  			"runner_name", instance.Name,
-@@ -261,6 +275,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
+@@ -261,6 +272,12 @@ func (i *instanceManager) handleCreateInstanceInProvider(instance params.Instanc
  		instanceIDToDelete = instance.Name
  		return fmt.Errorf("creating instance in provider: %w", err)
  	}

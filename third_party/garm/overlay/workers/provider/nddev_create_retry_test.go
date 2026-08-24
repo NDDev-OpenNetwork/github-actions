@@ -199,6 +199,45 @@ func TestNDDevPreJobCapacityRetryBudgetSurvivesFreshInstanceNames(t *testing.T) 
 	}
 }
 
+func TestNDDevPreJobReservationIsReleasedWhenSharedPreflightDefers(t *testing.T) {
+	now := time.Date(2026, 8, 24, 9, 10, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"intent":{"key":"intent","job_id":"stable-job","scale_set_id":17,"scale_set_name":"example-standard","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocker := "scale-set:other-entity:18:instance:blocker"
+	if err := nddevBeforeProviderCreate(context.Background(), blocker, "other-standard"); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevRecordProviderCreateFailure(context.Background(), blocker, errors.New("insufficient-memory")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := nddevPrepareProviderCreate(
+		context.Background(), params.Instance{Name: "runner-deferred"},
+		params.ScaleSet{ScaleSetID: 17, Name: "example-standard"},
+		params.ForgeEntity{ID: "entity-one", Owner: "example-org"},
+	)
+	if err == nil {
+		t.Fatal("shared saturation did not defer pre-job provider create")
+	}
+	journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Reservations) != 0 {
+		t.Fatalf("deferred preflight leaked reservation: %#v", journal.Reservations)
+	}
+}
+
 func TestNDDevProviderRetryIsDurableBoundedAndClearedBySuccess(t *testing.T) {
 	now := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow

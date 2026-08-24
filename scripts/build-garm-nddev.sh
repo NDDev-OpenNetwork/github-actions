@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.72"
+readonly derivative_version="v0.2.1-nddev.73"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="188d981b31134e5a6daf888d6be85445ddc249b66055b75fba3deadd9b3122c8"
+readonly expected_binary_sha256="1d158183dcf4385a96ca783717030752435693fd6a27f19b9ba7165420713ad3"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -65,7 +65,7 @@ readonly patch_sha256s=(
   "0cd77616af4160eae7be51f91340841b30e13d4b20ea5873e004c1b81d7879e1"
   "d23873baf6689c7e4cc366b14979ad86367ef9e321cb6d5d2745c78e64a3c172"
   "49de677a1c483e58cc009ef8f23d301ef4647ea01aec4100a3e6c49376f7889f"
-  "d5d0b8b359034b186b63835179b7ae67d563e1f7ec91370b0b1190e2ac4db6f0"
+  "ce5b84a530077b0431669521e9de57d56b1722b968145c9b84ed62d15566aa31"
   "3c9631ee2c73eedee90fc2f26a7f87361021236b6a1bc7b7ffffa2f0d1c3c3a3"
   "b38bc35afa7a93d703e8e141495ac9e930462feb74e941ee983e98b02d1ee565"
   "6bd28c42a3da9de1b9839d500c2a68d8507bc6f638caf935ccb81fa0fbef5f29"
@@ -94,8 +94,8 @@ readonly overlay_paths=(
 readonly overlay_sha256s=(
   "0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7"
   "02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65"
-  "d1de111d00aaf928ded3096d159c4cb2c679cc593bd83b29de256ca638a2b3a0"
-  "01103fbdd913ce785bb33c183bc2f0e3699af4c80c6aa8680a149f838d6c9236"
+  "6450f7307a113a3628eec8e37c9da0d3ba5558d01c1312b9926cc32edd348870"
+  "e5916316c804c72690b5578bb7f90cd2515ed1e366145649fd054cc69d7199d1"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
