@@ -1,6 +1,9 @@
 package admission
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEvaluateAdmitsWithinReserves(t *testing.T) {
 	t.Parallel()
@@ -116,6 +119,9 @@ func TestEvaluateBlocksBurstBeforePSIFeedbackCatchesUp(t *testing.T) {
 	}
 	if decision.Admitted || decision.Reason != ReasonCPUAllowance || decision.RemainingCPUAllowanceUnits >= 0 {
 		t.Fatalf("soft allowance burst was not blocked: %#v", decision)
+	}
+	if !strings.Contains(string(decision.Reason), "insufficient-cpu") {
+		t.Fatalf("CPU allowance rejection is not classifiable as capacity: %q", decision.Reason)
 	}
 }
 

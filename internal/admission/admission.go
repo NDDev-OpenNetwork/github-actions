@@ -11,7 +11,7 @@ const (
 	ReasonPoolSaturated       Reason = "pool-saturated"
 	ReasonQueueIntent         Reason = "queue-intent"
 	ReasonInsufficientCPU     Reason = "insufficient-cpu"
-	ReasonCPUAllowance        Reason = "cpu-allowance-envelope"
+	ReasonCPUAllowance        Reason = "insufficient-cpu: cpu-allowance-envelope"
 	ReasonInsufficientMemory  Reason = "insufficient-memory"
 	ReasonPressureUnavailable Reason = "pressure-unavailable"
 	ReasonCPUPressure         Reason = "cpu-pressure"
