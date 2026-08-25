@@ -18,6 +18,7 @@ type Attempt struct {
 
 type Result struct {
 	AttemptID  string
+	Suppressed bool
 	Checkpoint string
 	Progressed []string
 	Remaining  []string
@@ -55,8 +56,12 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 		return Result{}, fmt.Errorf("begin recovery attempt: %w", err)
 	}
 	if !acquired {
-		return Result{AttemptID: attempt.ID}, nil
+		return Result{AttemptID: attempt.ID, Suppressed: true}, nil
 	}
+	return recoverAcquired(ctx, attempt, store, executor, now)
+}
+
+func recoverAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
 	result := Result{AttemptID: attempt.ID}
 	finish := func(operationErr error) (Result, error) {
 		result.FinishedAt = now().UTC()

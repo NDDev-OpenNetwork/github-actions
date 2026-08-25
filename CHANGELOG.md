@@ -17,6 +17,8 @@ Versioning.
   health, and require that heartbeat to be stale before recovery is admitted.
 - Added an exact-argv host command adapter with no shell evaluation, bounded
   timeouts, checkpoint identity validation and typed progress output.
+- Added an end-to-end controller that binds observation, durable heartbeat,
+  decision, checkpoint/restart/progress recovery and typed lifecycle events.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
