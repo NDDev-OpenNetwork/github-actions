@@ -142,6 +142,113 @@ func TestNDDevPreJobInstancesReserveDistinctDurableIntentKeys(t *testing.T) {
 	}
 }
 
+func TestNDDevPreJobReservationSkipsBlockedExactIntentsWithoutDeletingThem(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	retryPath := filepath.Join(directory, "retry.json")
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevRetryFileEnv, retryPath)
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+
+	domain := "scale-set:entity-one:17"
+	terminalKey := domain + ":job:job-terminal"
+	deferredKey := domain + ":job:job-deferred"
+	readyKey := domain + ":job:job-ready"
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{
+			terminalKey: {
+				JobID: terminalKey, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+				UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute),
+				TerminalUntil: now.Add(24 * time.Hour), ScaleSetName: "example-integration",
+			},
+			deferredKey: {
+				JobID: deferredKey, Attempts: 1, LastErrorClass: "provider",
+				UpdatedAt: now, NextAllowedAt: now.Add(time.Minute), ScaleSetName: "example-integration",
+			},
+		},
+		Reservations: map[string]nddevRetryReservation{},
+	}
+	if err := nddevWriteRetryJournal(retryPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"terminal":{"key":"terminal","job_id":"job-terminal","scale_set_id":17,"scale_set_name":"example-integration","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q},"deferred":{"key":"deferred","job_id":"job-deferred","scale_set_id":17,"scale_set_name":"example-integration","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q},"ready":{"key":"ready","job_id":"job-ready","scale_set_id":17,"scale_set_name":"example-integration","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-3*time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano),
+		now.Add(-2*time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano),
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := nddevReserveProviderRetryKey(
+		context.Background(), params.Instance{Name: "runner-ready"},
+		params.ScaleSet{ScaleSetID: 17, Name: "example-integration"},
+		params.ForgeEntity{ID: "entity-one", Owner: "example-org"},
+	)
+	if err != nil || selected != readyKey {
+		t.Fatalf("selected=%q err=%v, want ready exact job", selected, err)
+	}
+	after, err := nddevReadRetryJournal(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{terminalKey, deferredKey} {
+		if after.Records[key] != journal.Records[key] {
+			t.Fatalf("blocked retry record %q changed: before=%#v after=%#v", key, journal.Records[key], after.Records[key])
+		}
+	}
+}
+
+func TestNDDevPreJobReservationFailsWhenEveryExactIntentIsBlocked(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 5, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	retryPath := filepath.Join(directory, "retry.json")
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevRetryFileEnv, retryPath)
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	key := "scale-set:entity-one:17:job:job-terminal"
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{key: {
+			JobID: key, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute),
+			TerminalUntil: now.Add(time.Hour), ScaleSetName: "example-integration",
+		}},
+		Reservations: map[string]nddevRetryReservation{},
+	}
+	if err := nddevWriteRetryJournal(retryPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"terminal":{"key":"terminal","job_id":"job-terminal","scale_set_id":17,"scale_set_name":"example-integration","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := nddevReserveProviderRetryKey(
+		context.Background(), params.Instance{Name: "runner-blocked"},
+		params.ScaleSet{ScaleSetID: 17, Name: "example-integration"},
+		params.ForgeEntity{ID: "entity-one", Owner: "example-org"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "no eligible unclaimed") {
+		t.Fatalf("all-blocked reservation err=%v", err)
+	}
+	after, readErr := nddevReadRetryJournal(retryPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(after.Reservations) != 0 || after.Records[key] != journal.Records[key] {
+		t.Fatalf("all-blocked reservation mutated retry state: %#v", after)
+	}
+}
+
 func TestNDDevUniqueActiveIntentOwnerFailsClosedOnTenantAmbiguity(t *testing.T) {
 	scaleSet := params.ScaleSet{ScaleSetID: 17, Name: "example-standard"}
 	intents := []nddevQueueRetryIntent{
@@ -225,11 +332,8 @@ func TestNDDevPreJobCapacityRetryBudgetSurvivesFreshInstanceNames(t *testing.T) 
 		}
 	}
 	key, err := nddevReserveProviderRetryKey(context.Background(), params.Instance{Name: "runner-four"}, scaleSet, entity)
-	if err != nil || key != stableKey {
+	if err == nil || key != "" || !strings.Contains(err.Error(), "no eligible unclaimed") {
 		t.Fatalf("fourth reservation key=%q err=%v", key, err)
-	}
-	if err := nddevBeforeProviderCreate(context.Background(), key, scaleSet.Name); err == nil {
-		t.Fatal("fourth pre-job infrastructure attempt passed the stable job circuit")
 	}
 }
 

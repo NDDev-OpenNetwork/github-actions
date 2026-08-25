@@ -1,5 +1,10 @@
 # Changelog
 
+- Added GARM derivative `v0.2.1-nddev.80`: pre-job reservation skips exact
+  intents whose own retry is terminal or still deferred, preserving that state
+  while allowing the oldest eligible sibling job to proceed instead of
+  head-of-line blocking the entire scale set.
+
 - Added GARM derivative `v0.2.1-nddev.79`: terminal retry state for an exact
   job is pruned when a valid durable queue journal proves the job is no longer
   live, while active jobs and domain, instance, or nonterminal state remain

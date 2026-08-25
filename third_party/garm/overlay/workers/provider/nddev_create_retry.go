@@ -139,6 +139,10 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 			if intent.JobID == "" || claimed[retryKey] {
 				continue
 			}
+			if record, exists := journal.Records[retryKey]; exists &&
+				(record.TerminalUntil.After(now) || record.NextAllowedAt.After(now)) {
+				continue
+			}
 			candidates = append(candidates, intent)
 		}
 		sort.Slice(candidates, func(left, right int) bool {
@@ -148,7 +152,7 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 			return candidates[left].Key < candidates[right].Key
 		})
 		if len(candidates) == 0 {
-			return fmt.Errorf("no unclaimed admitted queue intent can own pre-job provider create")
+			return fmt.Errorf("no eligible unclaimed admitted queue intent can own pre-job provider create")
 		}
 		selected = domain + ":job:" + candidates[0].JobID
 		journal.Reservations[instanceName] = nddevRetryReservation{
