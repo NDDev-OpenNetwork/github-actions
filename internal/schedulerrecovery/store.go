@@ -99,19 +99,30 @@ func (store FileStore) locked(update func(*fileState) error) error {
 	if err != nil {
 		return fmt.Errorf("open state lock: %w", err)
 	}
-	defer lock.Close()
-	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
-		return fmt.Errorf("lock state: %w", err)
-	}
-	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
-	state, err := readFileState(store.Path)
-	if err != nil {
+	operationErr := func() error {
+		if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+			return fmt.Errorf("lock state: %w", err)
+		}
+		state, err := readFileState(store.Path)
+		if err == nil {
+			err = update(&state)
+		}
+		if err == nil {
+			err = writeFileState(store.Path, state)
+		}
+		if unlockErr := unix.Flock(int(lock.Fd()), unix.LOCK_UN); err == nil && unlockErr != nil {
+			err = fmt.Errorf("unlock state: %w", unlockErr)
+		}
 		return err
+	}()
+	closeErr := lock.Close()
+	if operationErr != nil {
+		return operationErr
 	}
-	if err := update(&state); err != nil {
-		return err
+	if closeErr != nil {
+		return fmt.Errorf("close state lock: %w", closeErr)
 	}
-	return writeFileState(store.Path, state)
+	return nil
 }
 
 func readFileState(path string) (fileState, error) {
