@@ -23,6 +23,8 @@ Versioning.
   scheduler snapshots, keeping private database/path details outside the product.
 - Added the `gha-scheduler-recovery` CLI with validated config and explicit
   `heartbeat`, read-only `check`, and mutating `apply` modes.
+- Added an atomic Prometheus textfile sink for lifecycle state, stuck count and
+  event freshness, deliberately excluding attempt and instance identities.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap

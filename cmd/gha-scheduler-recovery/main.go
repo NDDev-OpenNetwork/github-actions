@@ -14,9 +14,10 @@ import (
 )
 
 type config struct {
-	StateFile string `json:"state_file"`
-	LockFile  string `json:"lock_file"`
-	Policy    struct {
+	StateFile   string `json:"state_file"`
+	LockFile    string `json:"lock_file"`
+	MetricsFile string `json:"metrics_file"`
+	Policy      struct {
 		MinimumStuckAgeSeconds int `json:"minimum_stuck_age_seconds"`
 		MinimumUptimeSeconds   int `json:"minimum_uptime_seconds"`
 		CooldownSeconds        int `json:"cooldown_seconds"`
@@ -93,12 +94,16 @@ func run(arguments []string) int {
 		}
 		return 0
 	case "apply":
+		var events schedulerrecovery.EventSink = jsonEvents{encoder: json.NewEncoder(os.Stdout)}
+		if configuration.MetricsFile != "" {
+			events = schedulerrecovery.MultiSink{events, schedulerrecovery.MetricsFileSink{Path: configuration.MetricsFile}}
+		}
 		controller := schedulerrecovery.Controller{
 			Policy: policy(configuration), Observer: commandObserver(configuration), Heartbeat: store,
 			Attempts: store, Executor: schedulerrecovery.CommandExecutor{Config: schedulerrecovery.CommandConfig{
 				Checkpoint: configuration.Recovery.Checkpoint, Restart: configuration.Recovery.Restart,
 				Progress: configuration.Recovery.Progress, Timeout: time.Duration(configuration.Recovery.TimeoutSeconds) * time.Second,
-			}}, Events: jsonEvents{encoder: json.NewEncoder(os.Stdout)}, Now: time.Now,
+			}}, Events: events, Now: time.Now,
 		}
 		_, _, err := controller.Tick(ctx)
 		if err != nil {
@@ -124,6 +129,7 @@ func loadConfig(path string) (config, error) {
 		return config{}, fmt.Errorf("decode scheduler recovery config: %w", err)
 	}
 	if !filepath.IsAbs(configuration.StateFile) || !filepath.IsAbs(configuration.LockFile) ||
+		(configuration.MetricsFile != "" && !filepath.IsAbs(configuration.MetricsFile)) ||
 		configuration.Policy.MinimumStuckAgeSeconds <= 0 || configuration.Policy.MinimumUptimeSeconds <= 0 ||
 		configuration.Policy.CooldownSeconds <= 0 || configuration.Policy.HeartbeatStaleSeconds <= 0 ||
 		configuration.Observation.TimeoutSeconds <= 0 || configuration.Recovery.TimeoutSeconds <= 0 {
