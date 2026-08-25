@@ -1,5 +1,9 @@
 # Changelog
 
+- Added provider derivative `v0.1.5-nddev.76`: CPU allowance-envelope
+  rejections retain their distinct reason while classifying as shared capacity
+  for bounded retry instead of terminal provider failure.
+
 - Added provider derivative `v0.1.5-nddev.75`: burst admission now tracks
   declared soft CPU allowances independently from measured reservations,
   preventing simultaneous creates from outrunning delayed PSI feedback.
