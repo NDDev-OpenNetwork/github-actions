@@ -1,5 +1,10 @@
 # Changelog
 
+- Added GARM derivative `v0.2.1-nddev.79`: terminal retry state for an exact
+  job is pruned when a valid durable queue journal proves the job is no longer
+  live, while active jobs and domain, instance, or nonterminal state remain
+  fail-closed and untouched.
+
 - Added provider derivative `v0.1.5-nddev.76`: CPU allowance-envelope
   rejections retain their distinct reason while classifying as shared capacity
   for bounded retry instead of terminal provider failure.
