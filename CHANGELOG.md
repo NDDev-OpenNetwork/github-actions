@@ -19,6 +19,8 @@ Versioning.
   timeouts, checkpoint identity validation and typed progress output.
 - Added an end-to-end controller that binds observation, durable heartbeat,
   decision, checkpoint/restart/progress recovery and typed lifecycle events.
+- Added an exact-argv observation adapter with bounded timeout and strict typed
+  scheduler snapshots, keeping private database/path details outside the product.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap

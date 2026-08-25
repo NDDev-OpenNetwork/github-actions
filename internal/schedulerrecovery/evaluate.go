@@ -10,9 +10,9 @@ type Policy struct {
 }
 
 type PendingCreate struct {
-	ID            string
-	Age           time.Duration
-	CreateAttempt int
+	ID            string        `json:"id"`
+	Age           time.Duration `json:"age_nanoseconds"`
+	CreateAttempt int           `json:"create_attempt"`
 }
 
 type Observation struct {
