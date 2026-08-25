@@ -82,6 +82,7 @@ func TestObservedAllocationsRequireCompleteSecurityPolicy(t *testing.T) {
 			PoolID:           "pool-test",
 			PoolName:         "nddev-linux-standard",
 			VCPU:             4,
+			CPUAllowanceUnits: 4,
 			MemoryMiB:        10240,
 			ImageFingerprint: testImageDigest,
 			State:            providerjournal.StateCreated,

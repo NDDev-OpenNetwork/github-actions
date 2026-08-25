@@ -207,13 +207,14 @@ func (n *nddevAdmission) Admit(
 	}
 	return n.controller.AdmitPreemptible(ctx, host, observed, provideradmission.Request{
 		Allocation: provideradmission.Allocation{
-			InstanceName:     bootstrap.Name,
-			ControllerID:     n.controllerID,
-			PoolID:           bootstrap.PoolID,
-			PoolName:         bootstrap.Flavor,
-			VCPU:             pool.EffectiveReservation().CPUUnits,
-			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
-			ImageFingerprint: imagePolicy.Fingerprint,
+			InstanceName:      bootstrap.Name,
+			ControllerID:      n.controllerID,
+			PoolID:            bootstrap.PoolID,
+			PoolName:          bootstrap.Flavor,
+			VCPU:              pool.EffectiveReservation().CPUUnits,
+			CPUAllowanceUnits: pool.Resources.VCPU,
+			MemoryMiB:         pool.EffectiveReservation().MemoryMiB,
+			ImageFingerprint:  imagePolicy.Fingerprint,
 		},
 		QueueIntentAuthorized: true,
 	})
@@ -250,13 +251,14 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 	}
 	return n.controller.Admit(ctx, host, observed, provideradmission.Request{
 		Allocation: provideradmission.Allocation{
-			InstanceName:     instanceName,
-			ControllerID:     n.controllerID,
-			PoolID:           warmPoolIDPrefix + flavor,
-			PoolName:         flavor,
-			VCPU:             pool.EffectiveReservation().CPUUnits,
-			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
-			ImageFingerprint: imagePolicy.Fingerprint,
+			InstanceName:      instanceName,
+			ControllerID:      n.controllerID,
+			PoolID:            warmPoolIDPrefix + flavor,
+			PoolName:          flavor,
+			VCPU:              pool.EffectiveReservation().CPUUnits,
+			CPUAllowanceUnits: pool.Resources.VCPU,
+			MemoryMiB:         pool.EffectiveReservation().MemoryMiB,
+			ImageFingerprint:  imagePolicy.Fingerprint,
 		},
 	})
 }
@@ -301,7 +303,8 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 				allocations = append(allocations, provideradmission.Allocation{
 					InstanceName: instance.Name, ControllerID: n.controllerID,
 					PoolID: "image-maintenance/" + maintenancePool.Name, PoolName: maintenancePool.Name,
-					VCPU: maintenancePool.EffectiveReservation().CPUUnits, MemoryMiB: maintenancePool.EffectiveReservation().MemoryMiB,
+					VCPU: maintenancePool.EffectiveReservation().CPUUnits, CPUAllowanceUnits: maintenancePool.Resources.VCPU,
+					MemoryMiB:        maintenancePool.EffectiveReservation().MemoryMiB,
 					ImageFingerprint: imagePolicy.Fingerprint, State: providerjournal.StateCreated,
 				})
 				continue
@@ -329,7 +332,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			}
 			allocations = append(allocations, provideradmission.Allocation{
 				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
-				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU,
+				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
 				MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
 				State: lease.State, JobName: instance.Name,
 			})
@@ -427,15 +430,16 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			}
 		}
 		allocations = append(allocations, provideradmission.Allocation{
-			InstanceName:     instance.Name,
-			ControllerID:     instance.ExpandedConfig[controllerIDKeyName],
-			PoolID:           instance.ExpandedConfig[poolIDKey],
-			PoolName:         flavor,
-			VCPU:             pool.EffectiveReservation().CPUUnits,
-			MemoryMiB:        pool.EffectiveReservation().MemoryMiB,
-			ImageFingerprint: instance.ExpandedConfig[imageFingerprintKey],
-			State:            state,
-			JobName:          instance.ExpandedConfig[garmJobNameKey],
+			InstanceName:      instance.Name,
+			ControllerID:      instance.ExpandedConfig[controllerIDKeyName],
+			PoolID:            instance.ExpandedConfig[poolIDKey],
+			PoolName:          flavor,
+			VCPU:              pool.EffectiveReservation().CPUUnits,
+			CPUAllowanceUnits: pool.Resources.VCPU,
+			MemoryMiB:         pool.EffectiveReservation().MemoryMiB,
+			ImageFingerprint:  instance.ExpandedConfig[imageFingerprintKey],
+			State:             state,
+			JobName:           instance.ExpandedConfig[garmJobNameKey],
 		})
 	}
 	return allocations, nil

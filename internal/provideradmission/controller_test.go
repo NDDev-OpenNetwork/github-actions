@@ -339,6 +339,26 @@ func request(name string) Request {
 	}
 }
 
+func TestAdmissionPersistsDeclaredCPUAllowance(t *testing.T) {
+	now := time.Date(2026, time.August, 25, 7, 0, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	request := request("runner-allowance")
+	request.CPUAllowanceUnits = 6
+	host := healthyHost()
+	host.TotalCPUUnits = 16
+	decision, err := controller.Admit(context.Background(), host, nil, request)
+	if err != nil || !decision.Admitted {
+		t.Fatalf("admission=%#v err=%v", decision, err)
+	}
+	journal, err := controller.Store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := journal.Leases["runner-allowance"].CPUAllowanceUnits; got != 6 {
+		t.Fatalf("CPU allowance=%d, want 6", got)
+	}
+}
+
 func warmAllocation(name string) Allocation {
 	allocation := request(name).Allocation
 	allocation.PoolID = "warm/nddev-linux-standard"
