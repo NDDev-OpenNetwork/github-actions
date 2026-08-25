@@ -65,13 +65,13 @@ func TestExternalDownloadFallbackMarkersRemainBounded(t *testing.T) {
 	root := toolCacheRepositoryRoot(t)
 	checks := map[string][]string{
 		"actions/tool-cache/tool-cache.sh": {
-			"--retry 5", "verify_candidate", "nddev_tool_cache_event=",
+			"--retry 2", "verify_candidate", "nddev_tool_cache_event=",
 		},
 		"scripts/install-benchmark-toolchain.sh": {
-			"--retry 5", "toolchain SHA-256 mismatch", "rustc 1.97.1",
+			"--retry 2", "toolchain SHA-256 mismatch", "rustc 1.97.1",
 		},
 		"internal/garmproviderincus/provider/incus.go": {
-			"--retry 5", "validateRunnerTool",
+			"--retry 2", "validateRunnerTool",
 		},
 		"internal/imagebuild/artifacts.go": {
 			"attempt <= 3", "http.StatusTooManyRequests", "expectedSHA",

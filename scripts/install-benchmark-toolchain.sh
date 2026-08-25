@@ -23,7 +23,7 @@ download_verified() {
     exit 65
   }
   curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-    --retry 5 --retry-all-errors --connect-timeout 15 --max-time 300 \
+    --retry 2 --retry-all-errors --connect-timeout 15 --max-time 300 \
     --output "${output}" "${url}"
   chmod 0600 "${output}"
   actual_sha256="$(sha256sum "${output}" | awk '{print $1}')"

@@ -1,5 +1,9 @@
 # Changelog
 
+- Added provider derivative `v0.1.5-nddev.78`: runner metadata bootstrap uses
+  the same three-total-attempt download contract as every other reviewed
+  network artifact path.
+
 - Added provider derivative `v0.1.5-nddev.77`: undeclared pool reservations
   now use hard CPU and memory limits, removing implicit overcommit from queue
   accounting and per-member placement while retaining explicitly reviewed
@@ -76,6 +80,10 @@ Versioning.
 
 ### Fixed
 
+- Bound every reviewed `curl` download path to two retries after the initial
+  request, making the repository-wide download policy exactly three total
+  attempts while leaving service-readiness polling and provider state retries
+  under their separate typed deadlines.
 - Default undeclared queue reservations to each pool's hard CPU and memory
   limits instead of silently applying a global historical overcommit table;
   smaller measured envelopes now require an explicit reviewed pool field.
