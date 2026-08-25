@@ -130,6 +130,22 @@ rules:
     summary: Queue, provider journal and Incus inventory disagree.
     action: Preserve all three states and recover only from exact authoritative identity.
     recovery: Orphan, missing and uncovered-running metrics remain zero.
+  - id: lifecycle_queued_delivery_stall
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
+    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"})
+    operator: ">"
+    threshold: 300
+    evaluation_seconds: 60
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: An eligible queued job has not produced runner delivery progress within five minutes.
+    action: Preserve the job and correlate queue intent, provider retry, admission, worker creation and GitHub registration before recovery.
+    recovery: Queued age remains below five minutes or the exact job advances without operator cancellation.
   - id: memory_psi_slow_burn
     severity: ticket
     query_language: promql
