@@ -1,5 +1,9 @@
 # Changelog
 
+- Added provider derivative `v0.1.5-nddev.78`: runner metadata bootstrap uses
+  the same three-total-attempt download contract as every other reviewed
+  network artifact path.
+
 - Added provider derivative `v0.1.5-nddev.77`: undeclared pool reservations
   now use hard CPU and memory limits, removing implicit overcommit from queue
   accounting and per-member placement while retaining explicitly reviewed
