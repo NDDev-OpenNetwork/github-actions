@@ -1,5 +1,9 @@
 # Changelog
 
+- Added GARM derivative `v0.2.1-nddev.78`: GitHub registration-token errors
+  now use the shared typed error mapping, allowing wrapped repository `404`
+  responses to drive idempotent scale-set cleanup.
+
 - Added GARM derivative `v0.2.1-nddev.77`: scale-set deletion now treats an
   already-absent GitHub scale set as idempotent success while preserving real
   provider failures and completing local cleanup.

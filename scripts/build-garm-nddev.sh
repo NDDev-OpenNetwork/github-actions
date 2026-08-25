@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.77"
+readonly derivative_version="v0.2.1-nddev.78"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="f866f74780d65640a3c8c88cb7f7dad6c3e5e453890f33f1405174fadd10c86b"
+readonly expected_binary_sha256="21b9750638b98d4ef5b62a0eecf3ee684b6b8c40808f596f8d7d189eb4a1ead3"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -59,6 +59,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch"
   "third_party/garm/patches/0024-preserve-running-queue-intent.patch"
   "third_party/garm/patches/0025-fix-scaleset-delete-error-handling.patch"
+  "third_party/garm/patches/0026-normalize-registration-token-errors.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -86,6 +87,7 @@ readonly patch_sha256s=(
   "45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8"
   "7af194cfa81d35f9778830c8772d3bf49c465920c4cb7d04f204ea21a25ebe6c"
   "9d3e6a6acccc66424461986905e3343f559c156fd5835adce6b2617b3bee777e"
+  "e3c09371d7a67072e1185afc09db823b5ccdc3ce6e524e5e504bc101cd4e06f0"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"

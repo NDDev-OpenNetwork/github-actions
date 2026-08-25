@@ -1,0 +1,17 @@
+diff --git a/util/github/client.go b/util/github/client.go
+index 1c1a1a3..530ad0f 100644
+--- a/util/github/client.go
++++ b/util/github/client.go
+@@ -373,8 +373,11 @@ func (g *githubClient) CreateEntityRegistrationToken(ctx context.Context) (*gith
+ 	if err == nil && response != nil {
+ 		g.recordLimits(response.Rate)
+ 	}
++	if parsed := parseError(response, err); parsed != nil {
++		return nil, response, fmt.Errorf("error creating registration token: %w", parsed)
++	}
+ 
+-	return ret, response, err
++	return ret, response, nil
+ }
+ 
+ func (g *githubClient) getOrganizationRunnerGroupIDByName(ctx context.Context, entity params.ForgeEntity, rgName string) (int64, error) {

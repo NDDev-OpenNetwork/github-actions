@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.77
+derivative_version: v0.2.1-nddev.78
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -82,6 +82,9 @@ patches:
   - path: third_party/garm/patches/0025-fix-scaleset-delete-error-handling.patch
     sha256: 9d3e6a6acccc66424461986905e3343f559c156fd5835adce6b2617b3bee777e
     purpose: Treat an already-absent GitHub runner scale set as idempotent success so local cleanup completes, while returning real remote deletion failures without falsely deleting local state.
+  - path: third_party/garm/patches/0026-normalize-registration-token-errors.patch
+    sha256: e3c09371d7a67072e1185afc09db823b5ccdc3ce6e524e5e504bc101cd4e06f0
+    purpose: Normalize GitHub registration-token API failures through the shared typed error mapping so repository 404 responses remain detectable through wrapped scale-set operations.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
@@ -109,7 +112,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: f866f74780d65640a3c8c88cb7f7dad6c3e5e453890f33f1405174fadd10c86b
+  binary_sha256: 21b9750638b98d4ef5b62a0eecf3ee684b6b8c40808f596f8d7d189eb4a1ead3
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
