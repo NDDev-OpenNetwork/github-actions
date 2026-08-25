@@ -80,6 +80,10 @@ Versioning.
 
 ### Fixed
 
+- Decoupled the diagnostic exporter's five-minute whole-run budget from its
+  twenty-second per-request timeout so natural multi-bundle bursts can finish
+  within the existing ten-minute systemd deadline instead of repeatedly timing
+  out during the final source rescan.
 - Bound every reviewed `curl` download path to two retries after the initial
   request, making the repository-wide download policy exactly three total
   attempts while leaving service-readiness polling and provider state retries

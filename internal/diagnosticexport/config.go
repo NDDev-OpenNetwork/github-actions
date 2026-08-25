@@ -53,6 +53,7 @@ type Config struct {
 	AccessKeyFile         string   `yaml:"access_key_file" json:"access_key_file"`
 	SecretKeyFile         string   `yaml:"secret_key_file" json:"secret_key_file"`
 	RequestTimeoutSeconds int      `yaml:"request_timeout_seconds" json:"request_timeout_seconds"`
+	RunTimeoutSeconds     int      `yaml:"run_timeout_seconds" json:"run_timeout_seconds"`
 	SourceRetentionHours  int      `yaml:"source_retention_hours" json:"source_retention_hours"`
 	MaxBundleBytes        int64    `yaml:"max_bundle_bytes" json:"max_bundle_bytes"`
 	MaxDecompressedBytes  int64    `yaml:"max_decompressed_bytes" json:"max_decompressed_bytes"`
@@ -127,8 +128,8 @@ func ParseConfig(content []byte) (Config, error) {
 func (c Config) Validate() error {
 	var problems []string
 	add := func(field, message string) { problems = append(problems, field+": "+message) }
-	if c.SchemaVersion != 4 {
-		add("schema_version", "must be 4 for exact multi-tenant trust scopes")
+	if c.SchemaVersion != 5 {
+		add("schema_version", "must be 5 for an explicit whole-run budget")
 	}
 	if !StageAccepted(c.DeploymentStage) {
 		add("deployment_stage", "must remain "+strings.Join(AcceptedStages(), " or ")+" until RustFS production gates pass")
@@ -214,6 +215,9 @@ func (c Config) Validate() error {
 	}
 	if c.RequestTimeoutSeconds < 5 || c.RequestTimeoutSeconds > 60 {
 		add("request_timeout_seconds", "must be between 5 and 60")
+	}
+	if c.RunTimeoutSeconds < 60 || c.RunTimeoutSeconds > 540 || c.RunTimeoutSeconds < c.RequestTimeoutSeconds*3 {
+		add("run_timeout_seconds", "must be between 60 and 540 and at least three request timeouts")
 	}
 	if c.SourceRetentionHours != 168 {
 		add("source_retention_hours", "must match the seven-day local spool")

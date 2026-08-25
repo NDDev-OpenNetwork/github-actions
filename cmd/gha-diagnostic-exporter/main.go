@@ -54,10 +54,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	budget := time.Duration(config.RequestTimeoutSeconds*3) * time.Second
-	if budget > 55*time.Second {
-		budget = 55 * time.Second
-	}
+	budget := time.Duration(config.RunTimeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	exporter := diagnosticexport.Exporter{

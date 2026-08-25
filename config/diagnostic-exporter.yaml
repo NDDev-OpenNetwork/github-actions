@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 deployment_stage: canary
 source_directory: /run/gha-diagnostic-exporter-source
 source_owner: garm
@@ -37,6 +37,7 @@ ca_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-ca.pem
 access_key_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-access-key
 secret_key_file: /run/credentials/gha-diagnostic-exporter.service/rustfs-secret-key
 request_timeout_seconds: 20
+run_timeout_seconds: 300
 source_retention_hours: 168
 max_bundle_bytes: 16777216
 max_decompressed_bytes: 20971520
