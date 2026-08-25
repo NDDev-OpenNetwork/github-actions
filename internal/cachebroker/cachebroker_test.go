@@ -163,7 +163,8 @@ func TestHandlerReturnsExactScopedDeliveryOnce(t *testing.T) {
 		t.Fatalf("delivery=%+v", delivery)
 	}
 	logged := logs.String()
-	if !strings.Contains(logged, `"msg":"cache claim delivered"`) || !strings.Contains(logged, delivery.DeliveryID) ||
+	if !strings.Contains(logged, `"msg":"cache claim delivered"`) || !strings.Contains(logged, `"repository":"example-org/example-actions"`) ||
+		!strings.Contains(logged, delivery.DeliveryID) ||
 		strings.Contains(logged, delivery.AccessKey) || strings.Contains(logged, delivery.SecretKeyB64) {
 		t.Fatalf("delivery evidence is missing or secret-bearing: %s", logged)
 	}
