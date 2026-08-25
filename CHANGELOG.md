@@ -7,6 +7,26 @@ Versioning.
 
 ### Added
 
+- Added the portable scheduler-recovery decision core: exact stuck-dispatch
+  detection, startup grace, cooldown, and duplicate-recovery exclusion.
+- Added checkpoint-first recovery orchestration with durable attempt identity,
+  bounded progress verification, and concurrent duplicate restart suppression.
+- Added a cross-process, fsync-backed file store that suppresses replay after
+  process restart and retains bounded terminal recovery history.
+- Added a monotonic durable dispatcher heartbeat, independent from HTTP process
+  health, and require that heartbeat to be stale before recovery is admitted.
+- Made repeated identical progress heartbeats idempotent: only a changed
+  scheduler progress identity advances the durable heartbeat timestamp.
+- Added an exact-argv host command adapter with no shell evaluation, bounded
+  timeouts, checkpoint identity validation and typed progress output.
+- Added an end-to-end controller that binds observation, durable heartbeat,
+  decision, checkpoint/restart/progress recovery and typed lifecycle events.
+- Added an exact-argv observation adapter with bounded timeout and strict typed
+  scheduler snapshots, keeping private database/path details outside the product.
+- Added the `gha-scheduler-recovery` CLI with validated config and explicit
+  `heartbeat`, read-only `check`, and mutating `apply` modes.
+- Added an atomic Prometheus textfile sink for lifecycle state, stuck count and
+  event freshness, deliberately excluding attempt and instance identities.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
