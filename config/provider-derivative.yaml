@@ -16,7 +16,7 @@ artifact: garm-provider-incus
 # state all move together, because all three derive from here. A provider change
 # that does not bump it ships under the previous version, which is exactly how
 # runner-1 and runner-2 diverged.
-derivative_version: v0.1.5-nddev.76
+derivative_version: v0.1.5-nddev.77
 
 # The external-provider protocol GARM speaks to this binary. It moves on its own
 # schedule -- a provider release does not imply an interface release -- so it is
@@ -37,8 +37,8 @@ runtime:
   queue_intent_schema_version: 4
 
 build:
-  source_commit: 7886cc72f041934587eff945a63c7666fcd78faf
-  binary_sha256: 94612caff1cf461b741719a9fd27e193dbe255a7131b984abb22de63281fb6c6
+  source_commit: b9937e043eb0f9e4ce62b531cc0ee421ca382f21
+  binary_sha256: 965d39a69654180c3d91b9c92d2e8a6b41ca96a056416aed9656409aed209990
   go_version: go1.26.6
   cgo_enabled: false
   target_os: linux

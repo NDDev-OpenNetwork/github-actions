@@ -192,20 +192,15 @@ type Reservation struct {
 	MemoryMiB int `json:"memory_mib" yaml:"memory_mib"`
 }
 
-// EffectiveReservation returns the measured fleet admission envelope. The
-// current immutable classes use seven-day OpenObserve p95 memory rounded up to
-// 256 MiB; one CPU unit lets host PSI, rather than worst-case cgroup ceilings,
-// close admission under real contention. Unknown development fixtures retain
-// their hard limits until they have measured evidence.
+// EffectiveReservation returns an explicitly reviewed measured envelope or the
+// hard resource limit. Implicit overcommit is unsafe: a generic memory size
+// cannot encode the workload class, peak concurrency, or host reserve that made
+// one historical measurement valid.
 func (p Pool) EffectiveReservation() Reservation {
 	if p.Reservation.CPUUnits > 0 && p.Reservation.MemoryMiB > 0 {
 		return p.Reservation
 	}
-	memory := map[int]int{2048: 512, 3072: 512, 4096: 2560, 6144: 2048}[p.Resources.MemoryMiB]
-	if memory == 0 {
-		return Reservation{CPUUnits: p.Resources.VCPU, MemoryMiB: p.Resources.MemoryMiB}
-	}
-	return Reservation{CPUUnits: 1, MemoryMiB: memory}
+	return Reservation{CPUUnits: p.Resources.VCPU, MemoryMiB: p.Resources.MemoryMiB}
 }
 
 type WarmPool struct {

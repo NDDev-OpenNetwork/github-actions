@@ -1,5 +1,10 @@
 # Changelog
 
+- Added provider derivative `v0.1.5-nddev.77`: undeclared pool reservations
+  now use hard CPU and memory limits, removing implicit overcommit from queue
+  accounting and per-member placement while retaining explicitly reviewed
+  measured envelopes.
+
 - Added GARM derivative `v0.2.1-nddev.80`: pre-job reservation skips exact
   intents whose own retry is terminal or still deferred, preserving that state
   while allowing the oldest eligible sibling job to proceed instead of
@@ -71,6 +76,9 @@ Versioning.
 
 ### Fixed
 
+- Default undeclared queue reservations to each pool's hard CPU and memory
+  limits instead of silently applying a global historical overcommit table;
+  smaller measured envelopes now require an explicit reviewed pool field.
 - Convert second-based alert evaluation contracts to OpenObserve's supported
   minute cadence, recompute consecutive-evaluation thresholds from the rendered
   schedule, and keep the lookback period no shorter than that cadence so short
