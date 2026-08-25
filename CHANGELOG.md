@@ -7,6 +7,8 @@ Versioning.
 
 ### Added
 
+- Mirrored verified `nddev_tool_cache_event` records into the GitHub runner
+  diagnostic directory so teardown bundles retain job-level cache evidence.
 - Added bounded extraction of `nddev_tool_cache_event` records from verified
   runner diagnostic artifacts, with malformed job text counted but non-blocking.
 - Added the portable scheduler-recovery decision core: exact stuck-dispatch

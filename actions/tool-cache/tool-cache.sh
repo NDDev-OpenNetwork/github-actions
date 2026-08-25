@@ -132,5 +132,17 @@ test ! -L "$output"
 install -m 0600 "$candidate" "$output"
 duration_ms=$(( $(date +%s%3N) - started ))
 printf 'source=%s\nbytes=%s\nduration_ms=%s\n' "$source" "$bytes" "$duration_ms" >>"$GITHUB_OUTPUT"
-printf 'nddev_tool_cache_event={"source":"%s","cache_result":"%s","sha256":"%s","bytes":%s,"duration_ms":%s}\n' \
+printf -v event 'nddev_tool_cache_event={"source":"%s","cache_result":"%s","sha256":"%s","bytes":%s,"duration_ms":%s}' \
   "$source" "$cache_result" "$expected_sha256" "$bytes" "$duration_ms"
+printf '%s\n' "$event"
+
+runner_work=$(dirname -- "$RUNNER_TEMP")
+runner_root=$(dirname -- "$runner_work")
+diagnostic_directory=$runner_root/_diag
+diagnostic_file=$diagnostic_directory/nddev-tool-cache-events.log
+if [[ "$(basename -- "$RUNNER_TEMP")" == _temp && "$(basename -- "$runner_work")" == _work &&
+      -d "$diagnostic_directory" && ! -L "$diagnostic_directory" && -w "$diagnostic_directory" &&
+      ( ! -e "$diagnostic_file" || ( -f "$diagnostic_file" && ! -L "$diagnostic_file" &&
+        "$(stat --format='%s' -- "$diagnostic_file")" -le 1048576 ) ) ]]; then
+  printf '%s\n' "$event" >>"$diagnostic_file"
+fi
