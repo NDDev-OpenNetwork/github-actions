@@ -98,7 +98,7 @@ def committed_memory_bytes(member_name, pending_count):
             fail("fleet instance has non-MiB memory limit: " + instance.name)
         limit_mib = int(memory[:-3])
         if limit_mib not in RESERVATION_BY_LIMIT_MIB:
-            fail("fleet instance has no measured memory reservation: " + instance.name)
+            fail("fleet instance has no memory reservation: " + instance.name)
         committed += RESERVATION_BY_LIMIT_MIB[limit_mib] * 1024 * 1024
     pending_without_record = pending_count - len(instances)
     if pending_without_record < 0:

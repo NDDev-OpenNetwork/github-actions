@@ -71,6 +71,9 @@ Versioning.
 
 ### Fixed
 
+- Default undeclared queue reservations to each pool's hard CPU and memory
+  limits instead of silently applying a global historical overcommit table;
+  smaller measured envelopes now require an explicit reviewed pool field.
 - Convert second-based alert evaluation contracts to OpenObserve's supported
   minute cadence, recompute consecutive-evaluation thresholds from the rendered
   schedule, and keep the lookback period no shorter than that cadence so short
