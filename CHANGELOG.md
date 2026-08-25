@@ -1,5 +1,9 @@
 # Changelog
 
+- Added provider derivative `v0.1.5-nddev.75`: burst admission now tracks
+  declared soft CPU allowances independently from measured reservations,
+  preventing simultaneous creates from outrunning delayed PSI feedback.
+
 - Added GARM derivative `v0.2.1-nddev.78`: GitHub registration-token errors
   now use the shared typed error mapping, allowing wrapped repository `404`
   responses to drive idempotent scale-set cleanup.
