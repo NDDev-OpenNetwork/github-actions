@@ -26,13 +26,23 @@ type ObjectStore interface {
 }
 
 type Summary struct {
-	SourceBundles   int   `json:"source_bundles"`
-	ExportedBundles int   `json:"exported_bundles"`
-	PendingBundles  int   `json:"pending_bundles"`
-	SourceBytes     int64 `json:"source_bytes"`
-	ExportedBytes   int64 `json:"exported_bytes"`
-	ScannedBundles  int   `json:"scanned_bundles"`
-	DeletedBundles  int   `json:"deleted_bundles"`
+	SourceBundles               int                      `json:"source_bundles"`
+	ExportedBundles             int                      `json:"exported_bundles"`
+	PendingBundles              int                      `json:"pending_bundles"`
+	SourceBytes                 int64                    `json:"source_bytes"`
+	ExportedBytes               int64                    `json:"exported_bytes"`
+	ScannedBundles              int                      `json:"scanned_bundles"`
+	DeletedBundles              int                      `json:"deleted_bundles"`
+	ToolCacheEventCount         int                      `json:"tool_cache_event_count"`
+	RejectedToolCacheEventCount int                      `json:"rejected_tool_cache_event_count"`
+	ToolCacheEvents             []ObservedToolCacheEvent `json:"-"`
+}
+
+type ObservedToolCacheEvent struct {
+	Event      ToolCacheEvent
+	Repository string
+	Runner     string
+	CapturedAt time.Time
 }
 
 type Exporter struct {
@@ -123,6 +133,7 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 			}
 			delete(state.Exports, name)
 			summary.DeletedBundles++
+			summary.addToolCacheEvents(bundle)
 			continue
 		}
 		remote, err := e.Store.Head(ctx, e.Config.Bucket, bundle.ObjectKey)
@@ -184,6 +195,7 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 		summary.DeletedBundles++
 		summary.ExportedBundles++
 		summary.ExportedBytes += bundleBytes
+		summary.addToolCacheEvents(bundle)
 	}
 	_, remainingBundles, remainingBytes, scanErr := ListBundleBatch(ctx, e.Config, 1)
 	if scanErr != nil {
@@ -234,6 +246,17 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 		return summary, exportError
 	}
 	return summary, nil
+}
+
+func (summary *Summary) addToolCacheEvents(bundle Bundle) {
+	summary.RejectedToolCacheEventCount += bundle.RejectedToolCacheEvents
+	for _, event := range bundle.ToolCacheEvents {
+		summary.ToolCacheEvents = append(summary.ToolCacheEvents, ObservedToolCacheEvent{
+			Event: event, Repository: bundle.Manifest.Instance.Repository,
+			Runner: bundle.Manifest.Instance.Name, CapturedAt: bundle.CapturedAt,
+		})
+		summary.ToolCacheEventCount++
+	}
 }
 
 func (e Exporter) saveFailure(

@@ -31,14 +31,16 @@ const (
 )
 
 type Bundle struct {
-	Name       string
-	Content    []byte
-	SHA256     string
-	Manifest   workerdiagnostics.Manifest
-	CapturedAt time.Time
-	ObjectKey  string
-	device     uint64
-	inode      uint64
+	Name                    string
+	Content                 []byte
+	SHA256                  string
+	Manifest                workerdiagnostics.Manifest
+	CapturedAt              time.Time
+	ObjectKey               string
+	ToolCacheEvents         []ToolCacheEvent
+	RejectedToolCacheEvents int
+	device                  uint64
+	inode                   uint64
 }
 
 type bundleScope uint8
@@ -223,15 +225,18 @@ func ReadBundle(ctx context.Context, config Config, name string) (Bundle, error)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("derive diagnostic object key: %w", err)
 	}
+	events, rejectedEvents := ExtractToolCacheEvents(content)
 	return Bundle{
-		Name:       name,
-		Content:    content,
-		SHA256:     digestHex,
-		Manifest:   manifest,
-		CapturedAt: capturedAt,
-		ObjectKey:  objectKey,
-		device:     before.Dev,
-		inode:      before.Ino,
+		Name:                    name,
+		Content:                 content,
+		SHA256:                  digestHex,
+		Manifest:                manifest,
+		CapturedAt:              capturedAt,
+		ObjectKey:               objectKey,
+		ToolCacheEvents:         events,
+		RejectedToolCacheEvents: rejectedEvents,
+		device:                  before.Dev,
+		inode:                   before.Ino,
 	}, nil
 }
 

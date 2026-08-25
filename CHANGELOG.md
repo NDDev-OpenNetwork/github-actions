@@ -7,6 +7,8 @@ Versioning.
 
 ### Added
 
+- Added bounded extraction of `nddev_tool_cache_event` records from verified
+  runner diagnostic artifacts, with malformed job text counted but non-blocking.
 - Added the portable scheduler-recovery decision core: exact stuck-dispatch
   detection, startup grace, cooldown, and duplicate-recovery exclusion.
 - Added checkpoint-first recovery orchestration with durable attempt identity,

@@ -47,11 +47,13 @@ func TestCommandExecutorRejectsShellAndTimeouts(t *testing.T) {
 func writeExecutable(t *testing.T, directory, name, content string) string {
 	t.Helper()
 	path := filepath.Join(directory, name)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	temporary := path + ".tmp"
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
 	require.NoError(t, err)
 	_, err = file.WriteString(content)
 	require.NoError(t, err)
 	require.NoError(t, file.Sync())
 	require.NoError(t, file.Close())
+	require.NoError(t, os.Rename(temporary, path))
 	return path
 }

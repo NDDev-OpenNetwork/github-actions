@@ -73,11 +73,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 		logger.Error("diagnostic export incomplete", "error", err)
 		return err
 	}
+	for _, observed := range summary.ToolCacheEvents {
+		logger.Info(
+			"nddev tool cache event",
+			"event_type", "nddev_tool_cache_event",
+			"repository", observed.Repository,
+			"runner", observed.Runner,
+			"captured_at", observed.CapturedAt,
+			"source", observed.Event.Source,
+			"cache_result", observed.Event.CacheResult,
+			"sha256", observed.Event.SHA256,
+			"bytes", observed.Event.Bytes,
+			"duration_ms", observed.Event.DurationMS,
+		)
+	}
 	logger.Info(
 		"diagnostic export complete",
 		"source_bundles", summary.SourceBundles,
 		"exported_bundles", summary.ExportedBundles,
 		"pending_bundles", summary.PendingBundles,
+		"tool_cache_events", summary.ToolCacheEventCount,
+		"rejected_tool_cache_events", summary.RejectedToolCacheEventCount,
 	)
 	return nil
 }
