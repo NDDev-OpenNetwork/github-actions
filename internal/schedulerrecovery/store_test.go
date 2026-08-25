@@ -55,5 +55,13 @@ func TestFileStorePersistsMonotonicHeartbeat(t *testing.T) {
 	heartbeat, err := reopened.ReadHeartbeat(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, Heartbeat{At: at, Progress: "job-1"}, heartbeat)
+	require.NoError(t, reopened.RecordHeartbeat(context.Background(), Heartbeat{At: at.Add(time.Minute), Progress: "job-1"}))
+	heartbeat, err = reopened.ReadHeartbeat(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, at, heartbeat.At)
+	require.NoError(t, reopened.RecordHeartbeat(context.Background(), Heartbeat{At: at.Add(time.Minute), Progress: "job-2"}))
+	heartbeat, err = reopened.ReadHeartbeat(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, Heartbeat{At: at.Add(time.Minute), Progress: "job-2"}, heartbeat)
 	require.ErrorContains(t, reopened.RecordHeartbeat(context.Background(), Heartbeat{At: at.Add(-time.Second), Progress: "job-0"}), "moved backwards")
 }

@@ -15,6 +15,8 @@ Versioning.
   process restart and retains bounded terminal recovery history.
 - Added a monotonic durable dispatcher heartbeat, independent from HTTP process
   health, and require that heartbeat to be stale before recovery is admitted.
+- Made repeated identical progress heartbeats idempotent: only a changed
+  scheduler progress identity advances the durable heartbeat timestamp.
 - Added an exact-argv host command adapter with no shell evaluation, bounded
   timeouts, checkpoint identity validation and typed progress output.
 - Added an end-to-end controller that binds observation, durable heartbeat,

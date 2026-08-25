@@ -36,6 +36,9 @@ func (store FileStore) RecordHeartbeat(_ context.Context, heartbeat Heartbeat) e
 		return fmt.Errorf("heartbeat time and progress identity are required")
 	}
 	return store.locked(func(state *fileState) error {
+		if heartbeat.Progress == state.Heartbeat.Progress {
+			return nil
+		}
 		if !state.Heartbeat.At.IsZero() && heartbeat.At.Before(state.Heartbeat.At) {
 			return fmt.Errorf("heartbeat time moved backwards")
 		}
