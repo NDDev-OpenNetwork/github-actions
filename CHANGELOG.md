@@ -1,5 +1,9 @@
 # Changelog
 
+- Added GARM derivative `v0.2.1-nddev.81`: all embedded bootstrap downloads
+  now use the same three-total-attempt contract as provider `.78`, preventing
+  an incompatible wrapper rollout from blocking every new runner.
+
 - Added provider derivative `v0.1.5-nddev.78`: runner metadata bootstrap uses
   the same three-total-attempt download contract as every other reviewed
   network artifact path.

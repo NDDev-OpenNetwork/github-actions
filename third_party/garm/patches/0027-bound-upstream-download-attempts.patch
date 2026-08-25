@@ -1,0 +1,128 @@
+diff --git a/internal/templates/userdata/gitea_linux_userdata.tmpl b/internal/templates/userdata/gitea_linux_userdata.tmpl
+index b64dec99..57ee9cb9 100644
+--- a/internal/templates/userdata/gitea_linux_userdata.tmpl
++++ b/internal/templates/userdata/gitea_linux_userdata.tmpl
+@@ -21,7 +21,7 @@ fi
+ function call() {
+ 	PAYLOAD="$1"
+ 	[[ $CALLBACK_URL =~ ^(.*)/status(/)?$ ]] || CALLBACK_URL="${CALLBACK_URL}/status"
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${CALLBACK_URL}" || echo "failed to call home: exit code ($?)"
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${CALLBACK_URL}" || echo "failed to call home: exit code ($?)"
+ }
+ 
+ function systemInfo() {
+@@ -35,7 +35,7 @@ function systemInfo() {
+ 	[[ $CALLBACK_URL =~ ^(.*)/status(/)?$ ]] && CALLBACK_URL="${BASH_REMATCH[1]}" || true
+ 	SYSINFO_URL="${CALLBACK_URL}/system-info/"
+ 	PAYLOAD="{\"os_name\": \"$OS_NAME\", \"os_version\": \"$OS_VERSION\", \"agent_id\": $AGENT_ID}"
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${SYSINFO_URL}" || true
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${SYSINFO_URL}" || true
+ }
+ 
+ function sendStatus() {
+@@ -68,7 +68,7 @@ if [ "$AGENT_MODE" == "true" ]; then
+     AGENT_TOKEN="{{ .AgentToken }}"
+     AGENT_SHELL={{ .AgentShell }}
+     sendStatus "Downloading agent from $DOWNLOAD_URL"
+-    sudo curl --retry 5 \
++    sudo curl --retry 2 \
+         --retry-delay 5 \
+         --retry-connrefused \
+         --fail -L \
+@@ -119,7 +119,7 @@ fi
+ function downloadAndExtractRunner() {
+ 	sendStatus "downloading tools from {{ .DownloadURL }}"
+     mkdir -p "$RUN_HOME" || fail "failed to create actions-runner folder"
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -L -o "$RUN_HOME/gitea-runner" "{{ .DownloadURL }}" || fail "failed to download tools"
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -L -o "$RUN_HOME/gitea-runner" "{{ .DownloadURL }}" || fail "failed to download tools"
+ 	chown {{ .RunnerUsername }}:{{ .RunnerGroup }} -R "$RUN_HOME"/ || fail "failed to change owner"
+ 	chmod +x "$RUN_HOME/gitea-runner" || fail "failed to set executable flag"
+ }
+@@ -134,14 +134,14 @@ cd "$RUN_HOME"
+ 
+ sendStatus "configuring runner"
+ function getRunnerFile() {
+-	curl --retry 5 --retry-delay 5 \
++	curl --retry 2 --retry-delay 5 \
+ 		--retry-connrefused --fail -s \
+ 		-X GET -H 'Accept: application/json' \
+ 		-H "Authorization: Bearer ${BEARER_TOKEN}" \
+ 		"${METADATA_URL}/$1" -o "$2"
+ }
+ 
+-GITHUB_TOKEN=$(curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X GET -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${METADATA_URL}/runner-registration-token/")
++GITHUB_TOKEN=$(curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X GET -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${METADATA_URL}/runner-registration-token/")
+ 
+ set +e
+ attempt=1
+diff --git a/internal/templates/userdata/github_linux_userdata.tmpl b/internal/templates/userdata/github_linux_userdata.tmpl
+index 609623cf..fbf68938 100644
+--- a/internal/templates/userdata/github_linux_userdata.tmpl
++++ b/internal/templates/userdata/github_linux_userdata.tmpl
+@@ -30,7 +30,7 @@ fi
+ function call() {
+ 	PAYLOAD="$1"
+ 	[[ $CALLBACK_URL =~ ^(.*)/status(/)?$ ]] || CALLBACK_URL="${CALLBACK_URL}/status"
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${CALLBACK_URL}" || echo "failed to call home: exit code ($?)"
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${CALLBACK_URL}" || echo "failed to call home: exit code ($?)"
+ }
+ 
+ function systemInfo() {
+@@ -44,7 +44,7 @@ function systemInfo() {
+ 	[[ $CALLBACK_URL =~ ^(.*)/status(/)?$ ]] && CALLBACK_URL="${BASH_REMATCH[1]}" || true
+ 	SYSINFO_URL="${CALLBACK_URL}/system-info/"
+ 	PAYLOAD="{\"os_name\": \"$OS_NAME\", \"os_version\": \"$OS_VERSION\", \"agent_id\": $AGENT_ID}"
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${SYSINFO_URL}" || true
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X POST -d "${PAYLOAD}" -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${SYSINFO_URL}" || true
+ }
+ 
+ function sendStatus() {
+@@ -77,7 +77,7 @@ if [ "$AGENT_MODE" == "true" ]; then
+     AGENT_TOKEN="{{ .AgentToken }}"
+     AGENT_SHELL={{ .AgentShell }}
+     sendStatus "Downloading agent from $DOWNLOAD_URL"
+-    sudo curl --retry 5 \
++    sudo curl --retry 2 \
+         --retry-delay 5 \
+         --retry-connrefused \
+         --fail -L \
+@@ -130,7 +130,7 @@ function downloadAndExtractRunner() {
+ 	if [ ! -z "{{ .TempDownloadToken }}" ]; then
+ 	TEMP_TOKEN="Authorization: Bearer {{ .TempDownloadToken }}"
+ 	fi
+-	curl --retry 5 --retry-delay 5 --retry-connrefused --fail -L -H "${TEMP_TOKEN}" -o "/home/{{ .RunnerUsername }}/{{ .FileName }}" "{{ .DownloadURL }}" || fail "failed to download tools"
++	curl --retry 2 --retry-delay 5 --retry-connrefused --fail -L -H "${TEMP_TOKEN}" -o "/home/{{ .RunnerUsername }}/{{ .FileName }}" "{{ .DownloadURL }}" || fail "failed to download tools"
+ 	mkdir -p "$RUN_HOME" || fail "failed to create actions-runner folder"
+ 	sendStatus "extracting runner"
+ 	tar xf "/home/{{ .RunnerUsername }}/{{ .FileName }}" -C "$RUN_HOME"/ || fail "failed to extract runner"
+@@ -160,7 +160,7 @@ fi
+ sendStatus "configuring runner"
+ {{- if .UseJITConfig }}
+ function getRunnerFile() {
+-	curl --retry 5 --retry-delay 5 \
++	curl --retry 2 --retry-delay 5 \
+ 		--retry-connrefused --fail -s \
+ 		-X GET -H 'Accept: application/json' \
+ 		-H "Authorization: Bearer ${BEARER_TOKEN}" \
+@@ -192,7 +192,7 @@ if [ "$AGENT_MODE" != "true" ]; then
+ fi
+ {{- else}}
+ 
+-GITHUB_TOKEN=$(curl --retry 5 --retry-delay 5 --retry-connrefused --fail -s -X GET -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${METADATA_URL}/runner-registration-token/")
++GITHUB_TOKEN=$(curl --retry 2 --retry-delay 5 --retry-connrefused --fail -s -X GET -H 'Accept: application/json' -H "Authorization: Bearer ${BEARER_TOKEN}" "${METADATA_URL}/runner-registration-token/")
+ 
+ 
+ set +e
+diff --git a/internal/templates/userdata/linux_wrapper.tmpl b/internal/templates/userdata/linux_wrapper.tmpl
+index b672e8a5..4d44139a 100644
+--- a/internal/templates/userdata/linux_wrapper.tmpl
++++ b/internal/templates/userdata/linux_wrapper.tmpl
+@@ -6,7 +6,7 @@ set -o pipefail
+ METADATA_URL="{{ .MetadataURL }}"
+ BEARER_TOKEN="{{ .CallbackToken }}"
+ 
+-curl -H "Authorization: Bearer $BEARER_TOKEN" --retry 5 --retry-delay 5 --retry-connrefused --fail $METADATA_URL/install-script/ -o /tmp/real-install.sh
++curl -H "Authorization: Bearer $BEARER_TOKEN" --retry 2 --retry-delay 5 --retry-connrefused --fail $METADATA_URL/install-script/ -o /tmp/real-install.sh
+ chmod +x /tmp/real-install.sh
+ 
+ /tmp/real-install.sh

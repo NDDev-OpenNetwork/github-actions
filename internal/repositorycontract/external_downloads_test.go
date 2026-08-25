@@ -89,3 +89,25 @@ func TestExternalDownloadFallbackMarkersRemainBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestGARMAndProviderRunnerWrappersShareTheAttemptBudget(t *testing.T) {
+	t.Parallel()
+	root := toolCacheRepositoryRoot(t)
+	paths := []string{
+		"internal/garmproviderincus/provider/specs.go",
+		"third_party/garm/patches/0027-bound-upstream-download-attempts.patch",
+	}
+	for _, relative := range paths {
+		raw, err := os.ReadFile(filepath.Join(root, relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		if !strings.Contains(text, `--retry 2 --retry-delay 5 --retry-connrefused`) {
+			t.Errorf("%s does not pin the three-total-attempt runner wrapper", relative)
+		}
+		if relative == paths[0] && strings.Contains(text, `--retry 5 --retry-delay 5 --retry-connrefused`) {
+			t.Errorf("%s retains the incompatible six-total-attempt runner wrapper", relative)
+		}
+	}
+}
