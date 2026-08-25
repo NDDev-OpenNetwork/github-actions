@@ -147,7 +147,8 @@ func TestHandlerReturnsExactScopedDeliveryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestBody, _ := json.Marshal(ClaimRequest{InstanceName: "runner-example", RunnerName: "runner-example", Repository: "example-org/example-actions", Token: base64.RawURLEncoding.EncodeToString(token)})
-	handler := Handler{Config: config, Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	var logs bytes.Buffer
+	handler := Handler{Config: config, Store: store, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
 	request := httptest.NewRequest(http.MethodPost, "https://gateway.example"+ClaimPath, bytes.NewReader(requestBody))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -160,6 +161,11 @@ func TestHandlerReturnsExactScopedDeliveryOnce(t *testing.T) {
 	}
 	if delivery.Role != "trusted-writer" || delivery.PrefixRoot != "example-org/example-actions/trust/trusted" || delivery.AccessKey != "AKIA0123456789ABCDEF" {
 		t.Fatalf("delivery=%+v", delivery)
+	}
+	logged := logs.String()
+	if !strings.Contains(logged, `"msg":"cache claim delivered"`) || !strings.Contains(logged, delivery.DeliveryID) ||
+		strings.Contains(logged, delivery.AccessKey) || strings.Contains(logged, delivery.SecretKeyB64) {
+		t.Fatalf("delivery evidence is missing or secret-bearing: %s", logged)
 	}
 	request = httptest.NewRequest(http.MethodPost, "https://gateway.example"+ClaimPath, bytes.NewReader(requestBody))
 	response = httptest.NewRecorder()
