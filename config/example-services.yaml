@@ -24,7 +24,7 @@ platform:
 
 control_plane:
   manager: garm
-  manager_version: v0.2.1-nddev.76
+  manager_version: v0.2.1-nddev.77
   scheduling_mode: scale-set
   provider: incus
   provider_version: v0.1.5-nddev.74
