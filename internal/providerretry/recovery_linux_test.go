@@ -5,6 +5,7 @@ package providerretry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,84 @@ func TestRecoverTerminalRejectsWrongTenantOrConcreteRetryKey(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := RecoverTerminal(context.Background(), journalPath, lockPath, test.key, test.entityID, test.scaleSetID, "identity", updatedAt, false); err == nil {
 				t.Fatal("mismatched recovery identity was accepted")
+			}
+		})
+	}
+}
+
+func TestRecoverExactJobTerminalRequiresLiveQueueProofAndCAS(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	lockPath := filepath.Join(directory, "create-retries.lock")
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	updatedAt := time.Now().UTC().Add(-time.Hour)
+	key := "scale-set:entity-one:3:job:job-one"
+	state := journal{SchemaVersion: 2, Generation: 19, UpdatedAt: updatedAt, Records: map[string]record{key: {
+		JobID: key, Attempts: 3, LastErrorClass: "provider", UpdatedAt: updatedAt,
+		NextAllowedAt: updatedAt, TerminalUntil: updatedAt.Add(24 * time.Hour),
+	}}, Reservations: map[string]reservation{"runner-existing": {RetryKey: "scale-set:other:2:job:other", UpdatedAt: updatedAt}}}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"github-scale-set-job:v2:3:job-one":{"job_id":"job-one","state":"assigned","expires_at":%q}}}`,
+		time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dry, err := RecoverExactJobTerminal(context.Background(), journalPath, lockPath, queuePath, key, "entity-one", 3, "provider", updatedAt, false)
+	if err != nil || dry.Applied || dry.Generation != 19 {
+		t.Fatalf("dry exact recovery=%#v err=%v", dry, err)
+	}
+	applied, err := RecoverExactJobTerminal(context.Background(), journalPath, lockPath, queuePath, key, "entity-one", 3, "provider", updatedAt, true)
+	if err != nil || !applied.Applied || applied.Generation != 20 {
+		t.Fatalf("applied exact recovery=%#v err=%v", applied, err)
+	}
+	observed, err := readJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := observed.Records[key]; exists || observed.Generation != 20 {
+		t.Fatalf("exact recovery journal=%#v", observed)
+	}
+}
+
+func TestRecoverExactJobTerminalRejectsMissingOrInvalidQueueProof(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		queue string
+	}{
+		{name: "job absent", queue: `{"schema_version":4,"intents":{}}`},
+		{name: "job running", queue: `{"schema_version":4,"intents":{"job":{"job_id":"job-one","state":"running","expires_at":"2099-01-01T00:00:00Z"}}}`},
+		{name: "wrong schema", queue: `{"schema_version":3,"intents":{"job":{"job_id":"job-one","state":"assigned","expires_at":"2099-01-01T00:00:00Z"}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			journalPath := filepath.Join(directory, "create-retries.json")
+			lockPath := filepath.Join(directory, "create-retries.lock")
+			queuePath := filepath.Join(directory, "queue-intents.json")
+			updatedAt := time.Now().UTC().Add(-time.Hour)
+			key := "scale-set:entity-one:3:job:job-one"
+			state := journal{SchemaVersion: 2, Generation: 21, UpdatedAt: updatedAt, Records: map[string]record{key: {
+				JobID: key, Attempts: 3, LastErrorClass: "provider", UpdatedAt: updatedAt,
+				NextAllowedAt: updatedAt, TerminalUntil: updatedAt.Add(24 * time.Hour),
+			}}, Reservations: map[string]reservation{"runner-existing": {RetryKey: "scale-set:other:2:job:other", UpdatedAt: updatedAt}}}
+			content, _ := json.Marshal(state)
+			if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(queuePath, []byte(test.queue), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.ReadFile(journalPath)
+			if _, err := RecoverExactJobTerminal(context.Background(), journalPath, lockPath, queuePath, key, "entity-one", 3, "provider", updatedAt, true); err == nil {
+				t.Fatal("invalid queue proof recovered exact job retry")
+			}
+			after, _ := os.ReadFile(journalPath)
+			if string(after) != string(before) {
+				t.Fatal("failed exact recovery mutated retry journal")
 			}
 		})
 	}
