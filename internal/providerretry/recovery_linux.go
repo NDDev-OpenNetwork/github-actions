@@ -19,6 +19,8 @@ import (
 
 const minimumTerminalRecoveryAge = time.Minute
 
+const maximumQueueJournalBytes = 1024 * 1024
+
 type record struct {
 	JobID          string    `json:"job_id"`
 	Attempts       int       `json:"attempts"`
@@ -164,6 +166,30 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID s
 		(errorClass != "provider" && errorClass != "intent" && errorClass != "identity" && errorClass != "timeout") || expectedUpdatedAt.IsZero() {
 		return RecoveryResult{}, errors.New("exact scale-set retry key, entity_id, scale_set_id, recoverable error class and updated_at are required")
 	}
+	return recoverTerminalRecord(ctx, journalPath, lockPath, key, entityID, scaleSetID, errorClass, expectedUpdatedAt, 8, nil, apply)
+}
+
+func RecoverExactJobTerminal(ctx context.Context, journalPath, lockPath, queuePath, key, entityID string, scaleSetID uint, errorClass string, expectedUpdatedAt time.Time, apply bool) (RecoveryResult, error) {
+	jobID, parsedEntityID, parsedScaleSetID, err := parseExactJobKey(key)
+	if err != nil || parsedEntityID != entityID || parsedScaleSetID != scaleSetID ||
+		(errorClass != "provider" && errorClass != "identity" && errorClass != "timeout") || expectedUpdatedAt.IsZero() {
+		return RecoveryResult{}, errors.New("exact job retry key, entity_id, scale_set_id, recoverable error class and updated_at are required")
+	}
+	if !filepath.IsAbs(queuePath) || filepath.Dir(queuePath) != filepath.Dir(journalPath) {
+		return RecoveryResult{}, errors.New("queue journal must be an absolute retry-journal sibling")
+	}
+	return recoverTerminalRecord(ctx, journalPath, lockPath, key, entityID, scaleSetID, errorClass, expectedUpdatedAt, 3, func(now time.Time) error {
+		return requireActiveQueueJob(queuePath, jobID, now)
+	}, apply)
+}
+
+func recoverTerminalRecord(ctx context.Context, journalPath, lockPath, key, entityID string, scaleSetID uint, errorClass string, expectedUpdatedAt time.Time, attempts int, prove func(time.Time) error, apply bool) (RecoveryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RecoveryResult{}, err
+	}
+	if !filepath.IsAbs(journalPath) || !filepath.IsAbs(lockPath) || filepath.Dir(journalPath) != filepath.Dir(lockPath) || journalPath == lockPath {
+		return RecoveryResult{}, errors.New("retry journal and lock must be distinct absolute siblings")
+	}
 	parent := filepath.Dir(journalPath)
 	resolved, err := filepath.EvalSymlinks(parent)
 	if err != nil || filepath.Clean(resolved) != filepath.Clean(parent) {
@@ -191,7 +217,7 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID s
 		return RecoveryResult{}, err
 	}
 	retry, exists := state.Records[key]
-	if !exists || retry.JobID != key || retry.Attempts != 8 || retry.LastErrorClass != errorClass || retry.TerminalUntil.IsZero() {
+	if !exists || retry.JobID != key || retry.Attempts != attempts || retry.LastErrorClass != errorClass || retry.TerminalUntil.IsZero() {
 		return RecoveryResult{}, errors.New("retry record is not the exact terminal circuit")
 	}
 	if !retry.UpdatedAt.Equal(expectedUpdatedAt.UTC()) {
@@ -200,6 +226,11 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID s
 	now := time.Now().UTC()
 	if now.Sub(retry.UpdatedAt) < minimumTerminalRecoveryAge {
 		return RecoveryResult{}, errors.New("retry circuit is inside the recovery grace period")
+	}
+	if prove != nil {
+		if err := prove(now); err != nil {
+			return RecoveryResult{}, err
+		}
 	}
 	result := RecoveryResult{Key: key, EntityID: entityID, ScaleSetID: scaleSetID, ErrorClass: errorClass, ExpectedUpdatedAt: retry.UpdatedAt, PreviousGeneration: state.Generation, Generation: state.Generation, RecoveredAt: now}
 	if !apply {
@@ -249,6 +280,47 @@ func RecoverTerminal(ctx context.Context, journalPath, lockPath, key, entityID s
 	result.Applied = true
 	result.Generation = state.Generation
 	return result, nil
+}
+
+func parseExactJobKey(key string) (jobID, entityID string, scaleSetID uint, err error) {
+	domain, jobID, found := strings.Cut(key, ":job:")
+	if !found || jobID == "" || strings.Contains(jobID, ":") {
+		return "", "", 0, errors.New("retry key is not an exact job key")
+	}
+	entityID, scaleSetID, err = parseScaleSetDomainKey(domain)
+	return jobID, entityID, scaleSetID, err
+}
+
+func requireActiveQueueJob(path, jobID string, now time.Time) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() < 1 || info.Size() > maximumQueueJournalBytes {
+		return errors.New("queue journal must be a bounded private regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read queue journal: %w", err)
+	}
+	var queue struct {
+		SchemaVersion int `json:"schema_version"`
+		Intents       map[string]struct {
+			JobID     string    `json:"job_id"`
+			State     string    `json:"state"`
+			ExpiresAt time.Time `json:"expires_at"`
+		} `json:"intents"`
+	}
+	if err := json.Unmarshal(data, &queue); err != nil || queue.SchemaVersion != 4 || queue.Intents == nil {
+		return errors.New("queue journal identity is invalid")
+	}
+	for _, intent := range queue.Intents {
+		if intent.JobID != jobID || !intent.ExpiresAt.After(now) {
+			continue
+		}
+		switch intent.State {
+		case "queued", "acquiring", "acquired", "assigned":
+			return nil
+		}
+	}
+	return errors.New("exact retry job is not active in the queue journal")
 }
 
 // parseScaleSetDomainKey accepts only the terminal failure domain written by

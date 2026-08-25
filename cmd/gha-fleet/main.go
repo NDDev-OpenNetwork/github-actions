@@ -137,6 +137,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRecoverQueueIntent(args[1:], stdout, stderr, true)
 	case "recover-provider-retry":
 		return runRecoverProviderRetry(args[1:], stdout, stderr)
+	case "recover-provider-job-retry":
+		return runRecoverProviderJobRetry(args[1:], stdout, stderr)
 	case "version":
 		if err := writeJSON(stdout, map[string]string{"version": version, "commit": commit}); err != nil {
 			fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
@@ -496,6 +498,56 @@ func runRecoverProviderRetry(args []string, stdout, stderr io.Writer) int {
 	result, err := providerretry.RecoverTerminal(ctx, *journalPath, *lockPath, *key, *entityID, *scaleSetID, *errorClass, updatedAt, *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: recover provider retry: %v\n", err)
+		return 1
+	}
+	if err := writeJSON(stdout, result); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRecoverProviderJobRetry(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("recover-provider-job-retry", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	journalPath := flags.String("journal", "/var/lib/gha-fleet/create-retries.json", "exact GARM provider retry journal")
+	lockPath := flags.String("lock", "/var/lib/gha-fleet/create-retries.lock", "exact GARM provider retry lock")
+	queuePath := flags.String("queue", "/var/lib/gha-fleet/queue-intents.json", "exact durable queue journal")
+	key := flags.String("key", "", "exact terminal job retry key")
+	entityID := flags.String("entity-id", "", "exact forge entity UUID encoded in the retry key")
+	scaleSetID := flags.Uint("scale-set-id", 0, "exact GARM scale-set database ID encoded in the retry key")
+	errorClass := flags.String("error-class", "", "exact recoverable error class")
+	updatedAtText := flags.String("updated-at", "", "exact RFC3339Nano updated_at precondition")
+	apply := flags.Bool("apply", false, "remove the exact proven terminal job circuit")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *key == "" || *entityID == "" || *scaleSetID == 0 || *errorClass == "" || *updatedAtText == "" {
+		fmt.Fprintln(stderr, "gha-fleet: recover-provider-job-retry requires --key, --entity-id, --scale-set-id, --error-class and --updated-at")
+		return 2
+	}
+	if os.Geteuid() == 0 {
+		fmt.Fprintln(stderr, "gha-fleet: recover-provider-job-retry must run as the garm service account")
+		return 1
+	}
+	active, err := garmServiceActive()
+	if err != nil || active {
+		if err == nil {
+			err = errors.New("garm.service must be stopped")
+		}
+		fmt.Fprintf(stderr, "gha-fleet: recover provider job retry: %v\n", err)
+		return 1
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, *updatedAtText)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover provider job retry: invalid updated_at: %v\n", err)
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := providerretry.RecoverExactJobTerminal(ctx, *journalPath, *lockPath, *queuePath, *key, *entityID, *scaleSetID, *errorClass, updatedAt, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: recover provider job retry: %v\n", err)
 		return 1
 	}
 	if err := writeJSON(stdout, result); err != nil {
@@ -1826,5 +1878,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
 }
