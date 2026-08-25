@@ -75,6 +75,11 @@ type nddevQueueRetryIntent struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
+type nddevActiveQueueInventory struct {
+	ScaleSets map[string]bool
+	JobIDs    map[string]bool
+}
+
 func nddevProviderRetryKey(instance params.Instance, scaleSet params.ScaleSet, entity params.ForgeEntity) string {
 	domain := nddevScaleSetRetryKey(scaleSet, entity)
 	if domain == "" {
@@ -603,17 +608,11 @@ func nddevOldestEligibleCapacityDomain(journal *nddevRetryJournal, activeScaleSe
 }
 
 func nddevActiveQueueScaleSets() (map[string]bool, bool, error) {
-	intents, configured, err := nddevReadQueueRetryIntents(nddevRetryNow().UTC())
+	inventory, configured, err := nddevReadActiveQueueInventory(nddevRetryNow().UTC())
 	if err != nil || !configured {
 		return nil, configured, err
 	}
-	active := map[string]bool{}
-	for _, intent := range intents {
-		if name := strings.TrimSpace(intent.ScaleSetName); name != "" {
-			active[name] = true
-		}
-	}
-	return active, true, nil
+	return inventory.ScaleSets, true, nil
 }
 
 func nddevActiveQueueIntents(now time.Time) ([]nddevQueueRetryIntent, error) {
@@ -628,6 +627,61 @@ func nddevActiveQueueIntents(now time.Time) ([]nddevQueueRetryIntent, error) {
 }
 
 func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, error) {
+	queue, configured, err := nddevReadQueueRetryIntentMap()
+	if err != nil || !configured {
+		return nil, configured, err
+	}
+	active := make([]nddevQueueRetryIntent, 0, len(queue))
+	for key, intent := range queue {
+		switch intent.State {
+		case "acquiring", "acquired", "assigned":
+			if intent.Key == "" {
+				intent.Key = key
+			}
+			if intent.ExpiresAt.After(now) {
+				active = append(active, intent)
+			}
+		}
+	}
+	return active, true, nil
+}
+
+func nddevReadActiveQueueInventory(now time.Time) (nddevActiveQueueInventory, bool, error) {
+	queue, configured, err := nddevReadQueueRetryIntentMap()
+	if err != nil || !configured {
+		return nddevActiveQueueInventory{}, configured, err
+	}
+	inventory := nddevActiveQueueInventory{
+		ScaleSets: map[string]bool{},
+		JobIDs:    map[string]bool{},
+	}
+	for key, intent := range queue {
+		switch intent.State {
+		case "queued", "acquiring", "acquired", "assigned":
+			if !intent.ExpiresAt.After(now) {
+				continue
+			}
+			if name := strings.TrimSpace(intent.ScaleSetName); name != "" {
+				inventory.ScaleSets[name] = true
+			}
+			jobID := strings.TrimSpace(intent.JobID)
+			if jobID == "" {
+				const prefix = "github-scale-set-job:v2:"
+				if strings.HasPrefix(key, prefix) {
+					if separator := strings.LastIndexByte(key, ':'); separator >= len(prefix) && separator < len(key)-1 {
+						jobID = strings.TrimSpace(key[separator+1:])
+					}
+				}
+			}
+			if jobID != "" {
+				inventory.JobIDs[jobID] = true
+			}
+		}
+	}
+	return inventory, true, nil
+}
+
+func nddevReadQueueRetryIntentMap() (map[string]nddevQueueRetryIntent, bool, error) {
 	path := strings.TrimSpace(os.Getenv(nddevQueueIntentFileEnv))
 	if path == "" {
 		return nil, false, nil
@@ -654,19 +708,7 @@ func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, e
 	if err := json.Unmarshal(data, &queue); err != nil {
 		return nil, true, fmt.Errorf("decode queue intent journal: %w", err)
 	}
-	active := make([]nddevQueueRetryIntent, 0, len(queue.Intents))
-	for key, intent := range queue.Intents {
-		switch intent.State {
-		case "acquiring", "acquired", "assigned":
-			if intent.Key == "" {
-				intent.Key = key
-			}
-			if intent.ExpiresAt.After(now) {
-				active = append(active, intent)
-			}
-		}
-	}
-	return active, true, nil
+	return queue.Intents, true, nil
 }
 
 func nddevRetryDelay(key string, attempt int) time.Duration {
@@ -755,11 +797,17 @@ func nddevUpdateRetryJournal(ctx context.Context, mutate func(*nddevRetryJournal
 	}
 	before, _ := json.Marshal(journal)
 	now := nddevRetryNow().UTC()
+	activeQueue, queueConfigured, err := nddevReadActiveQueueInventory(now)
+	if err != nil {
+		return err
+	}
 	for key, record := range journal.Records {
 		terminalExpired := !record.TerminalUntil.IsZero() && !record.TerminalUntil.After(now)
 		staleNonTerminal := record.TerminalUntil.IsZero() && !record.NextAllowedAt.After(now) &&
 			!record.UpdatedAt.Add(nddevRetryStaleTTL).After(now)
-		if terminalExpired || staleNonTerminal {
+		staleTerminalJob := queueConfigured && !record.TerminalUntil.IsZero() &&
+			nddevTerminalRetryJobIsInactive(key, activeQueue.JobIDs)
+		if terminalExpired || staleNonTerminal || staleTerminalJob {
 			delete(journal.Records, key)
 		}
 	}
@@ -781,6 +829,15 @@ func nddevUpdateRetryJournal(ctx context.Context, mutate func(*nddevRetryJournal
 	journal.Generation++
 	journal.UpdatedAt = now
 	return nddevWriteRetryJournal(path, journal)
+}
+
+func nddevTerminalRetryJobIsInactive(key string, activeJobIDs map[string]bool) bool {
+	const marker = ":job:"
+	separator := strings.LastIndex(key, marker)
+	if separator < 0 || separator+len(marker) >= len(key) {
+		return false
+	}
+	return !activeJobIDs[key[separator+len(marker):]]
 }
 
 func (j nddevRetryJournal) Validate() error {

@@ -887,6 +887,123 @@ func TestNDDevProviderRetryJournalPrunesExpiredNonTerminalRecords(t *testing.T) 
 	}
 }
 
+func TestNDDevProviderRetryJournalPrunesOnlyInactiveTerminalExactJobs(t *testing.T) {
+	now := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	retryPath := filepath.Join(directory, "retry.json")
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevRetryFileEnv, retryPath)
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+
+	domain := "scale-set:entity-one:17"
+	activeJob := domain + ":job:00000000-0000-4000-8000-000000000001"
+	queuedJob := domain + ":job:00000000-0000-4000-8000-000000000002"
+	staleJob := domain + ":job:00000000-0000-4000-8000-000000000003"
+	instance := domain + ":instance:runner-one"
+	nonTerminalJob := domain + ":job:00000000-0000-4000-8000-000000000004"
+	terminal := func(key string) nddevRetryRecord {
+		return nddevRetryRecord{
+			JobID: key, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute),
+			TerminalUntil: now.Add(24 * time.Hour), ScaleSetName: "example-integration",
+		}
+	}
+	nonTerminal := terminal(nonTerminalJob)
+	nonTerminal.Attempts = 1
+	nonTerminal.TerminalUntil = time.Time{}
+	nonTerminal.NextAllowedAt = now.Add(time.Minute)
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{
+			domain: domainRecordForTest(domain, now), activeJob: terminal(activeJob),
+			queuedJob: terminal(queuedJob), staleJob: terminal(staleJob),
+			instance: terminal(instance), nonTerminalJob: nonTerminal,
+		},
+		Reservations: map[string]nddevRetryReservation{},
+	}
+	if err := nddevWriteRetryJournal(retryPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"active":{"job_id":"00000000-0000-4000-8000-000000000001","scale_set_name":"example-integration","state":"assigned","expires_at":%q},"queued":{"scale_set_name":"example-integration","state":"queued","expires_at":%q},"github-scale-set-job:v2:17:00000000-0000-4000-8000-000000000002":{"scale_set_name":"example-integration","state":"queued","expires_at":%q}}}`,
+		now.Add(time.Hour).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevUpdateRetryJournal(context.Background(), func(*nddevRetryJournal, time.Time) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	after, err := nddevReadRetryJournal(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := after.Records[staleJob]; exists {
+		t.Fatalf("inactive terminal exact job survived: %#v", after.Records[staleJob])
+	}
+	for _, key := range []string{domain, activeJob, queuedJob, instance, nonTerminalJob} {
+		if _, exists := after.Records[key]; !exists {
+			t.Fatalf("protected retry record %q was pruned", key)
+		}
+	}
+}
+
+func TestNDDevProviderRetryJournalInvalidQueueFailsWithoutMutation(t *testing.T) {
+	now := time.Date(2026, 8, 25, 9, 5, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	retryPath := filepath.Join(directory, "retry.json")
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevRetryFileEnv, retryPath)
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	key := "scale-set:entity-one:17:job:00000000-0000-4000-8000-000000000003"
+	journal := nddevRetryJournal{
+		SchemaVersion: nddevRetrySchemaVersion,
+		Records: map[string]nddevRetryRecord{key: {
+			JobID: key, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute),
+			TerminalUntil: now.Add(24 * time.Hour), ScaleSetName: "example-integration",
+		}},
+		Reservations: map[string]nddevRetryReservation{},
+	}
+	if err := nddevWriteRetryJournal(retryPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, []byte(`{"schema_version":4,"intents":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := nddevUpdateRetryJournal(context.Background(), func(journal *nddevRetryJournal, _ time.Time) error {
+		delete(journal.Records, key)
+		return nil
+	}); err == nil {
+		t.Fatal("invalid queue intent journal allowed retry mutation")
+	}
+	after, err := os.ReadFile(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("invalid queue intent journal changed retry journal bytes")
+	}
+}
+
+func domainRecordForTest(key string, now time.Time) nddevRetryRecord {
+	return nddevRetryRecord{
+		JobID: key, Attempts: nddevRetryMaximum, LastErrorClass: "provider",
+		UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Minute),
+		TerminalUntil: now.Add(24 * time.Hour), ScaleSetName: "example-integration",
+	}
+}
+
 func TestNDDevProviderRetryReservesBeforeTheProviderCall(t *testing.T) {
 	now := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow
