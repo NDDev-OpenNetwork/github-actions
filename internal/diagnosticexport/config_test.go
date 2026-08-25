@@ -9,7 +9,7 @@ import (
 
 func validConfig() Config {
 	return Config{
-		SchemaVersion:         4,
+		SchemaVersion:         5,
 		DeploymentStage:       "canary",
 		SourceDirectory:       "/run/gha-diagnostic-exporter-source",
 		SourceOwner:           "garm",
@@ -29,6 +29,7 @@ func validConfig() Config {
 		AccessKeyFile:         "/run/credentials/gha-diagnostic-exporter.service/rustfs-access-key",
 		SecretKeyFile:         "/run/credentials/gha-diagnostic-exporter.service/rustfs-secret-key",
 		RequestTimeoutSeconds: 20,
+		RunTimeoutSeconds:     300,
 		SourceRetentionHours:  168,
 		MaxBundleBytes:        16 * 1024 * 1024,
 		MaxDecompressedBytes:  20 * 1024 * 1024,
@@ -44,7 +45,8 @@ func TestConfigValidate(t *testing.T) {
 		edit func(*Config)
 		want string
 	}{
-		{"legacy schema", func(c *Config) { c.SchemaVersion = 3 }, "must be 4"},
+		{"legacy schema", func(c *Config) { c.SchemaVersion = 4 }, "must be 5"},
+		{"short run timeout", func(c *Config) { c.RunTimeoutSeconds = 59 }, "three request timeouts"},
 		{"unsorted trusts", func(c *Config) { c.Trusts = []string{"trusted", "release"} }, "strictly sorted"},
 		{"missing trusts", func(c *Config) { c.Trusts = nil }, "between 1 and 16"},
 		{"production stage", func(c *Config) { c.DeploymentStage = "production" }, "must remain canary"},
