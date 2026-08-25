@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.80
+derivative_version: v0.2.1-nddev.81
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -85,6 +85,9 @@ patches:
   - path: third_party/garm/patches/0026-normalize-registration-token-errors.patch
     sha256: e3c09371d7a67072e1185afc09db823b5ccdc3ce6e524e5e504bc101cd4e06f0
     purpose: Normalize GitHub registration-token API failures through the shared typed error mapping so repository 404 responses remain detectable through wrapped scale-set operations.
+  - path: third_party/garm/patches/0027-bound-upstream-download-attempts.patch
+    sha256: 35f257c8016c7999c8780970f673c5b35e04b3b3301565cffea0bd242e168456
+    purpose: Bound every upstream Linux and Gitea bootstrap curl path to two retries after the initial attempt so GARM and the provider enforce the same three-total-attempt contract.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
@@ -112,7 +115,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 5f4e5177044f0a3bff8ece13d5f865a85362a75296ebad07eccf8d3faa9af0f0
+  binary_sha256: 118b1ee61acb7e2737f8e2c8c907d6498881d710251a9431a8878358352d2419
 runtime_contract:
   queue_intent_schema_version: 4
   event_driven_scale_set_wake: true
