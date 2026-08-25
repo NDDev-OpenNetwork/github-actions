@@ -76,6 +76,10 @@ Versioning.
 
 ### Fixed
 
+- Bound every reviewed `curl` download path to two retries after the initial
+  request, making the repository-wide download policy exactly three total
+  attempts while leaving service-readiness polling and provider state retries
+  under their separate typed deadlines.
 - Default undeclared queue reservations to each pool's hard CPU and memory
   limits instead of silently applying a global historical overcommit table;
   smaller measured envelopes now require an explicit reviewed pool field.

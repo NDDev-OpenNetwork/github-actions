@@ -999,7 +999,7 @@ if [[ -n "${CA_B64}" ]]; then
   test -s "${ca_file}"
   export CURL_CA_BUNDLE="${ca_file}"
 fi
-curl -H "Authorization: Bearer ${BEARER_TOKEN}" --retry 5 --retry-delay 5 --retry-connrefused --fail "${METADATA_URL}/install-script/" -o "${install_script}"
+curl -H "Authorization: Bearer ${BEARER_TOKEN}" --retry 2 --retry-delay 5 --retry-connrefused --fail "${METADATA_URL}/install-script/" -o "${install_script}"
 chmod 0700 "${install_script}"
 # GARM's pinned runtime wrapper enables xtrace before it invokes the generated
 # installer. Keep tracing output on an already-open /dev/null descriptor so a

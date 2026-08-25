@@ -108,7 +108,7 @@ fi
 if [[ "$source" == upstream ]]; then
   rm -f -- "$candidate"
   curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-    --retry 5 --retry-all-errors --retry-max-time 180 --connect-timeout 15 --max-time 300 \
+    --retry 2 --retry-all-errors --retry-max-time 180 --connect-timeout 15 --max-time 300 \
     --max-filesize "$max_bytes" \
     --output "$candidate" "$url"
   if ! verify_candidate; then

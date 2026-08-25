@@ -89,7 +89,7 @@ set -o pipefail
 METADATA_URL="{{ .MetadataURL }}"
 BEARER_TOKEN="{{ .CallbackToken }}"
 
-curl -H "Authorization: Bearer $BEARER_TOKEN" --retry 5 --retry-delay 5 --retry-connrefused --fail $METADATA_URL/install-script/ -o /tmp/real-install.sh
+curl -H "Authorization: Bearer $BEARER_TOKEN" --retry 2 --retry-delay 5 --retry-connrefused --fail $METADATA_URL/install-script/ -o /tmp/real-install.sh
 chmod +x /tmp/real-install.sh
 
 /tmp/real-install.sh
