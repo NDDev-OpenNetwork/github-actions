@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.76
+derivative_version: v0.2.1-nddev.77
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -79,6 +79,9 @@ patches:
   - path: third_party/garm/patches/0024-preserve-running-queue-intent.patch
     sha256: 7af194cfa81d35f9778830c8772d3bf49c465920c4cb7d04f204ea21a25ebe6c
     purpose: Bind authoritative repository identity before deleting a stale queued database duplicate for a GitHub in-progress job without releasing its running central admission intent; binding failures retain the row for retry, while terminal or absent jobs still release capacity exactly once.
+  - path: third_party/garm/patches/0025-fix-scaleset-delete-error-handling.patch
+    sha256: 9d3e6a6acccc66424461986905e3343f559c156fd5835adce6b2617b3bee777e
+    purpose: Treat an already-absent GitHub runner scale set as idempotent success so local cleanup completes, while returning real remote deletion failures without falsely deleting local state.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7

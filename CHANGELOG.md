@@ -1,5 +1,9 @@
 # Changelog
 
+- Added GARM derivative `v0.2.1-nddev.77`: scale-set deletion now treats an
+  already-absent GitHub scale set as idempotent success while preserving real
+  provider failures and completing local cleanup.
+
 All notable changes are documented here. The project follows Semantic
 Versioning.
 

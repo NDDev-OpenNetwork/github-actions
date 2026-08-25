@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.76"
+readonly derivative_version="v0.2.1-nddev.77"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -58,6 +58,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0022-bound-capacity-probe-burst.patch"
   "third_party/garm/patches/0023-backoff-authoritative-access-refusal.patch"
   "third_party/garm/patches/0024-preserve-running-queue-intent.patch"
+  "third_party/garm/patches/0025-fix-scaleset-delete-error-handling.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -84,6 +85,7 @@ readonly patch_sha256s=(
   "d4a4f73c5a45708149edc9782c2772cede3c1bc9fcb523be07d4f9c98f51fc4b"
   "45edfadc2668cc413f0409d1b3924d52127630ee3086009907fccdbe992eb7a8"
   "7af194cfa81d35f9778830c8772d3bf49c465920c4cb7d04f204ea21a25ebe6c"
+  "9d3e6a6acccc66424461986905e3343f559c156fd5835adce6b2617b3bee777e"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
