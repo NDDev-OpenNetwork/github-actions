@@ -168,7 +168,11 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(writer).Encode(delivery); err != nil {
 		logger.ErrorContext(ctx, "encode cache delivery", "error", err)
+		return
 	}
+	logger.InfoContext(ctx, "cache claim delivered", "repository", repositoryConfig.Name,
+		"role", identity.Role, "mode", identity.Mode,
+		"delivery_id", delivery.DeliveryID)
 }
 
 func validateJobCorrelation(request ClaimRequest) error {
