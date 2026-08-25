@@ -15,6 +15,8 @@ Versioning.
   process restart and retains bounded terminal recovery history.
 - Added a monotonic durable dispatcher heartbeat, independent from HTTP process
   health, and require that heartbeat to be stale before recovery is admitted.
+- Added an exact-argv host command adapter with no shell evaluation, bounded
+  timeouts, checkpoint identity validation and typed progress output.
 - Added a typed provider rollout contract that requires observer restart and
   bounded inventory convergence after every provider identity change.
 - Added a machine-enforced inventory for every shell/provider network bootstrap
