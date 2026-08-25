@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 13 {
-		t.Fatalf("rules = %d, want 13", len(bundle.Rules))
+	if len(bundle.Rules) != 14 {
+		t.Fatalf("rules = %d, want 14", len(bundle.Rules))
 	}
 }
 
@@ -22,6 +22,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 	}
 	wanted := map[string]string{
 		"github_correlation_persistent":   "gha_fleet_queue_missing_workflow_run_id_beyond_grace",
+		"lifecycle_queued_delivery_stall": `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
 		"memory_psi_slow_burn":            `window_seconds="10"`,
 		"queue_wait_slow_burn":            `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
 		"provider_retry_error_persistent": `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
