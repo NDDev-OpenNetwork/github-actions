@@ -78,7 +78,7 @@ func TestEvaluateTreatsAllocationsAbovePressureEligibleCapacityAsSaturation(t *t
 	}
 }
 
-func TestEvaluateUsesAggregateQuotaInsteadOfStrandingIntegerCPUUnits(t *testing.T) {
+func TestEvaluateUsesAggregateQuotaAsCPUAllowanceEnvelope(t *testing.T) {
 	t.Parallel()
 	snapshot, policy, request := validInputs()
 	snapshot.TotalCPUUnits = 8
@@ -96,8 +96,26 @@ func TestEvaluateUsesAggregateQuotaInsteadOfStrandingIntegerCPUUnits(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !withQuota.Admitted || withQuota.RemainingCPUUnits != 0 || withQuota.RequiredCPUReserve != 0 {
-		t.Fatalf("aggregate quota did not admit bounded full-vCPU commitment: %#v", withQuota)
+	if withQuota.Admitted || withQuota.Reason != ReasonCPUAllowance || withQuota.RequiredCPUReserve != 0 {
+		t.Fatalf("aggregate quota did not bound declared CPU allowance: %#v", withQuota)
+	}
+}
+
+func TestEvaluateBlocksBurstBeforePSIFeedbackCatchesUp(t *testing.T) {
+	t.Parallel()
+	snapshot, policy, request := validInputs()
+	policy.MaximumFleetCPUPercent = 98
+	snapshot.TotalCPUUnits = 32
+	snapshot.AllocatedCPUUnits = 8
+	snapshot.AllocatedCPUAllowanceUnits = 28
+	request.VCPU = 1
+	request.CPUAllowanceUnits = 4
+	decision, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Admitted || decision.Reason != ReasonCPUAllowance || decision.RemainingCPUAllowanceUnits >= 0 {
+		t.Fatalf("soft allowance burst was not blocked: %#v", decision)
 	}
 }
 

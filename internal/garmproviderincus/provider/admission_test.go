@@ -77,15 +77,16 @@ func TestObservedAllocationsRequireCompleteSecurityPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []provideradmission.Allocation{
 		{
-			InstanceName:     "runner",
-			ControllerID:     testControllerID,
-			PoolID:           "pool-test",
-			PoolName:         "nddev-linux-standard",
-			VCPU:             4,
-			MemoryMiB:        10240,
-			ImageFingerprint: testImageDigest,
-			State:            providerjournal.StateCreated,
-			JobName:          "runner-test-instance",
+			InstanceName:      "runner",
+			ControllerID:      testControllerID,
+			PoolID:            "pool-test",
+			PoolName:          "nddev-linux-standard",
+			VCPU:              4,
+			CPUAllowanceUnits: 4,
+			MemoryMiB:         10240,
+			ImageFingerprint:  testImageDigest,
+			State:             providerjournal.StateCreated,
+			JobName:           "runner-test-instance",
 		},
 	}, allocations)
 }

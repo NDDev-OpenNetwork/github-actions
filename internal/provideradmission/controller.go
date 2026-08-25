@@ -12,13 +12,14 @@ import (
 )
 
 type Allocation struct {
-	InstanceName     string
-	ControllerID     string
-	PoolID           string
-	PoolName         string
-	VCPU             int
-	MemoryMiB        int
-	ImageFingerprint string
+	InstanceName      string
+	ControllerID      string
+	PoolID            string
+	PoolName          string
+	VCPU              int
+	CPUAllowanceUnits int
+	MemoryMiB         int
+	ImageFingerprint  string
 	// State is derived from immutable Incus lifecycle metadata. An empty value
 	// is treated as StateCreated for compatibility with cold workers.
 	State   providerjournal.LeaseState
@@ -139,7 +140,7 @@ func (c Controller) admit(
 			hostWithoutExisting := withAllocatedLeasesExcluding(host, journal.Leases, exclusionSet(excluded...))
 			hostWithoutExisting.AvailableMemoryMiB = projectedAvailableMemory(host, journal.Leases, preemptions)
 			result.Decision, err = admission.Evaluate(hostWithoutExisting, c.Policy, admission.Request{
-				PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
+				PoolName: request.PoolName, VCPU: request.VCPU, CPUAllowanceUnits: request.CPUAllowanceUnits, MemoryMiB: request.MemoryMiB,
 			})
 			if err != nil {
 				return err
@@ -161,9 +162,10 @@ func (c Controller) admit(
 
 		allocatedHost := withAllocatedLeases(host, journal.Leases, "")
 		result.Decision, err = admission.Evaluate(allocatedHost, c.Policy, admission.Request{
-			PoolName:  request.PoolName,
-			VCPU:      request.VCPU,
-			MemoryMiB: request.MemoryMiB,
+			PoolName:          request.PoolName,
+			VCPU:              request.VCPU,
+			CPUAllowanceUnits: request.CPUAllowanceUnits,
+			MemoryMiB:         request.MemoryMiB,
 		})
 		if err != nil {
 			return err
@@ -178,17 +180,18 @@ func (c Controller) admit(
 			return nil
 		}
 		journal.Leases[request.InstanceName] = providerjournal.Lease{
-			InstanceName:     request.InstanceName,
-			ControllerID:     request.ControllerID,
-			PoolID:           request.PoolID,
-			PoolName:         request.PoolName,
-			VCPU:             request.VCPU,
-			MemoryMiB:        request.MemoryMiB,
-			ImageFingerprint: request.ImageFingerprint,
-			State:            providerjournal.StateAdmitted,
-			AdmittedAt:       now,
-			UpdatedAt:        now,
-			ExpiresAt:        now.Add(c.LeaseTTL),
+			InstanceName:      request.InstanceName,
+			ControllerID:      request.ControllerID,
+			PoolID:            request.PoolID,
+			PoolName:          request.PoolName,
+			VCPU:              request.VCPU,
+			CPUAllowanceUnits: request.CPUAllowanceUnits,
+			MemoryMiB:         request.MemoryMiB,
+			ImageFingerprint:  request.ImageFingerprint,
+			State:             providerjournal.StateAdmitted,
+			AdmittedAt:        now,
+			UpdatedAt:         now,
+			ExpiresAt:         now.Add(c.LeaseTTL),
 		}
 		for _, name := range result.PreemptedWarmWorkers {
 			victim := journal.Leases[name]
@@ -217,7 +220,7 @@ func (c Controller) planWarmPreemption(
 ) (admission.Decision, []string, error) {
 	projected := withAllocatedLeases(host, journal.Leases, "")
 	decision, err := admission.Evaluate(projected, c.Policy, admission.Request{
-		PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
+		PoolName: request.PoolName, VCPU: request.VCPU, CPUAllowanceUnits: request.CPUAllowanceUnits, MemoryMiB: request.MemoryMiB,
 	})
 	if err != nil {
 		return admission.Decision{}, nil, err
@@ -258,7 +261,7 @@ func (c Controller) planWarmPreemption(
 		projected = withAllocatedLeasesExcluding(host, journal.Leases, exclusionSet(selected...))
 		projected.AvailableMemoryMiB = projectedAvailableMemory(host, journal.Leases, selected)
 		decision, err = admission.Evaluate(projected, c.Policy, admission.Request{
-			PoolName: request.PoolName, VCPU: request.VCPU, MemoryMiB: request.MemoryMiB,
+			PoolName: request.PoolName, VCPU: request.VCPU, CPUAllowanceUnits: request.CPUAllowanceUnits, MemoryMiB: request.MemoryMiB,
 		})
 		if err != nil {
 			return admission.Decision{}, nil, err
@@ -532,6 +535,7 @@ func (c Controller) reconcile(journal *providerjournal.Journal, observed map[str
 					// a hard-limit-to-p95 release can migrate live leases without
 					// deleting or recreating their running workers.
 					lease.VCPU = allocation.VCPU
+					lease.CPUAllowanceUnits = allocation.CPUAllowanceUnits
 					lease.MemoryMiB = allocation.MemoryMiB
 				} else {
 					claim, claimed := claimsByInstance[name]
@@ -603,17 +607,18 @@ func (c Controller) reconcile(journal *providerjournal.Journal, observed map[str
 	for _, name := range observedNames {
 		allocation := observed[name]
 		journal.Leases[name] = providerjournal.Lease{
-			InstanceName:     allocation.InstanceName,
-			ControllerID:     allocation.ControllerID,
-			PoolID:           allocation.PoolID,
-			PoolName:         allocation.PoolName,
-			VCPU:             allocation.VCPU,
-			MemoryMiB:        allocation.MemoryMiB,
-			ImageFingerprint: allocation.ImageFingerprint,
-			State:            normalizedObservedState(allocation.State),
-			AdmittedAt:       now,
-			UpdatedAt:        now,
-			ExpiresAt:        now.Add(c.LeaseTTL),
+			InstanceName:      allocation.InstanceName,
+			ControllerID:      allocation.ControllerID,
+			PoolID:            allocation.PoolID,
+			PoolName:          allocation.PoolName,
+			VCPU:              allocation.VCPU,
+			CPUAllowanceUnits: allocation.CPUAllowanceUnits,
+			MemoryMiB:         allocation.MemoryMiB,
+			ImageFingerprint:  allocation.ImageFingerprint,
+			State:             normalizedObservedState(allocation.State),
+			AdmittedAt:        now,
+			UpdatedAt:         now,
+			ExpiresAt:         now.Add(c.LeaseTTL),
 		}
 	}
 	return nil
@@ -697,6 +702,9 @@ func validateAllocation(allocation Allocation) error {
 	if allocation.VCPU <= 0 || allocation.MemoryMiB <= 0 || allocation.ImageFingerprint == "" {
 		return fmt.Errorf("allocation resources or image fingerprint are invalid")
 	}
+	if allocation.CPUAllowanceUnits > 0 && allocation.CPUAllowanceUnits < allocation.VCPU {
+		return fmt.Errorf("CPU allowance is below measured reservation")
+	}
 	return nil
 }
 
@@ -712,6 +720,8 @@ func leaseMatches(lease providerjournal.Lease, allocation Allocation) error {
 		return fmt.Errorf("pool name mismatch for lease %q", lease.InstanceName)
 	case lease.VCPU != allocation.VCPU || lease.MemoryMiB != allocation.MemoryMiB:
 		return fmt.Errorf("resource mismatch for lease %q", lease.InstanceName)
+	case effectiveCPUAllowance(lease.CPUAllowanceUnits, lease.VCPU) != effectiveCPUAllowance(allocation.CPUAllowanceUnits, allocation.VCPU):
+		return fmt.Errorf("CPU allowance mismatch for lease %q", lease.InstanceName)
 	case lease.ImageFingerprint != allocation.ImageFingerprint:
 		return fmt.Errorf("image fingerprint mismatch for lease %q", lease.InstanceName)
 	}
@@ -728,17 +738,27 @@ func withAllocatedLeasesExcluding(
 	excluded map[string]struct{},
 ) admission.HostSnapshot {
 	allocatedCPU := 0
+	allocatedCPUAllowance := 0
 	allocatedMemory := 0
 	for name, lease := range leases {
 		if _, skip := excluded[name]; skip {
 			continue
 		}
 		allocatedCPU += lease.VCPU
+		allocatedCPUAllowance += effectiveCPUAllowance(lease.CPUAllowanceUnits, lease.VCPU)
 		allocatedMemory += lease.MemoryMiB
 	}
 	host.AllocatedCPUUnits = allocatedCPU
+	host.AllocatedCPUAllowanceUnits = allocatedCPUAllowance
 	host.AllocatedMemoryMiB = allocatedMemory
 	return host
+}
+
+func effectiveCPUAllowance(allowance, reservation int) int {
+	if allowance > 0 {
+		return allowance
+	}
+	return reservation
 }
 
 func exclusionSet(names ...string) map[string]struct{} {

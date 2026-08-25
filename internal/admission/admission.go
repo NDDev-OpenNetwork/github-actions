@@ -11,6 +11,7 @@ const (
 	ReasonPoolSaturated       Reason = "pool-saturated"
 	ReasonQueueIntent         Reason = "queue-intent"
 	ReasonInsufficientCPU     Reason = "insufficient-cpu"
+	ReasonCPUAllowance        Reason = "cpu-allowance-envelope"
 	ReasonInsufficientMemory  Reason = "insufficient-memory"
 	ReasonPressureUnavailable Reason = "pressure-unavailable"
 	ReasonCPUPressure         Reason = "cpu-pressure"
@@ -21,25 +22,25 @@ const (
 )
 
 type HostSnapshot struct {
-	Healthy            bool    `json:"healthy" yaml:"healthy"`
-	TotalCPUUnits      int     `json:"total_cpu_units" yaml:"total_cpu_units"`
-	TotalMemoryMiB     int     `json:"total_memory_mib" yaml:"total_memory_mib"`
-	AvailableMemoryMiB int     `json:"available_memory_mib" yaml:"available_memory_mib"`
-	AllocatedCPUUnits  int     `json:"allocated_cpu_units" yaml:"allocated_cpu_units"`
-	AllocatedMemoryMiB int     `json:"allocated_memory_mib" yaml:"allocated_memory_mib"`
-	FreeDiskPercent    int     `json:"free_disk_percent" yaml:"free_disk_percent"`
-	PressureAvailable  bool    `json:"pressure_available" yaml:"pressure_available"`
-	CPUSomeAvg10       float64 `json:"cpu_some_avg10" yaml:"cpu_some_avg10"`
-	MemoryFullAvg10    float64 `json:"memory_full_avg10" yaml:"memory_full_avg10"`
-	IOFullAvg10        float64 `json:"io_full_avg10" yaml:"io_full_avg10"`
-	RecentOOMKills     int     `json:"recent_oom_kills" yaml:"recent_oom_kills"`
+	Healthy                    bool    `json:"healthy" yaml:"healthy"`
+	TotalCPUUnits              int     `json:"total_cpu_units" yaml:"total_cpu_units"`
+	TotalMemoryMiB             int     `json:"total_memory_mib" yaml:"total_memory_mib"`
+	AvailableMemoryMiB         int     `json:"available_memory_mib" yaml:"available_memory_mib"`
+	AllocatedCPUUnits          int     `json:"allocated_cpu_units" yaml:"allocated_cpu_units"`
+	AllocatedCPUAllowanceUnits int     `json:"allocated_cpu_allowance_units" yaml:"allocated_cpu_allowance_units"`
+	AllocatedMemoryMiB         int     `json:"allocated_memory_mib" yaml:"allocated_memory_mib"`
+	FreeDiskPercent            int     `json:"free_disk_percent" yaml:"free_disk_percent"`
+	PressureAvailable          bool    `json:"pressure_available" yaml:"pressure_available"`
+	CPUSomeAvg10               float64 `json:"cpu_some_avg10" yaml:"cpu_some_avg10"`
+	MemoryFullAvg10            float64 `json:"memory_full_avg10" yaml:"memory_full_avg10"`
+	IOFullAvg10                float64 `json:"io_full_avg10" yaml:"io_full_avg10"`
+	RecentOOMKills             int     `json:"recent_oom_kills" yaml:"recent_oom_kills"`
 }
 
 type ReservePolicy struct {
 	MinimumCPUUnits int
-	// MaximumFleetCPUPercent means aggregate CPU is enforced by the worker
-	// cgroup. In that mode the admission ledger may commit all physical vCPU;
-	// the cgroup, rather than stranded integer CPU units, preserves headroom.
+	// MaximumFleetCPUPercent bounds the sum of declared worker CPU allowances
+	// before delayed PSI feedback becomes the only admission guard.
 	MaximumFleetCPUPercent int
 	MinimumMemoryMiB       int
 	MinimumPercent         int
@@ -52,20 +53,22 @@ type ReservePolicy struct {
 }
 
 type Request struct {
-	PoolName  string
-	VCPU      int
-	MemoryMiB int
+	PoolName          string
+	VCPU              int
+	CPUAllowanceUnits int
+	MemoryMiB         int
 }
 
 type Decision struct {
-	Admitted              bool   `json:"admitted"`
-	Reason                Reason `json:"reason"`
-	Pool                  string `json:"pool"`
-	RequiredCPUReserve    int    `json:"required_cpu_reserve"`
-	RequiredMemoryReserve int    `json:"required_memory_reserve_mib"`
-	RemainingCPUUnits     int    `json:"remaining_cpu_units"`
-	RemainingMemoryMiB    int    `json:"remaining_memory_mib"`
-	RemainingAvailableMiB int    `json:"remaining_available_memory_mib"`
+	Admitted                   bool   `json:"admitted"`
+	Reason                     Reason `json:"reason"`
+	Pool                       string `json:"pool"`
+	RequiredCPUReserve         int    `json:"required_cpu_reserve"`
+	RequiredMemoryReserve      int    `json:"required_memory_reserve_mib"`
+	RemainingCPUUnits          int    `json:"remaining_cpu_units"`
+	RemainingCPUAllowanceUnits int    `json:"remaining_cpu_allowance_units"`
+	RemainingMemoryMiB         int    `json:"remaining_memory_mib"`
+	RemainingAvailableMiB      int    `json:"remaining_available_memory_mib"`
 }
 
 // Evaluate uses one schedulable CPU unit for every requested vCPU. A CPU unit
@@ -82,16 +85,30 @@ func Evaluate(snapshot HostSnapshot, policy ReservePolicy, request Request) (Dec
 	}
 	memoryReserve := max(policy.MinimumMemoryMiB, percentCeiling(snapshot.TotalMemoryMiB, policy.MinimumPercent))
 	remainingCPU := snapshot.TotalCPUUnits - snapshot.AllocatedCPUUnits - request.VCPU
+	allowanceLimit := snapshot.TotalCPUUnits
+	if policy.MaximumFleetCPUPercent > 0 {
+		allowanceLimit = snapshot.TotalCPUUnits * policy.MaximumFleetCPUPercent / 100
+	}
+	allocatedAllowance := snapshot.AllocatedCPUAllowanceUnits
+	if allocatedAllowance == 0 {
+		allocatedAllowance = snapshot.AllocatedCPUUnits
+	}
+	requestedAllowance := request.CPUAllowanceUnits
+	if requestedAllowance == 0 {
+		requestedAllowance = request.VCPU
+	}
+	remainingAllowance := allowanceLimit - allocatedAllowance - requestedAllowance
 	remainingMemory := snapshot.TotalMemoryMiB - snapshot.AllocatedMemoryMiB - request.MemoryMiB
 	remainingAvailableMemory := snapshot.AvailableMemoryMiB - request.MemoryMiB
 
 	decision := Decision{
-		Pool:                  request.PoolName,
-		RequiredCPUReserve:    cpuReserve,
-		RequiredMemoryReserve: memoryReserve,
-		RemainingCPUUnits:     remainingCPU,
-		RemainingMemoryMiB:    remainingMemory,
-		RemainingAvailableMiB: remainingAvailableMemory,
+		Pool:                       request.PoolName,
+		RequiredCPUReserve:         cpuReserve,
+		RequiredMemoryReserve:      memoryReserve,
+		RemainingCPUUnits:          remainingCPU,
+		RemainingCPUAllowanceUnits: remainingAllowance,
+		RemainingMemoryMiB:         remainingMemory,
+		RemainingAvailableMiB:      remainingAvailableMemory,
 	}
 
 	switch {
@@ -111,6 +128,8 @@ func Evaluate(snapshot HostSnapshot, policy ReservePolicy, request Request) (Dec
 		decision.Reason = ReasonIOPressure
 	case remainingCPU < cpuReserve:
 		decision.Reason = ReasonInsufficientCPU
+	case remainingAllowance < 0:
+		decision.Reason = ReasonCPUAllowance
 	case remainingMemory < memoryReserve || remainingAvailableMemory < memoryReserve:
 		decision.Reason = ReasonInsufficientMemory
 	default:

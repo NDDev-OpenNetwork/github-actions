@@ -48,14 +48,15 @@ type Claim struct {
 }
 
 type Lease struct {
-	InstanceName     string     `json:"instance_name"`
-	ControllerID     string     `json:"controller_id"`
-	PoolID           string     `json:"pool_id"`
-	PoolName         string     `json:"pool_name"`
-	VCPU             int        `json:"vcpu"`
-	MemoryMiB        int        `json:"memory_mib"`
-	ImageFingerprint string     `json:"image_fingerprint"`
-	State            LeaseState `json:"state"`
+	InstanceName      string     `json:"instance_name"`
+	ControllerID      string     `json:"controller_id"`
+	PoolID            string     `json:"pool_id"`
+	PoolName          string     `json:"pool_name"`
+	VCPU              int        `json:"vcpu"`
+	CPUAllowanceUnits int        `json:"cpu_allowance_units,omitempty"`
+	MemoryMiB         int        `json:"memory_mib"`
+	ImageFingerprint  string     `json:"image_fingerprint"`
+	State             LeaseState `json:"state"`
 	// PreemptedBy durably binds speculative warm capacity to the admitted cold
 	// request that is replacing it. It is set before VM teardown, so a warm
 	// claim or replenishment process cannot race into the capacity hand-off.
@@ -109,6 +110,9 @@ func (j Journal) Validate() error {
 		}
 		if lease.VCPU <= 0 || lease.MemoryMiB <= 0 {
 			return fmt.Errorf("lease %q has invalid resources", key)
+		}
+		if lease.CPUAllowanceUnits > 0 && lease.CPUAllowanceUnits < lease.VCPU {
+			return fmt.Errorf("lease %q CPU allowance is below its reservation", key)
 		}
 		if lease.ImageFingerprint == "" {
 			return fmt.Errorf("lease %q has no image fingerprint", key)
