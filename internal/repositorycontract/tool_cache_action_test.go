@@ -78,18 +78,24 @@ type toolCacheResult struct {
 	outputs     string
 	stdout      string
 	invocations string
+	diagnostics string
 }
 
 func runToolCache(t *testing.T, cacheMode string) toolCacheResult {
 	t.Helper()
 	root := toolCacheRepositoryRoot(t)
 	directory := t.TempDir()
-	runnerTemp := filepath.Join(directory, "runner-temp")
+	runnerRoot := filepath.Join(directory, "actions-runner")
+	runnerTemp := filepath.Join(runnerRoot, "_work", "_temp")
+	diagnosticDirectory := filepath.Join(runnerRoot, "_diag")
 	bin := filepath.Join(directory, "bin")
 	if err := os.MkdirAll(runnerTemp, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(diagnosticDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	fixture := []byte("immutable verified tool artifact\n")
@@ -186,7 +192,16 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	return toolCacheResult{outputs: string(outputs), stdout: string(combined), invocations: string(calls)}
+	diagnostics, err := os.ReadFile(filepath.Join(diagnosticDirectory, "nddev-tool-cache-events.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(diagnostics) != string(combined) {
+		t.Fatalf("diagnostic event differs from stdout: diagnostics=%q stdout=%q", diagnostics, combined)
+	}
+	return toolCacheResult{
+		outputs: string(outputs), stdout: string(combined), invocations: string(calls), diagnostics: string(diagnostics),
+	}
 }
 
 func toolCacheRepositoryRoot(t *testing.T) string {
