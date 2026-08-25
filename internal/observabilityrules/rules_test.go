@@ -88,3 +88,38 @@ func TestRenderOpenObserveSeparatesExpressionAndThreshold(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderOpenObserveConvertsSecondsToMinuteSchedule(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		severity         string
+		evaluationSecs   int
+		holdSecs         int
+		frequencyMinutes int
+		periodMinutes    int
+		evaluations      int
+	}{
+		{name: "thirty seconds", severity: "page", evaluationSecs: 30, holdSecs: 120, frequencyMinutes: 1, periodMinutes: 2, evaluations: 2},
+		{name: "sixty seconds", severity: "page", evaluationSecs: 60, holdSecs: 60, frequencyMinutes: 1, periodMinutes: 1, evaluations: 1},
+		{name: "five minutes", severity: "ticket", evaluationSecs: 300, holdSecs: 900, frequencyMinutes: 5, periodMinutes: 15, evaluations: 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bundle := Bundle{SchemaVersion: SchemaVersion, Backend: "openobserve", Organization: "default", Rules: []Rule{{
+				ID: "example_rule", Severity: test.severity, QueryLanguage: "promql", StreamName: "example_metric",
+				Expression: "max(example_metric)", Operator: ">", Threshold: 0,
+				EvaluationSecs: test.evaluationSecs, HoldSecs: test.holdSecs, DestinationRef: "fleet_oncall",
+				Owner: "fleet-operations", Runbook: "https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md",
+				Summary: "Example summary.", Action: "Example action.", Recovery: "Example recovery.",
+			}}}
+			rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			trigger := rendered.Alerts[0].TriggerCondition
+			if trigger.FrequencyType != "minutes" || trigger.Frequency != test.frequencyMinutes ||
+				trigger.Period != test.periodMinutes || trigger.Threshold != test.evaluations {
+				t.Fatalf("trigger = %#v", trigger)
+			}
+		})
+	}
+}

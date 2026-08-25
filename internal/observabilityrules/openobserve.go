@@ -76,7 +76,8 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			priority = 1
 			silence = 10
 		}
-		periodMinutes := (rule.HoldSecs + 59) / 60
+		frequencyMinutes := (rule.EvaluationSecs + 59) / 60
+		periodMinutes := max((rule.HoldSecs+59)/60, frequencyMinutes)
 		result.Alerts = append(result.Alerts, OpenObserveAlert{
 			Name:       rule.ID,
 			OrgID:      bundle.Organization,
@@ -91,7 +92,7 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			},
 			TriggerCondition: OpenObserveTrigger{
 				Period: periodMinutes, Operator: ">=", Threshold: rule.RequiredEvaluations(),
-				Frequency: rule.EvaluationSecs, FrequencyType: "minutes", Silence: silence,
+				Frequency: frequencyMinutes, FrequencyType: "minutes", Silence: silence,
 				Timezone: "UTC", AlignTime: true,
 			},
 			Destinations: []string{destination},

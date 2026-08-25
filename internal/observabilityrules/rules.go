@@ -119,5 +119,6 @@ func (r Rule) Validate() error {
 }
 
 func (r Rule) RequiredEvaluations() int {
-	return (r.HoldSecs + r.EvaluationSecs - 1) / r.EvaluationSecs
+	frequencySecs := ((r.EvaluationSecs + 59) / 60) * 60
+	return (r.HoldSecs + frequencySecs - 1) / frequencySecs
 }

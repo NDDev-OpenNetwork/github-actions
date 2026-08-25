@@ -71,6 +71,10 @@ Versioning.
 
 ### Fixed
 
+- Convert second-based alert evaluation contracts to OpenObserve's supported
+  minute cadence, recompute consecutive-evaluation thresholds from the rendered
+  schedule, and keep the lookback period no shorter than that cadence so short
+  OOM and lifecycle incidents cannot disappear between evaluations.
 - Provision the standard runner cache directory with runner ownership before
   each job, preventing setup actions from exporting an unwritable home cache.
 - Refresh the grouped provider dependency set to smithy-go 1.27.9 and
