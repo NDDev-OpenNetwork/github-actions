@@ -55,11 +55,13 @@ type Delivery struct {
 }
 
 type Handler struct {
-	Config          Config
-	Store           Store
-	QueueCorrelator *queueintent.Correlator
-	Logger          *slog.Logger
-	Now             func() time.Time
+	Config                   Config
+	Store                    Store
+	QueueCorrelator          *queueintent.Correlator
+	CorrelationRetryInterval time.Duration
+	CorrelationRetryWindow   time.Duration
+	Logger                   *slog.Logger
+	Now                      func() time.Time
 }
 
 func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -141,17 +143,21 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if claimRequest.WorkflowRunID > 0 {
 		if h.QueueCorrelator != nil {
-			result, bindErr := h.QueueCorrelator.BindRunning(ctx, queueintent.RunningCorrelation{
+			correlation := queueintent.RunningCorrelation{
 				RunnerName: claimRequest.RunnerName, PoolName: claim.PoolName, Repository: claimRequest.Repository,
 				WorkflowRunID: claimRequest.WorkflowRunID, JobDisplayName: claimRequest.JobName,
 				WorkflowRef: claimRequest.WorkflowRef,
-			})
+			}
+			result, bindErr := h.QueueCorrelator.BindRunning(ctx, correlation)
 			if bindErr != nil {
 				logger.WarnContext(ctx, "queue running correlation deferred",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
 					telemetryattrs.GitHubRepository, claimRequest.Repository,
 					telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
 					"error", bindErr)
+				if errors.Is(bindErr, queueintent.ErrRunningCorrelationNotReady) {
+					h.retryQueueCorrelation(correlation, logger)
+				}
 			} else {
 				logger.InfoContext(ctx, "queue running correlation bound",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
@@ -203,6 +209,55 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	logger.InfoContext(ctx, "cache claim delivered", "repository", repositoryConfig.Name,
 		"role", identity.Role, "mode", identity.Mode,
 		"delivery_id", delivery.DeliveryID)
+}
+
+func (h Handler) retryQueueCorrelation(correlation queueintent.RunningCorrelation, logger *slog.Logger) {
+	if h.QueueCorrelator == nil {
+		return
+	}
+	interval := h.CorrelationRetryInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	window := h.CorrelationRetryWindow
+	if window <= 0 {
+		window = 30 * time.Second
+	}
+	correlator := *h.QueueCorrelator
+	correlator.Attempts = 1
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), window)
+		defer cancel()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Warn("queue running correlation async window elapsed",
+					telemetryattrs.RunnerName, correlation.RunnerName,
+					telemetryattrs.GitHubRepository, correlation.Repository,
+					telemetryattrs.GitHubWorkflowRunID, correlation.WorkflowRunID)
+				return
+			case <-ticker.C:
+				result, err := correlator.BindRunning(ctx, correlation)
+				if errors.Is(err, queueintent.ErrRunningCorrelationNotReady) {
+					continue
+				}
+				if err != nil {
+					logger.Warn("queue running correlation async failed",
+						telemetryattrs.RunnerName, correlation.RunnerName, "error", err)
+					return
+				}
+				logger.Info("queue running correlation bound asynchronously",
+					telemetryattrs.RunnerName, correlation.RunnerName,
+					telemetryattrs.GitHubWorkflowRunID, correlation.WorkflowRunID,
+					"queue_job_uuid", result.Key,
+					"journal_generation", result.Generation,
+					"changed", result.Changed)
+				return
+			}
+		}
+	}()
 }
 
 func validateJobCorrelation(request ClaimRequest) error {

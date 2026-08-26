@@ -278,6 +278,49 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 	}
 }
 
+func TestAsyncCorrelationUsesExactRunnerAfterHookReturns(t *testing.T) {
+	now := time.Date(2026, 8, 26, 20, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	queueLock := filepath.Join(directory, "queue-intents.lock")
+	key := "github-scale-set-job:v2:42:job-async"
+	queue := queueintent.Journal{
+		SchemaVersion: queueintent.SchemaVersion, Generation: 8, UpdatedAt: now,
+		Intents: map[string]queueintent.Intent{key: {
+			Key: key, ScaleSetID: 42, JobID: "job-async", RunnerRequestID: 99,
+			ScaleSetName: "example-standard", RunnerName: "runner-async", Owner: "example-org",
+			Repository: "example-org/example-repo", JobDisplayName: "arbitrary display title",
+			WorkflowRef: "example/ref", EventName: "push", QueueTime: now.Add(-time.Minute),
+			State: queueintent.StateRunning, Priority: 1, StateEnteredAt: now.Add(-time.Second),
+			UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+		}}, Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
+	}
+	raw, err := json.Marshal(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := Handler{
+		QueueCorrelator:          &queueintent.Correlator{Path: queuePath, LockPath: queueLock, Now: func() time.Time { return now.Add(time.Second) }},
+		CorrelationRetryInterval: time.Millisecond, CorrelationRetryWindow: time.Second,
+	}
+	handler.retryQueueCorrelation(queueintent.RunningCorrelation{
+		RunnerName: "runner-async", PoolName: "example-standard", Repository: "example-org/example-repo",
+		WorkflowRunID: 789, JobDisplayName: "job-key-does-not-match-title", WorkflowRef: "example/ref",
+	}, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, readErr := (queueintent.Reader{Path: queuePath, Now: func() time.Time { return now.Add(time.Second) }}).ReadActive(context.Background())
+		if readErr == nil && len(snapshot.Active) == 1 && snapshot.Active[0].WorkflowRunID == 789 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("async exact-runner correlation did not converge")
+}
+
 func TestJobCorrelationIsAllOrNothingAndBounded(t *testing.T) {
 	legacy := ClaimRequest{}
 	if err := validateJobCorrelation(legacy); err != nil {
