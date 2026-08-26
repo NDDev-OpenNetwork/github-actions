@@ -34,6 +34,22 @@ rules:
     summary: Durable diagnostic export is failing.
     action: Preserve the spool and restore RustFS routing or credentials without pruning evidence.
     recovery: Consecutive failures and pending backlog return to zero after an exact successful export.
+  - id: diagnostic_retention_overdue
+    severity: ticket
+    query_language: promql
+    stream_name: gha_diagnostic_storage_expiration_eligible_objects
+    expression: max(gha_diagnostic_storage_expiration_eligible_objects)
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 300
+    hold_seconds: 3600
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Diagnostic objects remain after their S3 lifecycle eligibility boundary.
+    action: Preserve object-age counts and lifecycle read-back, then repair RustFS expiry processing without deleting evidence manually.
+    recovery: No expiration-eligible diagnostic object remains after the one-hour implementation grace.
   - id: fleet_platform_unhealthy
     severity: page
     query_language: promql

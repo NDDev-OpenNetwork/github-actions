@@ -34,6 +34,26 @@ func TestSampleRendersHeadroomAndForecast(t *testing.T) {
 	}
 }
 
+func TestRetentionMetricsExposeEligibleObjectsAndNextBoundary(t *testing.T) {
+	now := time.Date(2026, 8, 26, 3, 0, 0, 0, time.UTC)
+	snapshot := Snapshot{CapturedAt: now, Result: diagnosticstore.Result{
+		StateAfter: "managed", HeadroomState: "sufficient", ObjectCount: 356,
+		OldestObjectModified: time.Date(2026, 8, 19, 0, 36, 58, 0, time.UTC),
+		ExpirationEligible:   0, NextExpirationAt: time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC),
+	}}
+	metrics := Render(snapshot, now)
+	for _, wanted := range []string{
+		"gha_diagnostic_storage_objects 356\n",
+		"gha_diagnostic_storage_oldest_object_age_seconds 613382\n",
+		"gha_diagnostic_storage_expiration_eligible_objects 0\n",
+		"gha_diagnostic_storage_next_expiration_seconds 75600\n",
+	} {
+		if !strings.Contains(metrics, wanted) {
+			t.Fatalf("metrics missing %q\n%s", wanted, metrics)
+		}
+	}
+}
+
 func TestHealthFailsClosedForLowHeadroomAndStaleness(t *testing.T) {
 	now := time.Date(2026, 8, 21, 8, 0, 0, 0, time.UTC)
 	state := &State{snapshot: Snapshot{CapturedAt: now, Result: diagnosticstore.Result{StateAfter: "managed", HeadroomState: "below-minimum"}}}

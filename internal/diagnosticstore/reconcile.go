@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -28,9 +29,16 @@ type Result struct {
 	HeadroomState        string    `json:"headroom_state"`
 	UsageObservedAt      time.Time `json:"usage_observed_at"`
 	Actions              []string  `json:"actions"`
+	ObjectCount          int       `json:"object_count"`
+	OldestObjectModified time.Time `json:"oldest_object_modified_at,omitempty"`
+	ExpirationEligible   int       `json:"expiration_eligible_objects"`
+	NextExpirationAt     time.Time `json:"next_expiration_at,omitempty"`
 }
 
-type Runner struct{ Requester rustfscache.Requester }
+type Runner struct {
+	Requester rustfscache.Requester
+	Now       func() time.Time
+}
 
 type quotaInfo struct {
 	Quota     int64  `json:"quota"`
@@ -59,6 +67,21 @@ type lifecycleRule struct {
 	} `xml:"Expiration"`
 }
 
+type listBucketResult struct {
+	IsTruncated           bool   `xml:"IsTruncated"`
+	NextContinuationToken string `xml:"NextContinuationToken"`
+	Contents              []struct {
+		LastModified string `xml:"LastModified"`
+	} `xml:"Contents"`
+}
+
+type objectInventory struct {
+	Count              int
+	OldestModified     time.Time
+	ExpirationEligible int
+	NextExpiration     time.Time
+}
+
 func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, error) {
 	if err := config.Validate(); err != nil {
 		return Result{}, err
@@ -71,6 +94,10 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 		return Result{}, err
 	}
 	defer clear(root.SecretKey)
+	now := time.Now().UTC()
+	if r.Now != nil {
+		now = r.Now().UTC()
+	}
 	state, usage, err := r.inspect(ctx, root, config)
 	if err != nil {
 		return Result{}, err
@@ -82,7 +109,12 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 		result.CurrentUsageBytes = usage.CurrentUsage
 		result.RemainingQuotaBytes = usage.RemainingQuota
 		result.UsagePercentage = usage.UsagePercentage
-		result.UsageObservedAt = time.Now().UTC()
+		result.UsageObservedAt = now
+		inventory, inventoryErr := r.listObjects(ctx, root, config, now)
+		if inventoryErr != nil {
+			return Result{}, inventoryErr
+		}
+		applyInventory(&result, inventory)
 		result.HeadroomState = "sufficient"
 		if usage.RemainingQuota < config.MinimumHeadroom {
 			result.HeadroomState = "below-minimum"
@@ -111,13 +143,83 @@ func (r Runner) Run(ctx context.Context, config Config, apply bool) (Result, err
 	result.CurrentUsageBytes = usageAfter.CurrentUsage
 	result.RemainingQuotaBytes = usageAfter.RemainingQuota
 	result.UsagePercentage = usageAfter.UsagePercentage
-	result.UsageObservedAt = time.Now().UTC()
+	result.UsageObservedAt = now
+	inventory, err := r.listObjects(ctx, root, config, now)
+	if err != nil {
+		return Result{}, err
+	}
+	applyInventory(&result, inventory)
 	if usageAfter.RemainingQuota < config.MinimumHeadroom {
 		result.HeadroomState = "below-minimum"
 	} else {
 		result.HeadroomState = "sufficient"
 	}
 	return result, nil
+}
+
+func (r Runner) listObjects(ctx context.Context, root rustfscache.Credential, config Config, now time.Time) (objectInventory, error) {
+	const maximumPages = 1024
+	inventory := objectInventory{}
+	token := ""
+	for page := 0; page < maximumPages; page++ {
+		query := url.Values{"list-type": {"2"}, "prefix": {config.Prefix + "/"}}
+		if token != "" {
+			query.Set("continuation-token", token)
+		}
+		response, err := r.Requester.Do(ctx, root, http.MethodGet, "/"+config.Bucket+"?"+query.Encode(), "", nil)
+		if err != nil {
+			return objectInventory{}, fmt.Errorf("list diagnostic objects: %w", err)
+		}
+		if response.StatusCode != http.StatusOK {
+			return objectInventory{}, responseError("list diagnostic objects", response)
+		}
+		var listed listBucketResult
+		if err := xml.Unmarshal(response.Body, &listed); err != nil {
+			return objectInventory{}, fmt.Errorf("decode diagnostic object listing: %w", err)
+		}
+		for _, object := range listed.Contents {
+			modified, err := time.Parse(time.RFC3339Nano, object.LastModified)
+			if err != nil {
+				return objectInventory{}, fmt.Errorf("decode diagnostic object timestamp: %w", err)
+			}
+			modified = modified.UTC()
+			expires := lifecycleExpirationAt(modified, config.RetentionDays)
+			inventory.Count++
+			if inventory.OldestModified.IsZero() || modified.Before(inventory.OldestModified) {
+				inventory.OldestModified = modified
+			}
+			if !now.Before(expires) {
+				inventory.ExpirationEligible++
+			}
+			if inventory.NextExpiration.IsZero() || expires.Before(inventory.NextExpiration) {
+				inventory.NextExpiration = expires
+			}
+		}
+		if !listed.IsTruncated {
+			return inventory, nil
+		}
+		if listed.NextContinuationToken == "" {
+			return objectInventory{}, fmt.Errorf("truncated diagnostic object listing omitted continuation token")
+		}
+		token = listed.NextContinuationToken
+	}
+	return objectInventory{}, fmt.Errorf("diagnostic object listing exceeded %d pages", maximumPages)
+}
+
+func lifecycleExpirationAt(modified time.Time, retentionDays int) time.Time {
+	candidate := modified.UTC().Add(time.Duration(retentionDays) * 24 * time.Hour)
+	midnight := candidate.Truncate(24 * time.Hour)
+	if candidate.Equal(midnight) {
+		return midnight
+	}
+	return midnight.Add(24 * time.Hour)
+}
+
+func applyInventory(result *Result, inventory objectInventory) {
+	result.ObjectCount = inventory.Count
+	result.OldestObjectModified = inventory.OldestModified
+	result.ExpirationEligible = inventory.ExpirationEligible
+	result.NextExpirationAt = inventory.NextExpiration
 }
 
 func (r Runner) inspect(ctx context.Context, root rustfscache.Credential, config Config) (string, quotaStats, error) {
