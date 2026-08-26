@@ -126,7 +126,7 @@ func TestFleetHostStateTreatsAnUnreportedPoolAsFull(t *testing.T) {
 	require.Equal(t, 0, state.FreeDiskPercent)
 }
 
-func TestFleetHostStateExcludesClosedMemberAndFailsClosedOnStaleMetadata(t *testing.T) {
+func TestFleetHostStateExcludesClosedOrStaleMemberWithoutMaskingHealthySibling(t *testing.T) {
 	platform := clusterPlatform()
 	for name, members := range map[string][]api.ClusterMember{
 		"closed member": {
@@ -149,15 +149,25 @@ func TestFleetHostStateExcludesClosedMemberAndFailsClosedOnStaleMetadata(t *test
 			cli.On("GetClusterMemberState", "example-runner-4").Return(memberState(16, 10, 0, 200, 20), "", nil)
 			state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
 			require.NoError(t, err)
-			if name == "closed member" {
-				require.True(t, state.Healthy)
-				require.Equal(t, 6, state.TotalCPUUnits)
-			} else {
-				require.False(t, state.Healthy)
-				require.False(t, state.PressureAvailable)
-			}
+			require.True(t, state.Healthy)
+			require.True(t, state.PressureAvailable)
+			require.Equal(t, 6, state.TotalCPUUnits)
 		})
 	}
+}
+
+func TestFleetHostStateFailsClosedWhenEveryOnlineMemberPressureIsInvalid(t *testing.T) {
+	platform := clusterPlatform()
+	stale := pressureMember("example-runner-3", "Online", pressuregate.StateOpen)
+	stale.Config[pressuregate.MetadataObservedAt] = clusterNow.Add(-10 * time.Minute).Format(time.RFC3339Nano)
+	cli := &MockIncusServer{}
+	cli.On("GetServer").Return(clusteredServer(), "", nil)
+	cli.On("GetClusterMembers").Return([]api.ClusterMember{stale}, nil)
+	cli.On("GetClusterMemberState", "example-runner-3").Return(memberState(16, 10, 0, 200, 20), "", nil)
+	state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
+	require.NoError(t, err)
+	require.False(t, state.Healthy)
+	require.False(t, state.PressureAvailable)
 }
 
 func TestFleetHostStateAllowsTwoPhaseUpgradeBeforePressurePolicyIsEnabled(t *testing.T) {
