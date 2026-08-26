@@ -18,6 +18,7 @@ var ErrRunningCorrelationNotReady = errors.New("exact running queue intent is no
 
 type RunningCorrelation struct {
 	RunnerName     string
+	PoolName       string
 	Repository     string
 	WorkflowRunID  int64
 	JobDisplayName string
@@ -116,6 +117,7 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 		now = c.Now().UTC()
 	}
 	key := ""
+	exactRunning := false
 	for candidateKey, intent := range journal.Intents {
 		if intent.State != StateRunning || intent.RunnerName != correlation.RunnerName || !intent.ExpiresAt.After(now) {
 			continue
@@ -128,6 +130,31 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 			return CorrelationResult{}, errors.New("runner identity maps to multiple running queue intents")
 		}
 		key = candidateKey
+		exactRunning = true
+	}
+	if key == "" {
+		for candidateKey, intent := range journal.Intents {
+			if intent.ScaleSetName != correlation.PoolName || !intent.ExpiresAt.After(now) {
+				continue
+			}
+			switch intent.State {
+			case StateAssigned, StateAcquiring, StateAcquired:
+			default:
+				continue
+			}
+			owner := strings.SplitN(correlation.Repository, "/", 2)[0]
+			if intent.OwnerAccount() != owner || (intent.Repository != owner && intent.Repository != correlation.Repository) ||
+				intent.JobDisplayName != correlation.JobDisplayName {
+				continue
+			}
+			if intent.WorkflowRunID != 0 && intent.WorkflowRunID != correlation.WorkflowRunID {
+				continue
+			}
+			if key != "" {
+				return CorrelationResult{}, errors.New("pool, repository and job identity map to multiple active queue intents")
+			}
+			key = candidateKey
+		}
 	}
 	if key == "" {
 		return CorrelationResult{}, ErrRunningCorrelationNotReady
@@ -136,7 +163,7 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 	if intent.WorkflowRunID != 0 && intent.WorkflowRunID != correlation.WorkflowRunID {
 		return CorrelationResult{}, errors.New("running queue intent has conflicting workflow run identity")
 	}
-	changed := intent.WorkflowRunID == 0 || intent.Repository != correlation.Repository ||
+	changed := !exactRunning || intent.WorkflowRunID == 0 || intent.Repository != correlation.Repository ||
 		(intent.JobDisplayName == "" && correlation.JobDisplayName != "") ||
 		((intent.WorkflowRef == "" || intent.WorkflowRef == "unavailable-before-job-available") && correlation.WorkflowRef != "")
 	if !changed {
@@ -144,6 +171,11 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 	}
 	intent.Repository = correlation.Repository
 	intent.WorkflowRunID = correlation.WorkflowRunID
+	if !exactRunning {
+		intent.State = StateRunning
+		intent.StateEnteredAt = now
+		intent.RunnerName = correlation.RunnerName
+	}
 	if intent.JobDisplayName == "" {
 		intent.JobDisplayName = correlation.JobDisplayName
 	}
@@ -164,7 +196,7 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 }
 
 func validateRunningCorrelation(correlation RunningCorrelation) error {
-	if !validText(correlation.RunnerName) || !validRepository(correlation.Repository) || correlation.WorkflowRunID <= 0 ||
+	if !validText(correlation.RunnerName) || !validText(correlation.PoolName) || !validRepository(correlation.Repository) || correlation.WorkflowRunID <= 0 ||
 		!validText(correlation.JobDisplayName) || !validText(correlation.WorkflowRef) {
 		return errors.New("running correlation identity is incomplete")
 	}

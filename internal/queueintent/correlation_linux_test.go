@@ -30,7 +30,7 @@ func TestRunningCorrelationBindsAuthenticatedRunnerExactlyAndIdempotently(t *tes
 	})
 	correlator := Correlator{Path: path, LockPath: lockPath, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1}
 	correlation := RunningCorrelation{
-		RunnerName: "runner-exact", Repository: "example-org/example-repo", WorkflowRunID: 1234,
+		RunnerName: "runner-exact", PoolName: "example-standard", Repository: "example-org/example-repo", WorkflowRunID: 1234,
 		JobDisplayName: "quality", WorkflowRef: "example-org/example-repo/.github/workflows/ci.yml@refs/heads/main",
 	}
 	result, err := correlator.BindRunning(context.Background(), correlation)
@@ -68,16 +68,16 @@ func TestRunningCorrelationRefusesAmbiguousOrConflictingIdentity(t *testing.T) {
 		key := intentKey(scaleSetID, "job-"+string(rune('1'+index)))
 		intents[key] = Intent{
 			Key: key, ScaleSetID: scaleSetID, JobID: "job-" + string(rune('1'+index)), RunnerRequestID: 90 + int64(index),
-			ScaleSetName: "example-standard", RunnerName: "runner-collision", Owner: "example-org",
+			ScaleSetName: "example-standard", Owner: "example-org",
 			Repository: "example-org/example-repo", WorkflowRef: "example/ref", EventName: "push",
-			QueueTime: now.Add(-time.Minute), State: StateRunning, Priority: 1,
+			JobDisplayName: "quality", QueueTime: now.Add(-time.Minute), State: StateAcquired, Priority: 1,
 			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 		}
 	}
 	writeCorrelationFixture(t, path, Journal{SchemaVersion: SchemaVersion, Generation: 3, UpdatedAt: now, Intents: intents, Repositories: map[string]RepositoryState{}, TerminalJobs: map[string]time.Time{}})
 	correlator := Correlator{Path: path, LockPath: lockPath, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1}
 	_, err := correlator.BindRunning(context.Background(), RunningCorrelation{
-		RunnerName: "runner-collision", Repository: "example-org/example-repo", WorkflowRunID: 1234,
+		RunnerName: "runner-collision", PoolName: "example-standard", Repository: "example-org/example-repo", WorkflowRunID: 1234,
 		JobDisplayName: "quality", WorkflowRef: "example/ref",
 	})
 	if err == nil || errors.Is(err, ErrRunningCorrelationNotReady) {
@@ -90,7 +90,7 @@ func TestRunningCorrelationWaitsForExactRunnerAndRepository(t *testing.T) {
 	path := filepath.Join(directory, "queue-intents.json")
 	writeCorrelationFixture(t, path, Journal{SchemaVersion: SchemaVersion, Intents: map[string]Intent{}, Repositories: map[string]RepositoryState{}, TerminalJobs: map[string]time.Time{}})
 	_, err := (Correlator{Path: path, LockPath: filepath.Join(directory, "queue-intents.lock"), Attempts: 1}).BindRunning(context.Background(), RunningCorrelation{
-		RunnerName: "runner-missing", Repository: "example-org/example-repo", WorkflowRunID: 1234,
+		RunnerName: "runner-missing", PoolName: "example-standard", Repository: "example-org/example-repo", WorkflowRunID: 1234,
 		JobDisplayName: "quality", WorkflowRef: "example/ref",
 	})
 	if !errors.Is(err, ErrRunningCorrelationNotReady) {

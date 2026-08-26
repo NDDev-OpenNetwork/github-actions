@@ -226,7 +226,7 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 	directory := t.TempDir()
 	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
 	token := bytes.Repeat([]byte{4}, ClaimTokenBytes)
-	if err := store.Add(context.Background(), "runner-exact", "pool", "trusted-writer", token); err != nil {
+	if err := store.Add(context.Background(), "runner-exact", "example-standard", "trusted-writer", token); err != nil {
 		t.Fatal(err)
 	}
 	queuePath := filepath.Join(directory, "queue-intents.json")
@@ -236,9 +236,9 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 		SchemaVersion: queueintent.SchemaVersion, Generation: 4, UpdatedAt: now,
 		Intents: map[string]queueintent.Intent{key: {
 			Key: key, ScaleSetID: 42, JobID: "job-1", RunnerRequestID: 99,
-			ScaleSetName: "example-standard", RunnerName: "runner-exact", Owner: "example-org",
+			ScaleSetName: "example-standard", JobDisplayName: "quality", Owner: "example-org",
 			Repository: "example-org", WorkflowRef: "unavailable-before-job-available", EventName: "push",
-			QueueTime: now.Add(-time.Minute), State: queueintent.StateRunning, Priority: 1,
+			QueueTime: now.Add(-time.Minute), State: queueintent.StateAcquired, Priority: 1,
 			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 		}}, Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
 	}
@@ -269,7 +269,8 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := snapshot.Active[0]
-	if intent.Repository != "example-org/example-repo" || intent.WorkflowRunID != 456 || intent.JobDisplayName != "quality" {
+	if intent.Repository != "example-org/example-repo" || intent.WorkflowRunID != 456 || intent.JobDisplayName != "quality" ||
+		intent.State != queueintent.StateRunning || intent.RunnerName != "runner-exact" {
 		t.Fatalf("correlated intent=%+v", intent)
 	}
 	if !strings.Contains(logs.String(), `"msg":"queue running correlation bound"`) || !strings.Contains(logs.String(), `"queue_job_uuid":"`+key+`"`) {

@@ -142,7 +142,7 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if claimRequest.WorkflowRunID > 0 {
 		if h.QueueCorrelator != nil {
 			result, bindErr := h.QueueCorrelator.BindRunning(ctx, queueintent.RunningCorrelation{
-				RunnerName: claimRequest.RunnerName, Repository: claimRequest.Repository,
+				RunnerName: claimRequest.RunnerName, PoolName: claim.PoolName, Repository: claimRequest.Repository,
 				WorkflowRunID: claimRequest.WorkflowRunID, JobDisplayName: claimRequest.JobName,
 				WorkflowRef: claimRequest.WorkflowRef,
 			})
