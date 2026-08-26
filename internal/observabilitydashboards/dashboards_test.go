@@ -21,7 +21,7 @@ func TestPublishedDashboardBundleIsValidAndRenderable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Dashboards) != 6 {
+	if len(bundle.Dashboards) != 7 {
 		t.Fatalf("dashboards=%d", len(bundle.Dashboards))
 	}
 	rendered, err := Render(bundle)

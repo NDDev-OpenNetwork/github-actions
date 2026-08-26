@@ -7,7 +7,7 @@ import (
 
 const managedDescriptionPrefix = "managed-by:gds;dashboard-contract:v1;"
 
-var metricPattern = regexp.MustCompile(`(?:gha_fleet_|otelcol_exporter_)[a-zA-Z0-9_:]*`)
+var metricPattern = regexp.MustCompile(`(?:gha_fleet_|gha_diagnostic_storage_|otelcol_exporter_)[a-zA-Z0-9_:]*`)
 
 type OpenObserveDashboard struct {
 	Version                 int              `json:"version"`

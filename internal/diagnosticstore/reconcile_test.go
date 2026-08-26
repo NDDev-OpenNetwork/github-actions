@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 )
@@ -16,6 +18,7 @@ type fakeRequester struct {
 	quota     int64
 	usage     int64
 	lifecycle []byte
+	objects   []time.Time
 }
 
 func (f *fakeRequester) Do(_ context.Context, _ rustfscache.Credential, method, path, _ string, body []byte) (rustfscache.Response, error) {
@@ -49,6 +52,14 @@ func (f *fakeRequester) Do(_ context.Context, _ rustfscache.Credential, method, 
 	case method == http.MethodPut && path == "/example-diagnostics?lifecycle":
 		f.lifecycle = append([]byte(nil), body...)
 		return rustfscache.Response{StatusCode: http.StatusOK}, nil
+	case method == http.MethodGet && strings.HasPrefix(path, "/example-diagnostics?list-type=2&prefix=diagnostics%2Fv1%2F"):
+		var payload strings.Builder
+		payload.WriteString("<ListBucketResult><IsTruncated>false</IsTruncated>")
+		for _, modified := range f.objects {
+			payload.WriteString("<Contents><LastModified>" + modified.UTC().Format(time.RFC3339Nano) + "</LastModified></Contents>")
+		}
+		payload.WriteString("</ListBucketResult>")
+		return rustfscache.Response{StatusCode: http.StatusOK, Body: []byte(payload.String())}, nil
 	default:
 		return rustfscache.Response{StatusCode: http.StatusBadRequest}, nil
 	}
@@ -110,6 +121,23 @@ func TestReportsLowRemoteHeadroom(t *testing.T) {
 	}
 	if result.HeadroomState != "below-minimum" || len(result.Actions) != 1 || result.Actions[0] != "increase_quota_or_reduce_retention" {
 		t.Fatalf("low headroom was not actionable: %+v", result)
+	}
+}
+
+func TestObjectInventoryUsesLifecycleMidnightEligibility(t *testing.T) {
+	config, remote := diagnosticStoreFixture(t)
+	remote.bucket, remote.quota = true, config.QuotaBytes
+	remote.lifecycle = lifecycleDocument(config)
+	modified := time.Date(2026, 8, 19, 0, 36, 58, 0, time.UTC)
+	remote.objects = []time.Time{modified}
+	now := time.Date(2026, 8, 26, 3, 37, 39, 0, time.UTC)
+	result, err := (Runner{Requester: remote, Now: func() time.Time { return now }}).Run(context.Background(), config, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ObjectCount != 1 || result.OldestObjectModified != modified || result.ExpirationEligible != 0 ||
+		result.NextExpirationAt != time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC) {
+		t.Fatalf("unexpected lifecycle inventory: %+v", result)
 	}
 }
 

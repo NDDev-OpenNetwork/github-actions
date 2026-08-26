@@ -130,7 +130,7 @@ func (p Panel) Validate() error {
 	if _, ok := map[string]struct{}{"bytes": {}, "count": {}, "percent": {}, "seconds": {}, "state": {}}[p.Unit]; !ok {
 		return fmt.Errorf("unit is invalid")
 	}
-	if !strings.Contains(p.Query, "gha_fleet_") && !strings.Contains(p.Query, "otelcol_exporter_") {
+	if !strings.Contains(p.Query, "gha_fleet_") && !strings.Contains(p.Query, "gha_diagnostic_storage_") && !strings.Contains(p.Query, "otelcol_exporter_") {
 		return fmt.Errorf("query does not use an owned fleet or Collector metric")
 	}
 	return nil

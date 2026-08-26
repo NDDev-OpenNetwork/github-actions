@@ -64,6 +64,37 @@ dashboards:
         query: max(gha_fleet_queue_uncovered_running)
         unit: count
         description: GitHub running jobs absent from the durable queue model.
+  - id: diagnostic_storage
+    title: Diagnostic storage retention
+    refresh_seconds: 60
+    default_range: 24h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: expiration_eligible
+        title: Objects past lifecycle eligibility
+        kind: timeseries
+        query: max(gha_diagnostic_storage_expiration_eligible_objects)
+        unit: count
+        description: Objects retained after their S3 UTC-midnight expiration boundary.
+      - id: next_expiration
+        title: Time to next lifecycle boundary
+        kind: timeseries
+        query: max(gha_diagnostic_storage_next_expiration_seconds)
+        unit: seconds
+        description: Seconds until the earliest retained object becomes expiration eligible.
+      - id: objects
+        title: Retained diagnostic objects
+        kind: timeseries
+        query: max(gha_diagnostic_storage_objects)
+        unit: count
+        description: Current object population under the managed diagnostic prefix.
+      - id: oldest_object_age
+        title: Oldest retained object age
+        kind: timeseries
+        query: max(gha_diagnostic_storage_oldest_object_age_seconds)
+        unit: seconds
+        description: Age of the oldest retained diagnostic object.
   - id: lifecycle_latency
     title: Job lifecycle latency
     refresh_seconds: 30

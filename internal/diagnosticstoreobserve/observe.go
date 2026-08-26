@@ -119,6 +119,18 @@ func Render(snapshot Snapshot, now time.Time) string {
 	gauge("gha_diagnostic_storage_usage_percent", "Percentage of the diagnostic bucket hard quota currently used.", snapshot.Result.UsagePercentage)
 	gauge("gha_diagnostic_storage_growth_bytes_per_second", "Non-negative growth rate between the two latest successful signed snapshots.", snapshot.GrowthBytesPerSecond)
 	gauge("gha_diagnostic_storage_forecast_exhaustion_seconds", "Seconds to hard-quota exhaustion at the latest positive growth rate, or -1 when not forecastable.", snapshot.ForecastExhaustionSeconds)
+	gauge("gha_diagnostic_storage_objects", "Objects retained under the diagnostic prefix.", float64(snapshot.Result.ObjectCount))
+	oldestObjectAge := float64(-1)
+	if !snapshot.Result.OldestObjectModified.IsZero() && !snapshot.Result.OldestObjectModified.After(now) {
+		oldestObjectAge = now.Sub(snapshot.Result.OldestObjectModified).Seconds()
+	}
+	gauge("gha_diagnostic_storage_oldest_object_age_seconds", "Age of the oldest retained diagnostic object, or -1 when empty.", oldestObjectAge)
+	gauge("gha_diagnostic_storage_expiration_eligible_objects", "Objects retained after their S3 lifecycle UTC-midnight eligibility boundary.", float64(snapshot.Result.ExpirationEligible))
+	nextExpiration := float64(-1)
+	if !snapshot.Result.NextExpirationAt.IsZero() {
+		nextExpiration = max(0, snapshot.Result.NextExpirationAt.Sub(now).Seconds())
+	}
+	gauge("gha_diagnostic_storage_next_expiration_seconds", "Seconds until the earliest retained object reaches its lifecycle eligibility boundary, or -1 when empty.", nextExpiration)
 	return output.String()
 }
 
