@@ -61,16 +61,17 @@ func TestOpenObserveQueryContractIsPortableAndComplete(t *testing.T) {
 	text := string(raw)
 	for _, required := range []string{
 		"eligibility-to-start-by-job",
-		"SUM(duration) AS eligibility_to_start_us",
+		"THEN duration ELSE 0 END)",
 		"github_workflow_run_id", "github_job_name",
 		"'queue.queued'", "'queue.assigned'", "'queue.acquiring'", "'queue.acquired'",
+		"'queue.running'", "HAVING SUM(CASE WHEN operation_name = 'queue.running' THEN 1 ELSE 0 END) > 0",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("eligibility-to-start query lacks %q", required)
 		}
 	}
-	if strings.Contains(text, "'queue.running'") {
-		t.Fatal("eligibility-to-start query includes execution time")
+	if strings.Contains(text, "SUM(duration) AS eligibility_to_start_us") {
+		t.Fatal("eligibility-to-start query sums running execution duration")
 	}
 	for _, privateIdentity := range []string{"NDDev-it-com", "My-Attention-AI-Inc", "10.110.", "209.38."} {
 		if strings.Contains(text, privateIdentity) {
