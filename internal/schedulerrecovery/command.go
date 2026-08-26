@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -85,12 +87,24 @@ func (executor CommandExecutor) run(ctx context.Context, argv []string, attempt 
 	}
 	bounded, cancel := context.WithTimeout(ctx, executor.Config.Timeout)
 	defer cancel()
-	command := exec.CommandContext(bounded, argv[0], argv[1:]...)
-	command.Env = append(command.Environ(),
-		"GHA_SCHEDULER_RECOVERY_ATTEMPT="+attempt.ID,
-		"GHA_SCHEDULER_RECOVERY_STUCK="+strings.Join(attempt.Stuck, ","),
-	)
-	output, err := command.Output()
+	var output []byte
+	var err error
+	for executionAttempt := 0; executionAttempt < 3; executionAttempt++ {
+		command := exec.CommandContext(bounded, argv[0], argv[1:]...)
+		command.Env = append(command.Environ(),
+			"GHA_SCHEDULER_RECOVERY_ATTEMPT="+attempt.ID,
+			"GHA_SCHEDULER_RECOVERY_STUCK="+strings.Join(attempt.Stuck, ","),
+		)
+		output, err = command.Output()
+		if !errors.Is(err, syscall.ETXTBSY) {
+			break
+		}
+		select {
+		case <-bounded.Done():
+			break
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 	if bounded.Err() != nil {
 		return nil, fmt.Errorf("command timed out: %w", bounded.Err())
 	}
