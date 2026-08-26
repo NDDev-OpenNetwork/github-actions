@@ -23,6 +23,10 @@ type config struct {
 	TokenFile      string             `json:"token_file"`
 	GitHubEndpoint string             `json:"github_endpoint"`
 	Policy         vanishedjob.Policy `json:"policy"`
+	Observation    struct {
+		Argv           []string `json:"argv"`
+		TimeoutSeconds int      `json:"timeout_seconds"`
+	} `json:"observation"`
 }
 
 type jsonEvents struct{ encoder *json.Encoder }
@@ -41,8 +45,8 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
-	if *configPath == "" || *jobPath == "" || flags.NArg() != 1 || flags.Arg(0) != "plan" && flags.Arg(0) != "apply" {
-		fmt.Fprintln(stderr, "usage: gha-vanished-job-recovery --config PATH --job PATH <plan|apply>")
+	if *configPath == "" || flags.NArg() != 1 || flags.Arg(0) != "plan" && flags.Arg(0) != "apply" {
+		fmt.Fprintln(stderr, "usage: gha-vanished-job-recovery --config PATH [--job PATH] <plan|apply>")
 		return 2
 	}
 	configuration, err := loadConfig(*configPath)
@@ -50,31 +54,49 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	job, err := loadJob(*jobPath)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	store := vanishedjob.FileStore{Path: configuration.StateFile, LockPath: configuration.LockFile}
-	existing, err := store.Get(vanishedjob.RecordKey(job.Repository, job.RunID, job.RunAttempt))
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if existing == nil {
-		existing, _, err = store.ForRun(job.Repository, job.RunID)
-	}
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if flags.Arg(0) == "plan" {
-		decision, err := vanishedjob.Evaluate(configuration.Policy, job, existing, time.Now().UTC())
-		if err != nil {
-			fmt.Fprintln(stderr, err)
+	var jobs []vanishedjob.Job
+	if *jobPath != "" {
+		job, loadErr := loadJob(*jobPath)
+		if loadErr != nil {
+			fmt.Fprintln(stderr, loadErr)
 			return 1
 		}
-		if err := json.NewEncoder(stdout).Encode(decision); err != nil {
+		jobs = []vanishedjob.Job{job}
+	} else {
+		observation, observeErr := (vanishedjob.CommandObserver{
+			Argv:    configuration.Observation.Argv,
+			Timeout: time.Duration(configuration.Observation.TimeoutSeconds) * time.Second,
+		}).Observe(context.Background())
+		if observeErr != nil {
+			fmt.Fprintln(stderr, observeErr)
+			return 1
+		}
+		jobs = observation.Jobs
+	}
+	store := vanishedjob.FileStore{Path: configuration.StateFile, LockPath: configuration.LockFile}
+	if flags.Arg(0) == "plan" {
+		decisions := make([]vanishedjob.Decision, 0, len(jobs))
+		for _, job := range jobs {
+			existing, getErr := store.Get(vanishedjob.RecordKey(job.Repository, job.RunID, job.RunAttempt))
+			if getErr != nil {
+				fmt.Fprintln(stderr, getErr)
+				return 1
+			}
+			if existing == nil {
+				existing, _, getErr = store.ForRun(job.Repository, job.RunID)
+			}
+			if getErr != nil {
+				fmt.Fprintln(stderr, getErr)
+				return 1
+			}
+			decision, evaluateErr := vanishedjob.Evaluate(configuration.Policy, job, existing, time.Now().UTC())
+			if evaluateErr != nil {
+				fmt.Fprintln(stderr, evaluateErr)
+				return 1
+			}
+			decisions = append(decisions, decision)
+		}
+		if err := json.NewEncoder(stdout).Encode(decisions); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -91,9 +113,11 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		Client: vanishedjob.GitHubClient{Endpoint: endpoint, Token: token, HTTP: &http.Client{Timeout: 20 * time.Second}},
 		Events: jsonEvents{json.NewEncoder(stdout)}, Now: time.Now,
 	}
-	if _, err := controller.Reconcile(context.Background(), job); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	for _, job := range jobs {
+		if _, err := controller.Reconcile(context.Background(), job); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	return 0
 }
@@ -118,6 +142,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if err := configuration.Policy.Validate(); err != nil {
 		return config{}, err
+	}
+	if len(configuration.Observation.Argv) > 0 && (configuration.Observation.TimeoutSeconds <= 0 || !filepath.IsAbs(configuration.Observation.Argv[0])) {
+		return config{}, fmt.Errorf("recovery observation command is invalid")
 	}
 	return configuration, nil
 }
