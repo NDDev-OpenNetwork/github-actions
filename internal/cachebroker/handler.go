@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetryattrs"
 )
 
@@ -54,10 +55,11 @@ type Delivery struct {
 }
 
 type Handler struct {
-	Config Config
-	Store  Store
-	Logger *slog.Logger
-	Now    func() time.Time
+	Config          Config
+	Store           Store
+	QueueCorrelator *queueintent.Correlator
+	Logger          *slog.Logger
+	Now             func() time.Time
 }
 
 func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -80,6 +82,12 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if _, err := h.Store.Read(request.Context()); err != nil {
 			http.Error(writer, "unhealthy", http.StatusServiceUnavailable)
 			return
+		}
+		if h.QueueCorrelator != nil {
+			if err := h.QueueCorrelator.Ready(request.Context()); err != nil {
+				http.Error(writer, "unhealthy", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("ok\n"))
@@ -132,6 +140,28 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if claimRequest.WorkflowRunID > 0 {
+		if h.QueueCorrelator != nil {
+			result, bindErr := h.QueueCorrelator.BindRunning(ctx, queueintent.RunningCorrelation{
+				RunnerName: claimRequest.RunnerName, Repository: claimRequest.Repository,
+				WorkflowRunID: claimRequest.WorkflowRunID, JobDisplayName: claimRequest.JobName,
+				WorkflowRef: claimRequest.WorkflowRef,
+			})
+			if bindErr != nil {
+				logger.WarnContext(ctx, "queue running correlation deferred",
+					telemetryattrs.InstanceName, claimRequest.InstanceName,
+					telemetryattrs.GitHubRepository, claimRequest.Repository,
+					telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
+					"error", bindErr)
+			} else {
+				logger.InfoContext(ctx, "queue running correlation bound",
+					telemetryattrs.InstanceName, claimRequest.InstanceName,
+					telemetryattrs.GitHubRepository, claimRequest.Repository,
+					telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
+					"queue_job_uuid", result.Key,
+					"journal_generation", result.Generation,
+					"changed", result.Changed)
+			}
+		}
 		logger.InfoContext(ctx, "job correlation accepted",
 			telemetryattrs.InstanceName, claimRequest.InstanceName,
 			telemetryattrs.RunnerName, claimRequest.RunnerName,
