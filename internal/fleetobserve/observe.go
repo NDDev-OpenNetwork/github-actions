@@ -199,6 +199,8 @@ type QueueSummary struct {
 	Stored                          int              `json:"stored"`
 	Active                          int              `json:"active"`
 	Expired                         int              `json:"expired"`
+	TerminalJobs                    int              `json:"terminal_jobs"`
+	TerminalNextExpirySeconds       int64            `json:"terminal_next_expiry_seconds"`
 	InFlight                        int              `json:"in_flight"`
 	OldestQueueAgeSeconds           int64            `json:"oldest_queue_age_seconds"`
 	UncoveredRunning                int              `json:"uncovered_running"`
@@ -560,14 +562,16 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		knownScaleSets[pool.ScaleSetName] = struct{}{}
 	}
 	summary := QueueSummary{
-		Generation:            snapshot.Generation,
-		Stored:                snapshot.Stored,
-		Active:                len(snapshot.Active),
-		Expired:               snapshot.Expired,
-		ByState:               make(map[string]int),
-		OldestStateAgeSeconds: make(map[string]int64),
-		ByPriority:            make(map[int]int),
-		ByScaleSet:            make(map[string]int),
+		Generation:                snapshot.Generation,
+		Stored:                    snapshot.Stored,
+		Active:                    len(snapshot.Active),
+		Expired:                   snapshot.Expired,
+		TerminalJobs:              snapshot.TerminalJobs,
+		TerminalNextExpirySeconds: snapshot.TerminalNextExpirySeconds,
+		ByState:                   make(map[string]int),
+		OldestStateAgeSeconds:     make(map[string]int64),
+		ByPriority:                make(map[int]int),
+		ByScaleSet:                make(map[string]int),
 	}
 	for scaleSet := range knownScaleSets {
 		summary.ByScaleSet[scaleSet] = 0

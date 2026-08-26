@@ -88,10 +88,12 @@ type Journal struct {
 }
 
 type Snapshot struct {
-	Generation uint64
-	Stored     int
-	Expired    int
-	Active     []Intent
+	Generation                uint64
+	Stored                    int
+	Expired                   int
+	TerminalJobs              int
+	TerminalNextExpirySeconds int64
+	Active                    []Intent
 }
 
 func (r Reader) HasActive(ctx context.Context) (bool, error) {
@@ -118,6 +120,16 @@ func (r Reader) ReadActive(ctx context.Context) (Snapshot, error) {
 	now := r.now()
 	active := make([]Intent, 0, len(journal.Intents))
 	expired := 0
+	terminalNextExpirySeconds := int64(0)
+	for _, expiry := range journal.TerminalJobs {
+		remaining := int64(expiry.Sub(now).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		if terminalNextExpirySeconds == 0 || remaining < terminalNextExpirySeconds {
+			terminalNextExpirySeconds = remaining
+		}
+	}
 	for _, intent := range journal.Intents {
 		if intent.ExpiresAt.After(now) {
 			active = append(active, intent)
@@ -134,7 +146,11 @@ func (r Reader) ReadActive(ctx context.Context) (Snapshot, error) {
 		}
 		return active[left].Key < active[right].Key
 	})
-	return Snapshot{Generation: journal.Generation, Stored: len(journal.Intents), Expired: expired, Active: active}, nil
+	return Snapshot{
+		Generation: journal.Generation, Stored: len(journal.Intents), Expired: expired,
+		TerminalJobs: len(journal.TerminalJobs), TerminalNextExpirySeconds: terminalNextExpirySeconds,
+		Active: active,
+	}, nil
 }
 
 // ActiveForScaleSet reports whether the named scale set of the named tenant

@@ -73,6 +73,28 @@ func TestReaderReturnsOnlyActiveIntentsInDeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestReaderReportsBoundedTerminalTombstones(t *testing.T) {
+	now := time.Date(2026, 8, 26, 14, 0, 0, 0, time.UTC)
+	path := writeFixture(t, `{
+  "schema_version": 5,
+  "generation": 9,
+  "updated_at": "2026-08-26T13:59:00Z",
+  "intents": {},
+  "repositories": {},
+  "terminal_jobs": {
+    "11111111-1111-4111-8111-111111111111": "2026-08-27T14:00:00Z",
+    "22222222-2222-4222-8222-222222222222": "2026-08-26T15:00:00Z"
+  }
+}`)
+	snapshot, err := (Reader{Path: path, Now: func() time.Time { return now }}).ReadActive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TerminalJobs != 2 || snapshot.TerminalNextExpirySeconds != 3600 {
+		t.Fatalf("terminal snapshot = %#v", snapshot)
+	}
+}
+
 func TestReaderRejectsFinalComponentSymlink(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "real-journal.json")

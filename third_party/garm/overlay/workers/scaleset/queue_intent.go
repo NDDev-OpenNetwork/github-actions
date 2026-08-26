@@ -558,10 +558,12 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	var orphanedStarts []string
 	var uncorrelatedStarts []string
 	var reservationTransfers [][2]string
+	var suppressedTerminalAssignments []string
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		orphanedStarts = orphanedStarts[:0]
 		uncorrelatedStarts = uncorrelatedStarts[:0]
 		reservationTransfers = reservationTransfers[:0]
+		suppressedTerminalAssignments = suppressedTerminalAssignments[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
 		for _, job := range completed {
@@ -656,6 +658,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		}
 		for _, job := range assigned {
 			if expiry, terminal := journal.TerminalJobs[job.JobID]; terminal && expiry.After(now) {
+				suppressedTerminalAssignments = append(suppressedTerminalAssignments, job.JobID)
 				continue
 			}
 			intent, err := queueIntentFromLifecycle(config, scaleSet, entity, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
@@ -710,6 +713,12 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		slog.Warn(
 			"started job has no valid runner identity; acknowledging with explicit telemetry gap",
 			"key", key, "scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
+		)
+	}
+	for _, jobID := range suppressedTerminalAssignments {
+		slog.Info(
+			"suppressed delayed terminal job assignment",
+			"job_id", jobID, "scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
 		)
 	}
 	// A durable assigned/queued intent is the crash-safe ownership transfer.

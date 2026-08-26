@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.82"
+readonly derivative_version="v0.2.1-nddev.83"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="18089d33be778705d0a5b20a87f5b1ddea06b0a7bc9daab883a8014b0507d741"
+readonly expected_binary_sha256="f9594a5ff67643a3b1f9e3357db6a96b45e1ec83797ff9ad0189302a264bb238"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -98,7 +98,7 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
 )
 readonly overlay_sha256s=(
-  "180e60554d264358d5a71c3b16b90d897a82cdb51a7b3d70b587029f97e5e3fe"
+  "31486d264f0a2b8dc63bb902ee49163c32e4c8774a6ad5b6d29efad92a228a03"
   "2f7d98f63033d73d972a9e91ca7cca0934e09abbc62fa971b6ed99e328f531b9"
   "611d67a74ff626f04cc0240409a22848525a06c2ae4dc7180c4b75001fb4b599"
   "9379d69b8a40295e176fdfb0587b299fabda69de9708e63672c41546fd9a3508"

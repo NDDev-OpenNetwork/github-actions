@@ -139,6 +139,8 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_queue_intents_stored", "Queue intents stored in the current journal generation.", float64(snapshot.Queue.Stored))
 	gauge(&output, "gha_fleet_queue_intents_active", "Unexpired queue intents owned by central admission.", float64(snapshot.Queue.Active))
 	gauge(&output, "gha_fleet_queue_intents_expired", "Expired queue intents awaiting the next writer cleanup transaction.", float64(snapshot.Queue.Expired))
+	gauge(&output, "gha_fleet_queue_terminal_tombstones", "Completed job identities retained to suppress delayed lifecycle redelivery.", float64(snapshot.Queue.TerminalJobs))
+	gauge(&output, "gha_fleet_queue_terminal_tombstone_next_expiry_seconds", "Seconds until the next bounded terminal job tombstone expires.", float64(snapshot.Queue.TerminalNextExpirySeconds))
 	gauge(&output, "gha_fleet_queue_intents_in_flight", "Acquiring, acquired, assigned or running queue intents.", float64(snapshot.Queue.InFlight))
 	gauge(&output, "gha_fleet_queue_oldest_age_seconds", "Age of the oldest active GitHub queue intent.", float64(snapshot.Queue.OldestQueueAgeSeconds))
 	gauge(&output, "gha_fleet_queue_uncovered_running", "Running queue intents without a durable created or warm-claimed execution lease.", float64(snapshot.Queue.UncoveredRunning))
