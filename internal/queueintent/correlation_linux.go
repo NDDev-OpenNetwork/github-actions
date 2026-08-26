@@ -144,7 +144,7 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 			}
 			owner := strings.SplitN(correlation.Repository, "/", 2)[0]
 			if intent.OwnerAccount() != owner || (intent.Repository != owner && intent.Repository != correlation.Repository) ||
-				intent.JobDisplayName != correlation.JobDisplayName {
+				!jobDisplayMatchesHook(intent.JobDisplayName, correlation.JobDisplayName) {
 				continue
 			}
 			if intent.WorkflowRunID != 0 && intent.WorkflowRunID != correlation.WorkflowRunID {
@@ -193,6 +193,10 @@ func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation
 		return CorrelationResult{}, err
 	}
 	return CorrelationResult{Key: key, Generation: journal.Generation, Changed: true}, nil
+}
+
+func jobDisplayMatchesHook(displayName, jobKey string) bool {
+	return displayName == jobKey || strings.HasPrefix(displayName, jobKey+" / ")
 }
 
 func validateRunningCorrelation(correlation RunningCorrelation) error {

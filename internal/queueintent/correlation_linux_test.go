@@ -98,6 +98,23 @@ func TestRunningCorrelationWaitsForExactRunnerAndRepository(t *testing.T) {
 	}
 }
 
+func TestJobDisplayMatchesOnlyExactKeyOrExpandedDisplay(t *testing.T) {
+	for _, test := range []struct {
+		display, key string
+		want         bool
+	}{
+		{"security-bundle", "security-bundle", true},
+		{"security-bundle / actionlint + zizmor", "security-bundle", true},
+		{"static / python (uv, 3.14)", "python", false},
+		{"security-bundle-extra / scan", "security-bundle", false},
+		{"security-bundle", "security", false},
+	} {
+		if got := jobDisplayMatchesHook(test.display, test.key); got != test.want {
+			t.Fatalf("jobDisplayMatchesHook(%q, %q)=%t, want %t", test.display, test.key, got, test.want)
+		}
+	}
+}
+
 func writeCorrelationFixture(t *testing.T, path string, journal Journal) {
 	t.Helper()
 	raw, err := json.MarshalIndent(journal, "", "  ")
