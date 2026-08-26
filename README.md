@@ -26,6 +26,9 @@ whole-pipeline performance standard implemented by this engine.
   the server-provided `GITHUB_REPOSITORY` to an estate allowlist and receive
   only that repository/pool trust role. Claim retries are idempotent; another
   repository, runner, role, expired token or replay after cleanup fails closed.
+  The same authenticated job-start claim binds the exact workflow run to the
+  runner's authoritative running queue intent, so short jobs remain visible in
+  run-scoped latency telemetry even when their lifecycle webhook is sparse.
 - `reconcile-diagnostic-storage` plans, applies and reads back the remote hard
   quota and prefix lifecycle as one source-controlled durability contract. A
   consuming estate sizes the quota from measured retention, burst and outage

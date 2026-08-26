@@ -27,15 +27,17 @@ const (
 )
 
 type Config struct {
-	SchemaVersion int          `yaml:"schema_version" json:"schema_version"`
-	ListenAddress string       `yaml:"listen_address" json:"listen_address"`
-	Endpoint      string       `yaml:"endpoint" json:"endpoint"`
-	Region        string       `yaml:"region" json:"region"`
-	Bucket        string       `yaml:"bucket" json:"bucket"`
-	CAFile        string       `yaml:"ca_file" json:"ca_file"`
-	JournalFile   string       `yaml:"journal_file" json:"journal_file"`
-	JournalLock   string       `yaml:"journal_lock_file" json:"journal_lock_file"`
-	Repositories  []Repository `yaml:"repositories" json:"repositories"`
+	SchemaVersion    int          `yaml:"schema_version" json:"schema_version"`
+	ListenAddress    string       `yaml:"listen_address" json:"listen_address"`
+	Endpoint         string       `yaml:"endpoint" json:"endpoint"`
+	Region           string       `yaml:"region" json:"region"`
+	Bucket           string       `yaml:"bucket" json:"bucket"`
+	CAFile           string       `yaml:"ca_file" json:"ca_file"`
+	JournalFile      string       `yaml:"journal_file" json:"journal_file"`
+	JournalLock      string       `yaml:"journal_lock_file" json:"journal_lock_file"`
+	QueueJournalFile string       `yaml:"queue_journal_file,omitempty" json:"queue_journal_file,omitempty"`
+	QueueJournalLock string       `yaml:"queue_journal_lock_file,omitempty" json:"queue_journal_lock_file,omitempty"`
+	Repositories     []Repository `yaml:"repositories" json:"repositories"`
 }
 
 type Repository struct {
@@ -95,6 +97,19 @@ func (c Config) Validate() error {
 	for label, value := range map[string]string{"ca_file": c.CAFile, "journal_file": c.JournalFile, "journal_lock_file": c.JournalLock} {
 		if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
 			return fmt.Errorf("%s must be an absolute clean non-root path", label)
+		}
+	}
+	if (c.QueueJournalFile == "") != (c.QueueJournalLock == "") {
+		return errors.New("queue_journal_file and queue_journal_lock_file must be configured together")
+	}
+	if c.QueueJournalFile != "" {
+		for label, value := range map[string]string{"queue_journal_file": c.QueueJournalFile, "queue_journal_lock_file": c.QueueJournalLock} {
+			if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+				return fmt.Errorf("%s must be an absolute clean non-root path", label)
+			}
+		}
+		if filepath.Dir(c.QueueJournalFile) != filepath.Dir(c.QueueJournalLock) || c.QueueJournalFile == c.QueueJournalLock {
+			return errors.New("queue journal and lock must be distinct siblings")
 		}
 	}
 	if len(c.Repositories) == 0 {

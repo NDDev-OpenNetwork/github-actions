@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
 var version = "dev"
@@ -31,7 +32,11 @@ func main() {
 		logger.Error("load cache broker config", "error", err)
 		os.Exit(1)
 	}
-	handler := cachebroker.Handler{Config: config, Store: cachebroker.Store{Path: config.JournalFile, LockPath: config.JournalLock}, Logger: logger}
+	var correlator *queueintent.Correlator
+	if config.QueueJournalFile != "" {
+		correlator = &queueintent.Correlator{Path: config.QueueJournalFile, LockPath: config.QueueJournalLock}
+	}
+	handler := cachebroker.Handler{Config: config, Store: cachebroker.Store{Path: config.JournalFile, LockPath: config.JournalLock}, QueueCorrelator: correlator, Logger: logger}
 	server := &http.Server{Addr: config.ListenAddress, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

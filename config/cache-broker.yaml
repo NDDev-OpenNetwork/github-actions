@@ -6,6 +6,8 @@ bucket: github-actions-cache
 ca_file: /etc/gha-fleet/trust/rustfs-ca.pem
 journal_file: /var/lib/gha-cache-broker/claims.json
 journal_lock_file: /var/lib/gha-cache-broker/claims.lock
+queue_journal_file: /var/lib/gha-fleet/queue-intents.json
+queue_journal_lock_file: /var/lib/gha-fleet/queue-intents.lock
 repositories:
   - name: example-org/example-actions
     roles:

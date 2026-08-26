@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
 func TestCanonicalConfigLoads(t *testing.T) {
@@ -216,6 +218,62 @@ func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 		entries[0]["github.workflow_run_id"] != float64(456) ||
 		entries[0]["runner.name"] != "runner-three" {
 		t.Fatalf("correlation log=%v", entries)
+	}
+}
+
+func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
+	now := time.Date(2026, 8, 26, 18, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	token := bytes.Repeat([]byte{4}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "runner-exact", "pool", "trusted-writer", token); err != nil {
+		t.Fatal(err)
+	}
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	queueLock := filepath.Join(directory, "queue-intents.lock")
+	key := "github-scale-set-job:v2:42:job-1"
+	queue := queueintent.Journal{
+		SchemaVersion: queueintent.SchemaVersion, Generation: 4, UpdatedAt: now,
+		Intents: map[string]queueintent.Intent{key: {
+			Key: key, ScaleSetID: 42, JobID: "job-1", RunnerRequestID: 99,
+			ScaleSetName: "example-standard", RunnerName: "runner-exact", Owner: "example-org",
+			Repository: "example-org", WorkflowRef: "unavailable-before-job-available", EventName: "push",
+			QueueTime: now.Add(-time.Minute), State: queueintent.StateRunning, Priority: 1,
+			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+		}}, Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
+	}
+	raw, err := json.Marshal(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", Bucket: "github-actions-cache", CAFile: "/tmp/ca", JournalFile: store.Path, JournalLock: store.LockPath, QueueJournalFile: queuePath, QueueJournalLock: queueLock, Repositories: []Repository{{Name: "example-org/example-actions", Roles: []Identity{{Role: "trusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/trusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "untrusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/untrusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "release-reader", Mode: "read-only", Prefix: "example-org/example-actions/trust/promoted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}}}}}
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "runner-exact", RunnerName: "runner-exact", Repository: "example-org/example-repo",
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1, JobName: "quality",
+		WorkflowRef: "example-org/example-repo/.github/workflows/ci.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("a", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
+	var logs bytes.Buffer
+	correlator := &queueintent.Correlator{Path: queuePath, LockPath: queueLock, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1}
+	handler := Handler{Config: config, Store: store, QueueCorrelator: correlator, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	snapshot, err := (queueintent.Reader{Path: queuePath, Now: func() time.Time { return now.Add(time.Second) }}).ReadActive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := snapshot.Active[0]
+	if intent.Repository != "example-org/example-repo" || intent.WorkflowRunID != 456 || intent.JobDisplayName != "quality" {
+		t.Fatalf("correlated intent=%+v", intent)
+	}
+	if !strings.Contains(logs.String(), `"msg":"queue running correlation bound"`) || !strings.Contains(logs.String(), `"queue_job_uuid":"`+key+`"`) {
+		t.Fatalf("missing correlation evidence: %s", logs.String())
 	}
 }
 
