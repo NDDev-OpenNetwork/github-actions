@@ -74,6 +74,21 @@ func (store FileStore) Begin(_ context.Context, attempt Attempt) (bool, error) {
 	return acquired, err
 }
 
+func (store FileStore) Active(_ context.Context) ([]Attempt, error) {
+	var attempts []Attempt
+	err := store.locked(func(state *fileState) error {
+		attempts = make([]Attempt, 0, len(state.Active))
+		for _, attempt := range state.Active {
+			attempts = append(attempts, attempt)
+		}
+		slices.SortFunc(attempts, func(left, right Attempt) int {
+			return left.StartedAt.Compare(right.StartedAt)
+		})
+		return nil
+	})
+	return attempts, err
+}
+
 func (store FileStore) Finish(_ context.Context, result Result) error {
 	return store.locked(func(state *fileState) error {
 		if _, exists := state.Active[result.AttemptID]; !exists {

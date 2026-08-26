@@ -12,7 +12,7 @@ import (
 
 type memoryAttempts struct {
 	mu       sync.Mutex
-	active   map[string]bool
+	active   map[string]Attempt
 	finished []Result
 }
 
@@ -20,12 +20,17 @@ func (store *memoryAttempts) Begin(_ context.Context, attempt Attempt) (bool, er
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.active == nil {
-		store.active = map[string]bool{}
+		store.active = map[string]Attempt{}
 	}
-	if store.active[attempt.ID] {
+	if _, exists := store.active[attempt.ID]; exists {
 		return false, nil
 	}
-	store.active[attempt.ID] = true
+	for _, result := range store.finished {
+		if result.AttemptID == attempt.ID {
+			return false, nil
+		}
+	}
+	store.active[attempt.ID] = attempt
 	return true, nil
 }
 
@@ -33,7 +38,18 @@ func (store *memoryAttempts) Finish(_ context.Context, result Result) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.finished = append(store.finished, result)
+	delete(store.active, result.AttemptID)
 	return nil
+}
+
+func (store *memoryAttempts) Active(_ context.Context) ([]Attempt, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	attempts := make([]Attempt, 0, len(store.active))
+	for _, attempt := range store.active {
+		attempts = append(attempts, attempt)
+	}
+	return attempts, nil
 }
 
 type faultExecutor struct {

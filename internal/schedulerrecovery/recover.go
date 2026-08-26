@@ -28,8 +28,30 @@ type Result struct {
 }
 
 type AttemptStore interface {
+	Active(context.Context) ([]Attempt, error)
 	Begin(context.Context, Attempt) (bool, error)
 	Finish(context.Context, Result) error
+}
+
+func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
+	progressed, remaining, progressErr := executor.AwaitProgress(ctx, attempt)
+	if progressErr == nil && len(remaining) == 0 {
+		result := Result{
+			AttemptID: attempt.ID, Progressed: slices.Clone(progressed), Recovered: true,
+			FinishedAt: now().UTC(),
+		}
+		if err := store.Finish(ctx, result); err != nil {
+			return result, fmt.Errorf("finish resumed recovery attempt: %w", err)
+		}
+		return result, nil
+	}
+	// The previous process may have died before or during the manager restart.
+	// Re-running the checkpoint-first sequence is idempotent; restricting it to
+	// the still-stuck identities avoids replaying work already proven progressed.
+	if len(remaining) > 0 {
+		attempt.Stuck = slices.Clone(remaining)
+	}
+	return recoverAcquired(ctx, attempt, store, executor, now)
 }
 
 type Executor interface {

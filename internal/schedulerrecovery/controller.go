@@ -41,6 +41,29 @@ func (controller Controller) Tick(ctx context.Context) (Decision, Result, error)
 	if controller.Observer == nil || controller.Heartbeat == nil || controller.Attempts == nil || controller.Executor == nil || controller.Events == nil || controller.Now == nil {
 		return Decision{}, Result{}, fmt.Errorf("scheduler recovery controller is incomplete")
 	}
+	active, err := controller.Attempts.Active(ctx)
+	if err != nil {
+		return Decision{}, Result{}, fmt.Errorf("read active recovery attempt: %w", err)
+	}
+	if len(active) > 1 {
+		return Decision{}, Result{}, fmt.Errorf("multiple active recovery attempts require deterministic repair")
+	}
+	if len(active) == 1 {
+		attempt := active[0]
+		if err := controller.emit(ctx, Event{At: controller.Now().UTC(), State: "recovering", Reason: "resume-interrupted-recovery", AttemptID: attempt.ID, Stuck: attempt.Stuck}); err != nil {
+			return Decision{}, Result{}, err
+		}
+		result, recoveryErr := resumeAcquired(ctx, attempt, controller.Attempts, controller.Executor, controller.Now)
+		terminal := Event{At: controller.Now().UTC(), State: "recovered", Reason: "resume-interrupted-recovery", AttemptID: attempt.ID, Stuck: result.Remaining}
+		if recoveryErr != nil {
+			terminal.State = "failed"
+			terminal.Error = recoveryErr.Error()
+		}
+		if err := controller.emit(ctx, terminal); err != nil {
+			return Decision{}, result, err
+		}
+		return Decision{Reason: "resume-interrupted-recovery", Stuck: attempt.Stuck}, result, recoveryErr
+	}
 	observation, err := controller.Observer.Observe(ctx)
 	if err != nil {
 		return Decision{}, Result{}, fmt.Errorf("observe scheduler: %w", err)
