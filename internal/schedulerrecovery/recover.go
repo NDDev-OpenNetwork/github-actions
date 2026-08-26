@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -25,6 +26,62 @@ type Result struct {
 	Recovered  bool
 	FinishedAt time.Time
 	Error      string
+}
+
+type resultWire struct {
+	AttemptID  string    `json:"attempt_id"`
+	Suppressed bool      `json:"suppressed"`
+	Checkpoint string    `json:"checkpoint,omitempty"`
+	Progressed []string  `json:"progressed,omitempty"`
+	Remaining  []string  `json:"remaining,omitempty"`
+	Recovered  bool      `json:"recovered"`
+	FinishedAt time.Time `json:"finished_at"`
+	Error      string    `json:"error,omitempty"`
+}
+
+func (result Result) MarshalJSON() ([]byte, error) {
+	return json.Marshal(resultWire{
+		AttemptID: result.AttemptID, Suppressed: result.Suppressed, Checkpoint: result.Checkpoint,
+		Progressed: result.Progressed, Remaining: result.Remaining, Recovered: result.Recovered,
+		FinishedAt: result.FinishedAt, Error: result.Error,
+	})
+}
+
+func (result *Result) UnmarshalJSON(data []byte) error {
+	var normalized resultWire
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return err
+	}
+	if normalized.AttemptID != "" || !normalized.FinishedAt.IsZero() {
+		*result = Result{
+			AttemptID: normalized.AttemptID, Suppressed: normalized.Suppressed, Checkpoint: normalized.Checkpoint,
+			Progressed: normalized.Progressed, Remaining: normalized.Remaining, Recovered: normalized.Recovered,
+			FinishedAt: normalized.FinishedAt, Error: normalized.Error,
+		}
+		return nil
+	}
+	// v1 was deployed before an explicit JSON contract and therefore used Go
+	// field names. Decode it once; the next atomic state write normalizes every
+	// retained result without losing cooldown or recovery history.
+	var legacy struct {
+		AttemptID  string
+		Suppressed bool
+		Checkpoint string
+		Progressed []string
+		Remaining  []string
+		Recovered  bool
+		FinishedAt time.Time
+		Error      string
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	*result = Result{
+		AttemptID: legacy.AttemptID, Suppressed: legacy.Suppressed, Checkpoint: legacy.Checkpoint,
+		Progressed: legacy.Progressed, Remaining: legacy.Remaining, Recovered: legacy.Recovered,
+		FinishedAt: legacy.FinishedAt, Error: legacy.Error,
+	}
+	return nil
 }
 
 type AttemptStore interface {
