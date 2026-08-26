@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.84
+derivative_version: v0.2.1-nddev.85
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -88,6 +88,9 @@ patches:
   - path: third_party/garm/patches/0027-bound-upstream-download-attempts.patch
     sha256: 35f257c8016c7999c8780970f673c5b35e04b3b3301565cffea0bd242e168456
     purpose: Bound every upstream Linux and Gitea bootstrap curl path to two retries after the initial attempt so GARM and the provider enforce the same three-total-attempt contract.
+  - path: third_party/garm/patches/0028-terminal-workflow-run-reconciliation.patch
+    sha256: 3bc2722e87f1721c6094130d0f07310a796bf8074504ef121acac8ca7402887c
+    purpose: Treat a completed workflow run as authoritative over a queued child job so cancelled runs release their exact queue intent and cannot be resurrected during scale-set reconciliation.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: 31486d264f0a2b8dc63bb902ee49163c32e4c8774a6ad5b6d29efad92a228a03
@@ -115,7 +118,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 2c8dcf0f80071a5b488a3c20ac347f18975c7559bdae504091385cf48ac85534
+  binary_sha256: 4532d9881b98a3c99acb358c6437c1e738b9d5fc0268c2c5e0cbc3c27327e4c5
 runtime_contract:
   queue_intent_schema_version: 5
   event_driven_scale_set_wake: true
