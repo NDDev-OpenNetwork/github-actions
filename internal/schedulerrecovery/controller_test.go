@@ -73,3 +73,24 @@ func TestControllerReportsHealthyCurrentHeartbeat(t *testing.T) {
 	require.Equal(t, "dispatcher-heartbeat-current", decision.Reason)
 	require.Equal(t, "healthy", events.events[0].State)
 }
+
+func TestControllerFinishesInterruptedRecoveryAfterRestartProgressed(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 26, 14, 13, 56, 0, time.UTC)
+	attempt := NewAttempt(at, []string{"retry-1"})
+	store := &memoryAttempts{active: map[string]Attempt{attempt.ID: attempt}}
+	executor := &faultExecutor{progressed: []string{"retry-1"}}
+	events := &eventRecorder{}
+	controller := Controller{
+		Policy:   Policy{MinimumStuckAge: time.Minute, MinimumUptime: time.Minute, Cooldown: time.Minute, HeartbeatStale: time.Minute},
+		Observer: staticObserver{}, Heartbeat: staticHeartbeat{}, Attempts: store, Executor: executor,
+		Events: events, Now: func() time.Time { return at.Add(time.Minute) },
+	}
+	decision, result, err := controller.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "resume-interrupted-recovery", decision.Reason)
+	require.True(t, result.Recovered)
+	require.Zero(t, executor.restarts)
+	require.Empty(t, store.active)
+	require.Equal(t, []string{"recovering", "recovered"}, []string{events.events[0].State, events.events[1].State})
+}

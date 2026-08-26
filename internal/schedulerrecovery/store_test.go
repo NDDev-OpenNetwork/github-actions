@@ -20,6 +20,9 @@ func TestFileStorePersistsAttemptAndSuppressesReplay(t *testing.T) {
 	require.True(t, acquired)
 
 	reopened := FileStore{Path: store.Path, LockPath: store.LockPath}
+	active, err := reopened.Active(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []Attempt{attempt}, active)
 	acquired, err = reopened.Begin(context.Background(), attempt)
 	require.NoError(t, err)
 	require.False(t, acquired)

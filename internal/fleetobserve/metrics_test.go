@@ -45,6 +45,8 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_provider_warm_preemptions_total 0\n",
 		"gha_fleet_queue_journal_generation 1\n",
 		"gha_fleet_queue_intents_active 0\n",
+		"gha_fleet_queue_terminal_tombstones 0\n",
+		"gha_fleet_queue_terminal_tombstone_next_expiry_seconds 0\n",
 		"gha_fleet_queue_intents_in_flight 0\n",
 		"gha_fleet_queue_uncovered_running 0\n",
 		"gha_fleet_queue_missing_runner_request_id 0\n",

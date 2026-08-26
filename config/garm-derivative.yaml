@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.82
+derivative_version: v0.2.1-nddev.83
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -90,8 +90,8 @@ patches:
     purpose: Bound every upstream Linux and Gitea bootstrap curl path to two retries after the initial attempt so GARM and the provider enforce the same three-total-attempt contract.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 180e60554d264358d5a71c3b16b90d897a82cdb51a7b3d70b587029f97e5e3fe
-    purpose: Fsync-backed central queue admission where bounded terminal tombstones prevent delayed JobAssigned redelivery from resurrecting completed work, while provisional capacity, repository binding, running rehydration and stable phase-entry semantics remain intact.
+    sha256: 31486d264f0a2b8dc63bb902ee49163c32e4c8774a6ad5b6d29efad92a228a03
+    purpose: Fsync-backed central queue admission where bounded terminal tombstones prevent delayed JobAssigned redelivery from resurrecting completed work and emit one structured suppression event, while provisional capacity, repository binding, running rehydration and stable phase-entry semantics remain intact.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
     sha256: 2f7d98f63033d73d972a9e91ca7cca0934e09abbc62fa971b6ed99e328f531b9
     purpose: Deterministic terminal-redelivery suppression, disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement and concurrent-selection tests.
@@ -115,7 +115,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 18089d33be778705d0a5b20a87f5b1ddea06b0a7bc9daab883a8014b0507d741
+  binary_sha256: f9594a5ff67643a3b1f9e3357db6a96b45e1ec83797ff9ad0189302a264bb238
 runtime_contract:
   queue_intent_schema_version: 5
   event_driven_scale_set_wake: true
