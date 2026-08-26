@@ -51,13 +51,18 @@ queries:
     sql: >-
       SELECT queue_job_uuid, github_workflow_run_id, github_job_name,
       queue_repository, queue_scale_set, queue_priority,
-      SUM(duration) AS eligibility_to_start_us,
-      MIN(_timestamp) AS first_eligible_at
+      SUM(CASE WHEN operation_name IN ('queue.queued', 'queue.assigned',
+      'queue.acquiring', 'queue.acquired') THEN duration ELSE 0 END)
+      AS eligibility_to_start_us,
+      MIN(CASE WHEN operation_name IN ('queue.queued', 'queue.assigned',
+      'queue.acquiring', 'queue.acquired') THEN _timestamp END)
+      AS first_eligible_at
       FROM "fleet_traces"
       WHERE operation_name IN ('queue.queued', 'queue.assigned',
-      'queue.acquiring', 'queue.acquired')
+      'queue.acquiring', 'queue.acquired', 'queue.running')
       GROUP BY queue_job_uuid, github_workflow_run_id, github_job_name,
       queue_repository, queue_scale_set, queue_priority
+      HAVING SUM(CASE WHEN operation_name = 'queue.running' THEN 1 ELSE 0 END) > 0
       ORDER BY eligibility_to_start_us DESC
 
   - id: member-provisioning-summary
