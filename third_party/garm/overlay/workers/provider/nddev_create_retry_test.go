@@ -704,6 +704,53 @@ func TestNDDevCapacityRetrySerializesEveryScaleSetInTheMeasuredFleet(t *testing.
 	}
 }
 
+func TestNDDevSharedCapacitySkipsOwnerlessAliasFromAnotherTenant(t *testing.T) {
+	now := time.Date(2026, 8, 26, 19, 40, 0, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	retryPath := filepath.Join(directory, "retry.json")
+	t.Setenv(nddevRetryFileEnv, retryPath)
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	queue := fmt.Sprintf(`{"schema_version":5,"intents":{"active":{"key":"active","job_id":"job-active","scale_set_id":5,"scale_set_name":"nddev-linux-integration","owner":"active-org","state":"assigned","queue_time":%q,"expires_at":%q}}}`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleDomain := "scale-set:stale-entity:5"
+	activeDomain := "scale-set:active-entity:5"
+	journal := nddevRetryJournal{SchemaVersion: nddevRetrySchemaVersion, Records: map[string]nddevRetryRecord{
+		staleDomain:            {JobID: staleDomain, Attempts: 1, LastErrorClass: "capacity", UpdatedAt: now.Add(-time.Hour), NextAllowedAt: now.Add(-time.Minute), ScaleSetName: "nddev-linux-integration"},
+		activeDomain:           {JobID: activeDomain, Attempts: 1, LastErrorClass: "capacity", UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(-time.Second), ScaleSetName: "nddev-linux-integration"},
+		nddevCapacityDomainKey: {JobID: nddevCapacityDomainKey, Attempts: 1, LastErrorClass: "capacity", UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now, ScaleSetName: "nddev-linux-integration", WakeReason: "capacity-refused"},
+	}, Reservations: map[string]nddevRetryReservation{}}
+	if err := nddevWriteRetryJournal(retryPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	scaleSet := params.ScaleSet{ScaleSetID: 5, Name: "nddev-linux-integration"}
+	entity := params.ForgeEntity{ID: "active-entity", Owner: "active-org"}
+	if err := NDDevScaleSetCreateAllowed(context.Background(), scaleSet, entity); err != nil {
+		t.Fatalf("exact active tenant was blocked by stale alias: %v", err)
+	}
+	concrete := activeDomain + ":job:job-active"
+	if err := nddevBeforeProviderCreate(context.Background(), concrete, scaleSet.Name); err != nil {
+		t.Fatalf("exact active tenant did not acquire shared probe: %v", err)
+	}
+	updated, err := nddevReadRetryJournal(retryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := updated.Records[nddevCapacityDomainKey].ProbeOwner; owner != concrete {
+		t.Fatalf("shared probe owner=%q, want %q", owner, concrete)
+	}
+	if updated.Records[activeDomain].Owner != "active-org" || updated.Records[staleDomain].Owner != "" {
+		t.Fatalf("tenant qualification drifted: active=%#v stale=%#v", updated.Records[activeDomain], updated.Records[staleDomain])
+	}
+}
+
 func TestNDDevExpiredConcreteProbeOwnerWithoutFailureIsReleased(t *testing.T) {
 	now := time.Date(2026, 8, 23, 8, 18, 54, 0, time.UTC)
 	oldOwner := "scale-set:entity-one:5:instance:failed"
