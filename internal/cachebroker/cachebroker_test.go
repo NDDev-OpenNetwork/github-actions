@@ -236,7 +236,7 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 		SchemaVersion: queueintent.SchemaVersion, Generation: 4, UpdatedAt: now,
 		Intents: map[string]queueintent.Intent{key: {
 			Key: key, ScaleSetID: 42, JobID: "job-1", RunnerRequestID: 99,
-			ScaleSetName: "example-standard", JobDisplayName: "quality", Owner: "example-org",
+			ScaleSetName: "example-standard", JobDisplayName: "quality / go (1.26)", Owner: "example-org",
 			Repository: "example-org", WorkflowRef: "unavailable-before-job-available", EventName: "push",
 			QueueTime: now.Add(-time.Minute), State: queueintent.StateAcquired, Priority: 1,
 			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
@@ -269,7 +269,7 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := snapshot.Active[0]
-	if intent.Repository != "example-org/example-repo" || intent.WorkflowRunID != 456 || intent.JobDisplayName != "quality" ||
+	if intent.Repository != "example-org/example-repo" || intent.WorkflowRunID != 456 || intent.JobDisplayName != "quality / go (1.26)" ||
 		intent.State != queueintent.StateRunning || intent.RunnerName != "runner-exact" {
 		t.Fatalf("correlated intent=%+v", intent)
 	}
