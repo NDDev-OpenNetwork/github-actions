@@ -47,7 +47,7 @@ func TestCacheRoleMappingIsExactAndPromoterIsNeverDelivered(t *testing.T) {
 		{platformconfig.Pool{Name: "trusted", Trust: "trusted", Capabilities: platformconfig.Capabilities{CacheWriteScope: "trusted"}}, "trusted-writer", true, false},
 		{platformconfig.Pool{Name: "untrusted", Trust: "untrusted", Capabilities: platformconfig.Capabilities{CacheWriteScope: "isolated"}}, "untrusted-writer", true, false},
 		{platformconfig.Pool{Name: "release", Trust: "release", Capabilities: platformconfig.Capabilities{CacheWriteScope: "none"}}, "release-reader", true, false},
-		{platformconfig.Pool{Name: "disabled", Trust: "trusted", Capabilities: platformconfig.Capabilities{CacheWriteScope: "none"}}, "", false, false},
+		{platformconfig.Pool{Name: "correlation", Trust: "trusted", Capabilities: platformconfig.Capabilities{CacheWriteScope: "none"}}, "correlation-only", true, false},
 		{platformconfig.Pool{Name: "drift", Trust: "trusted", Capabilities: platformconfig.Capabilities{CacheWriteScope: "isolated"}}, "", false, true},
 	}
 	for _, test := range tests {
