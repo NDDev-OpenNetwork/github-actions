@@ -51,6 +51,25 @@ func (store FileStore) Get(key string) (*Record, error) {
 	return found, err
 }
 
+func (store FileStore) ForRun(repository string, runID int64) (*Record, string, error) {
+	var found *Record
+	var key string
+	err := store.readLocked(func(state fileState) error {
+		for candidateKey, record := range state.Records {
+			if record.Repository != repository || record.RunID != runID {
+				continue
+			}
+			if found != nil {
+				return fmt.Errorf("multiple vanished-runner recoveries exist for one run")
+			}
+			copy := record
+			found, key = &copy, candidateKey
+		}
+		return nil
+	})
+	return found, key, err
+}
+
 func (store FileStore) Begin(record Record) (bool, error) {
 	key := RecordKey(record.Repository, record.RunID, record.OriginalAttempt)
 	created := false
