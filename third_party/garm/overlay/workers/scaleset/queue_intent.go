@@ -22,8 +22,8 @@ import (
 const (
 	queueAdmissionSchemaVersion      = 5
 	queueIntentLegacySchemaVersion   = 1
-	queueIntentPreviousSchemaVersion = 3
-	queueIntentSchemaVersion         = 4
+	queueIntentPreviousSchemaVersion = 4
+	queueIntentSchemaVersion         = 5
 	queueIntentMaxBytes              = 4 * 1024 * 1024
 	queueSchedulerStride             = uint64(1_000_000)
 	queueAcquireRetryDelay           = 5 * time.Second
@@ -141,6 +141,7 @@ type queueIntentJournal struct {
 	UpdatedAt     time.Time                       `json:"updated_at"`
 	Intents       map[string]queueIntent          `json:"intents"`
 	Repositories  map[string]queueRepositoryState `json:"repositories"`
+	TerminalJobs  map[string]time.Time            `json:"terminal_jobs"`
 }
 
 type queueIntentCoordinator struct {
@@ -187,9 +188,11 @@ func NDDevRemoveQueueIntent(ctx context.Context, jobID string) (bool, error) {
 			matched = key
 		}
 		if matched == "" {
+			markTerminalJob(journal, jobID, now.Add(time.Duration(config.ExecutionTTLSeconds)*time.Second))
 			return nil
 		}
 		delete(journal.Intents, matched)
+		markTerminalJob(journal, jobID, now.Add(time.Duration(config.ExecutionTTLSeconds)*time.Second))
 		admitQueuedToBudget(journal, config, now)
 		removed = true
 		return nil
@@ -566,6 +569,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				return fmt.Errorf("completed job has invalid job ID")
 			}
 			completedKeys[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)] = struct{}{}
+			markTerminalJob(journal, job.JobID, now.Add(time.Duration(config.ExecutionTTLSeconds)*time.Second))
 		}
 		for _, job := range started {
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
@@ -651,6 +655,9 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			journal.Intents[key] = intent
 		}
 		for _, job := range assigned {
+			if expiry, terminal := journal.TerminalJobs[job.JobID]; terminal && expiry.After(now) {
+				continue
+			}
 			intent, err := queueIntentFromLifecycle(config, scaleSet, entity, job, now, time.Duration(config.QueuedTTLSeconds)*time.Second)
 			if err != nil {
 				return err
@@ -870,6 +877,7 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	now := c.nowUTC()
 	migrateLegacyQueueIntentOwnership(&journal, config, now)
 	cleanupExpiredQueueIntents(&journal, now)
+	cleanupExpiredTerminalJobs(&journal, now)
 	// A restart can occur after JobAssigned was durably acknowledged but before
 	// the scale-up worker observed its provisional token. Promote from durable
 	// queue state on every serialized journal transaction so recovery never
@@ -972,7 +980,7 @@ func (c queueAdmissionConfig) Validate() error {
 }
 
 func (j queueIntentJournal) Validate() error {
-	if j.SchemaVersion != queueIntentSchemaVersion || j.Intents == nil || j.Repositories == nil {
+	if j.SchemaVersion != queueIntentSchemaVersion || j.Intents == nil || j.Repositories == nil || j.TerminalJobs == nil {
 		return fmt.Errorf("queue-intent journal identity or maps are invalid")
 	}
 	for key, intent := range j.Intents {
@@ -1002,7 +1010,26 @@ func (j queueIntentJournal) Validate() error {
 			return fmt.Errorf("queue repository state %q is invalid", key)
 		}
 	}
+	for jobID, expiry := range j.TerminalJobs {
+		if !validQueueText(jobID) || expiry.IsZero() {
+			return fmt.Errorf("terminal queue job %q is invalid", jobID)
+		}
+	}
 	return nil
+}
+
+func markTerminalJob(journal *queueIntentJournal, jobID string, expiry time.Time) {
+	if current, exists := journal.TerminalJobs[jobID]; !exists || !current.After(expiry) {
+		journal.TerminalJobs[jobID] = expiry
+	}
+}
+
+func cleanupExpiredTerminalJobs(journal *queueIntentJournal, now time.Time) {
+	for jobID, expiry := range journal.TerminalJobs {
+		if !expiry.After(now) {
+			delete(journal.TerminalJobs, jobID)
+		}
+	}
 }
 
 func queueIntentFromJob(config queueAdmissionConfig, scaleSet params.ScaleSet, job params.ScaleSetJobMessage, now time.Time, ttl time.Duration) (queueIntent, error) {
@@ -1374,14 +1401,22 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 		// v2 adds only the JobStarted runner identity. Old active intents have no
 		// value to synthesize; they remain explicitly uncorrelated until their
 		// lifecycle completes, and the next writer transaction upgrades the file.
+		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = queueIntentSchemaVersion
 		for key, intent := range journal.Intents {
 			intent.StateEnteredAt = intent.UpdatedAt
 			journal.Intents[key] = intent
 		}
-	case queueIntentPreviousSchemaVersion:
-		// v4 adds correlation fields only. Existing intents remain explicitly
+	case 3:
+		// v4 added correlation fields only. Existing intents remain explicitly
 		// incomplete until a later JobAvailable or JobStarted binds them.
+		journal.TerminalJobs = make(map[string]time.Time)
+		journal.SchemaVersion = queueIntentSchemaVersion
+	case queueIntentPreviousSchemaVersion:
+		// v5 adds bounded terminal tombstones. No prior tombstone can be
+		// reconstructed, so the map starts empty and only new authoritative
+		// completion or absence evidence populates it.
+		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = queueIntentSchemaVersion
 	case queueIntentSchemaVersion:
 	default:
@@ -1477,6 +1512,7 @@ func newQueueIntentJournal() queueIntentJournal {
 		SchemaVersion: queueIntentSchemaVersion,
 		Intents:       make(map[string]queueIntent),
 		Repositories:  make(map[string]queueRepositoryState),
+		TerminalJobs:  make(map[string]time.Time),
 	}
 }
 

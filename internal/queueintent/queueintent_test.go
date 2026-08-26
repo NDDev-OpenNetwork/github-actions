@@ -43,6 +43,7 @@ func TestReaderReturnsOnlyActiveIntentsInDeterministicOrder(t *testing.T) {
       "updated_at": "2026-08-09T13:50:00Z", "expires_at": "2026-08-09T13:59:59Z"
     }
   },
+  "terminal_jobs": {},
   "repositories": {
     "owner/standard": {"repository": "owner/standard", "weight": 1, "pass": 10},
     "owner/release": {"repository": "owner/release", "weight": 2, "pass": 5}
@@ -105,6 +106,7 @@ func TestReaderAuthorizesAssignedUUIDWithoutRunnerRequestID(t *testing.T) {
       "expires_at": "2026-08-10T15:20:46Z"
     }
   },
+  "terminal_jobs": {},
   "repositories": {
     "example-user/github-actions": {"repository": "example-user/github-actions", "weight": 1, "pass": 1000000}
   }

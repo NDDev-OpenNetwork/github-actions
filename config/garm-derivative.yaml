@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.81
+derivative_version: v0.2.1-nddev.82
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -90,11 +90,11 @@ patches:
     purpose: Bound every upstream Linux and Gitea bootstrap curl path to two retries after the initial attempt so GARM and the provider enforce the same three-total-attempt contract.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 0793ef4a19052849f265dfe40a06a8f3330bef053ea2fff84e080b269a85f7b7
-    purpose: Fsync-backed central queue admission where disabled scale sets cannot record or acquire work, sparse JobAssigned owns a bounded provisional token without refreshing its TTL, JobAvailable or the authoritative queued DB row binds repository identity, authoritative JobStarted rehydrates missing running ownership, and state_entered_at remains stable across same-phase lease refreshes.
+    sha256: 180e60554d264358d5a71c3b16b90d897a82cdb51a7b3d70b587029f97e5e3fe
+    purpose: Fsync-backed central queue admission where bounded terminal tombstones prevent delayed JobAssigned redelivery from resurrecting completed work, while provisional capacity, repository binding, running rehydration and stable phase-entry semantics remain intact.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 02449e9feaf09de10f225323053b1efbc75e810a0f7bba5113b9b27fb1856c65
-    purpose: Deterministic disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment and rebinding refusal, one-time legacy horizon migration, non-refreshing assigned expiry, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement, crash expiry and concurrent-selection tests.
+    sha256: 2f7d98f63033d73d972a9e91ca7cca0934e09abbc62fa971b6ed99e328f531b9
+    purpose: Deterministic terminal-redelivery suppression, disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 611d67a74ff626f04cc0240409a22848525a06c2ae4dc7180c4b75001fb4b599
     purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases, pruning inactive terminal jobs while retaining active state, and selecting the oldest eligible exact intent so one terminal or deferred job cannot block newer work in the same scale set.
@@ -115,9 +115,9 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 118b1ee61acb7e2737f8e2c8c907d6498881d710251a9431a8878358352d2419
+  binary_sha256: 18089d33be778705d0a5b20a87f5b1ddea06b0a7bc9daab883a8014b0507d741
 runtime_contract:
-  queue_intent_schema_version: 4
+  queue_intent_schema_version: 5
   event_driven_scale_set_wake: true
   event_driven_instance_wake: true
   startup_states_protected_from_scale_down: true

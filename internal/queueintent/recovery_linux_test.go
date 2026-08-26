@@ -28,6 +28,7 @@ func TestRecoverUnboundRunningUsesExactCASAndGeneration(t *testing.T) {
 			StateEnteredAt: updatedAt, UpdatedAt: updatedAt, ExpiresAt: updatedAt.Add(24 * time.Hour),
 		}},
 		Repositories: map[string]RepositoryState{"example-org": {Repository: "example-org", Weight: 1}},
+		TerminalJobs: map[string]time.Time{},
 	}
 	content, err := json.Marshal(journal)
 	if err != nil {
@@ -69,7 +70,7 @@ func TestRecoverUnboundRunningRejectsChangedPrecondition(t *testing.T) {
 	lockPath := filepath.Join(directory, "queue-intents.lock")
 	updatedAt := time.Now().UTC().Add(-time.Hour)
 	key := intentKey(1, "bound-job")
-	journal := Journal{SchemaVersion: SchemaVersion, Intents: map[string]Intent{key: {
+	journal := Journal{SchemaVersion: SchemaVersion, TerminalJobs: map[string]time.Time{}, Intents: map[string]Intent{key: {
 		Key: key, ScaleSetID: 1, JobID: "bound-job", RunnerRequestID: 42,
 		ScaleSetName: "nddev-linux-standard", Owner: "example-org", Repository: "example-org/repository",
 		WorkflowRef: "workflow.yml@refs/heads/main", EventName: "push", QueueTime: updatedAt,
@@ -96,7 +97,7 @@ func TestRecoverCanceledUnboundAcceptsOnlySparseQueuedOrAssigned(t *testing.T) {
 			lockPath := filepath.Join(directory, "queue-intents.lock")
 			updatedAt := time.Now().UTC().Add(-time.Hour)
 			key := intentKey(6, "canceled-job")
-			journal := Journal{SchemaVersion: SchemaVersion, Intents: map[string]Intent{key: {
+			journal := Journal{SchemaVersion: SchemaVersion, TerminalJobs: map[string]time.Time{}, Intents: map[string]Intent{key: {
 				Key: key, ScaleSetID: 6, JobID: "canceled-job", ScaleSetName: "nddev-linux-untrusted",
 				Owner: "example-org", Repository: "example-org",
 				WorkflowRef: "unavailable-before-job-available", EventName: "unavailable-before-job-available",

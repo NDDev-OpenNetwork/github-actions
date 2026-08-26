@@ -29,6 +29,7 @@ func TestActiveForScaleSetSeparatesAccountsSharingAClassName(t *testing.T) {
       "expires_at": "2026-08-12T14:10:00Z"
     }
   },
+  "terminal_jobs": {},
   "repositories": {
     "owner/attention": {"repository": "owner/attention", "weight": 1, "pass": 1}
   }
@@ -56,7 +57,8 @@ func TestRepositoryForScaleSetNarrowsOrganizationIntent(t *testing.T) {
     "repository":"example-org/example-actions","workflow_ref":"x","event_name":"workflow_dispatch",
     "queue_time":"2026-01-01T00:00:00Z","state":"acquired","priority":1,
     "updated_at":"2026-01-01T00:00:00Z","expires_at":"2099-01-01T00:00:00Z"}},
-  "repositories":{"example-org":{"repository":"example-org","weight":1,"pass":1}}
+  "repositories":{"example-org":{"repository":"example-org","weight":1,"pass":1}},
+  "terminal_jobs":{}
 }`)}
 	repository, err := reader.RepositoryForScaleSet(context.Background(), "example-org", "nddev-linux-standard")
 	if err != nil {
