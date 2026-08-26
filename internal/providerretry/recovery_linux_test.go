@@ -222,11 +222,11 @@ func TestInspectExposesBoundedSharedCapacityProbeState(t *testing.T) {
 		"capacity-domain:measured-fleet": {
 			JobID: "capacity-domain:measured-fleet", Attempts: 3, LastErrorClass: "capacity",
 			UpdatedAt: now.Add(-12 * time.Second), NextAllowedAt: now.Add(108 * time.Second),
-			ProbeOwner: "scale-set:private-entity:17:instance:runner-secret", WakeReason: "probe-leased",
+			ProbeOwner: "scale-set:private-entity:17:instance:runner-secret", WakeReason: "probe-leased", Owner: "private-org",
 		},
 		"scale-set:private-entity:17": {
 			JobID: "scale-set:private-entity:17", Attempts: 2, LastErrorClass: "capacity",
-			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(-time.Minute), NextAllowedAt: now.Add(time.Minute), Owner: "private-org",
 		},
 	}}
 	content, _ := json.Marshal(state)
@@ -245,7 +245,7 @@ func TestInspectExposesBoundedSharedCapacityProbeState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "private-entity") || strings.Contains(string(encoded), "runner-secret") {
+	if strings.Contains(string(encoded), "private-entity") || strings.Contains(string(encoded), "runner-secret") || strings.Contains(string(encoded), "private-org") {
 		t.Fatalf("dynamic probe owner leaked from bounded observation: %s", encoded)
 	}
 }

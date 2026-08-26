@@ -31,6 +31,7 @@ type record struct {
 	ProbeOwner     string    `json:"probe_owner,omitempty"`
 	WakeReason     string    `json:"wake_reason,omitempty"`
 	ScaleSetName   string    `json:"scale_set_name,omitempty"`
+	Owner          string    `json:"owner,omitempty"`
 }
 
 type journal struct {
