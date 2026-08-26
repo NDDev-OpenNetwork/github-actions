@@ -154,10 +154,12 @@ func (store FileStore) readLocked(read func(fileState) error) error {
 	if !filepath.IsAbs(store.Path) || !filepath.IsAbs(store.LockPath) || filepath.Clean(store.Path) == filepath.Clean(store.LockPath) {
 		return fmt.Errorf("vanished-runner recovery paths are unsafe")
 	}
-	if err := os.MkdirAll(filepath.Dir(store.LockPath), 0o700); err != nil {
+	if _, err := os.Stat(store.Path); os.IsNotExist(err) {
+		return read(fileState{SchemaVersion: 1, Records: map[string]Record{}})
+	} else if err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(store.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(store.LockPath, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}

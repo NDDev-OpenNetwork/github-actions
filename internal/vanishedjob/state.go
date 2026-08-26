@@ -26,18 +26,18 @@ const (
 )
 
 type Job struct {
-	Repository    string
-	ScaleSet      string
-	RunID         int64
-	JobID         int64
-	RunnerID      int64
-	RunnerName    string
-	JobStatus     string
-	StartedAt     time.Time
-	RunnerPresent bool
-	RunStatus     string
-	RunConclusion string
-	RunAttempt    int
+	Repository    string    `json:"repository"`
+	ScaleSet      string    `json:"scale_set"`
+	RunID         int64     `json:"run_id"`
+	JobID         int64     `json:"job_id"`
+	RunnerID      int64     `json:"runner_id"`
+	RunnerName    string    `json:"runner_name"`
+	JobStatus     string    `json:"job_status"`
+	StartedAt     time.Time `json:"started_at"`
+	RunnerPresent bool      `json:"runner_present"`
+	RunStatus     string    `json:"run_status"`
+	RunConclusion string    `json:"run_conclusion,omitempty"`
+	RunAttempt    int       `json:"run_attempt"`
 }
 
 type Record struct {
@@ -53,9 +53,9 @@ type Record struct {
 }
 
 type Decision struct {
-	Action Action
-	Reason string
-	Record Record
+	Action Action `json:"action"`
+	Reason string `json:"reason"`
+	Record Record `json:"record,omitempty"`
 }
 
 func Evaluate(policy Policy, job Job, existing *Record, now time.Time) (Decision, error) {
