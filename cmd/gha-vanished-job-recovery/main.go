@@ -105,11 +105,17 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	endpoint, _ := url.Parse(configuration.GitHubEndpoint)
+	tokens := make(map[string]string)
 	for _, job := range jobs {
-		token, tokenErr := resolveToken(context.Background(), configuration, job.Repository)
-		if tokenErr != nil {
-			fmt.Fprintln(stderr, tokenErr)
-			return 1
+		token, present := tokens[job.Repository]
+		if !present {
+			var tokenErr error
+			token, tokenErr = resolveToken(context.Background(), configuration, job.Repository)
+			if tokenErr != nil {
+				fmt.Fprintln(stderr, tokenErr)
+				return 1
+			}
+			tokens[job.Repository] = token
 		}
 		controller := vanishedjob.Controller{
 			Policy: configuration.Policy, Store: store,
