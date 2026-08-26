@@ -43,6 +43,23 @@ queries:
       GROUP BY operation_name
       ORDER BY operation_name
 
+  - id: eligibility-to-start-by-job
+    title: Exact eligible-to-runner-start duration by job
+    stream: fleet_traces
+    search_type: traces
+    parameters: []
+    sql: >-
+      SELECT queue_job_uuid, github_workflow_run_id, github_job_name,
+      queue_repository, queue_scale_set, queue_priority,
+      SUM(duration) AS eligibility_to_start_us,
+      MIN(_timestamp) AS first_eligible_at
+      FROM "fleet_traces"
+      WHERE operation_name IN ('queue.queued', 'queue.assigned',
+      'queue.acquiring', 'queue.acquired')
+      GROUP BY queue_job_uuid, github_workflow_run_id, github_job_name,
+      queue_repository, queue_scale_set, queue_priority
+      ORDER BY eligibility_to_start_us DESC
+
   - id: member-provisioning-summary
     title: Provider provisioning by Incus member
     stream: fleet_traces
@@ -65,6 +82,7 @@ dashboards:
         visualization: table
       - query: queue-phase-summary
         visualization: table
+      - query: eligibility-to-start-by-job
+        visualization: table
       - query: member-provisioning-summary
         visualization: table
-
