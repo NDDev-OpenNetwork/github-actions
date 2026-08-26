@@ -90,6 +90,7 @@ func emitSpan(ctx context.Context, phase Phase) {
 			attribute.String("queue.scale_set", phase.Intent.ScaleSetName),
 			attribute.Int("queue.priority", phase.Intent.Priority),
 			attribute.Int64("github.workflow_run_id", phase.Intent.WorkflowRunID),
+			attribute.String("github.job_name", phase.Intent.JobDisplayName),
 			attribute.Int64("github.runner_request_id", phase.Intent.RunnerRequestID),
 			attribute.Int64("github.runner_id", phase.Intent.GitHubRunnerID),
 			attribute.String("runner.name", phase.Intent.RunnerName),
