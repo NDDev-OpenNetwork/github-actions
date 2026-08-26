@@ -59,3 +59,17 @@ func TestEvaluateRecoversOverdueProviderRetryDespiteCurrentSiblingHeartbeat(t *t
 		Stuck: []string{"scale-set:example:2:job:stuck"},
 	}, Evaluate(policy, observation))
 }
+
+func TestEvaluateRecoversStaleAssignedIntentDespiteCurrentSiblingHeartbeat(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 26, 13, 0, 0, 0, time.UTC)
+	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute, HeartbeatStale: time.Minute}
+	observation := Observation{
+		ObservedAt: now, ActiveIntents: 8, ManagerUptime: time.Hour,
+		HeartbeatAt:   now.Add(-10 * time.Second),
+		StaleAssigned: []AssignedIntent{{ID: "intent-skipped", Age: 2 * time.Minute}},
+	}
+	require.Equal(t, Decision{
+		Recover: true, Reason: "stale-assigned-intent-without-instance", Stuck: []string{"intent-skipped"},
+	}, Evaluate(policy, observation))
+}
