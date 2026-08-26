@@ -46,6 +46,12 @@ Versioning.
 
 ### Added
 
+- Added autonomous vanished-runner recovery with exact GitHub run
+  force-cancellation, one full rerun, crash reconstruction from `run_attempt`,
+  bounded command observation and fsync-backed transaction state.
+- Added short-lived GitHub App installation-token minting from an existing
+  encrypted GARM credential envelope, without persisting private keys or
+  installation tokens outside their existing authority.
 - Mirrored verified `nddev_tool_cache_event` records into the GitHub runner
   diagnostic directory so teardown bundles retain job-level cache evidence.
 - Added bounded extraction of `nddev_tool_cache_event` records from verified
