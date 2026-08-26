@@ -128,7 +128,11 @@ func clusterHostState(cli InstanceServerInterface, platform platformconfig.Confi
 	if online == 0 {
 		return admission.HostSnapshot{}, fmt.Errorf("no Incus cluster member is online")
 	}
-	if pressure.Required && (invalidPressure || eligible == 0) {
+	// Pressure metadata is a member-local admission signal. A stale member is
+	// excluded exactly like a valid closed member; it must not erase fresh open
+	// capacity reported by healthy siblings. The cluster fails closed only when
+	// no online member remains eligible.
+	if pressure.Required && eligible == 0 {
 		fallback.Healthy = false
 		fallback.PressureAvailable = !invalidPressure
 		return fallback, nil
