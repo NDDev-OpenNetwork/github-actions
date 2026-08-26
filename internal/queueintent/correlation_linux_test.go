@@ -75,7 +75,7 @@ func TestRunningCorrelationRefusesAmbiguousOrConflictingIdentity(t *testing.T) {
 		}
 	}
 	writeCorrelationFixture(t, path, Journal{SchemaVersion: SchemaVersion, Generation: 3, UpdatedAt: now, Intents: intents, Repositories: map[string]RepositoryState{}, TerminalJobs: map[string]time.Time{}})
-	correlator := Correlator{Path: path, LockPath: lockPath, Attempts: 1}
+	correlator := Correlator{Path: path, LockPath: lockPath, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1}
 	_, err := correlator.BindRunning(context.Background(), RunningCorrelation{
 		RunnerName: "runner-collision", Repository: "example-org/example-repo", WorkflowRunID: 1234,
 		JobDisplayName: "quality", WorkflowRef: "example/ref",
@@ -86,7 +86,6 @@ func TestRunningCorrelationRefusesAmbiguousOrConflictingIdentity(t *testing.T) {
 }
 
 func TestRunningCorrelationWaitsForExactRunnerAndRepository(t *testing.T) {
-	now := time.Date(2026, 8, 26, 18, 0, 0, 0, time.UTC)
 	directory := t.TempDir()
 	path := filepath.Join(directory, "queue-intents.json")
 	writeCorrelationFixture(t, path, Journal{SchemaVersion: SchemaVersion, Intents: map[string]Intent{}, Repositories: map[string]RepositoryState{}, TerminalJobs: map[string]time.Time{}})
@@ -97,7 +96,6 @@ func TestRunningCorrelationWaitsForExactRunnerAndRepository(t *testing.T) {
 	if !errors.Is(err, ErrRunningCorrelationNotReady) {
 		t.Fatalf("missing exact intent err=%v", err)
 	}
-	_ = now
 }
 
 func writeCorrelationFixture(t *testing.T, path string, journal Journal) {
