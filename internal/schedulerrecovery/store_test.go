@@ -68,3 +68,18 @@ func TestFileStorePersistsMonotonicHeartbeat(t *testing.T) {
 	require.Equal(t, Heartbeat{At: at.Add(time.Minute), Progress: "job-2"}, heartbeat)
 	require.ErrorContains(t, reopened.RecordHeartbeat(context.Background(), Heartbeat{At: at.Add(-time.Second), Progress: "job-0"}), "moved backwards")
 }
+
+func TestFileStoreReadsLegacyResultAndNormalizesNextWrite(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	path := filepath.Join(directory, "state.json")
+	legacy := `{"schema_version":1,"heartbeat":{},"active":{},"finished":[{"AttemptID":"attempt-1","Recovered":false,"FinishedAt":"2026-08-26T15:38:36Z","Error":"incomplete"}]}`
+	require.NoError(t, os.WriteFile(path, []byte(legacy), 0o600))
+	store := FileStore{Path: path, LockPath: filepath.Join(directory, "state.lock")}
+	_, err := store.ReadHeartbeat(context.Background())
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"finished_at": "2026-08-26T15:38:36Z"`)
+	require.NotContains(t, string(data), `"FinishedAt"`)
+}
