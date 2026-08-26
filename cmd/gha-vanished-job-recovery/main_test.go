@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,5 +33,21 @@ func TestPlanIsReadOnlyAndClassifiesVanishedCIJob(t *testing.T) {
 	}
 	if _, err := os.Stat(state); !os.IsNotExist(err) {
 		t.Fatal("plan mutated recovery state")
+	}
+}
+
+func TestResolveTokenCommandReceivesOnlyRepositoryIdentity(t *testing.T) {
+	directory := t.TempDir()
+	command := filepath.Join(directory, "token")
+	script := "#!/bin/sh\n[ \"$GHA_VANISHED_REPOSITORY\" = 'example-org/example-repo' ]\nprintf '%s\\n' 'installation-token'\n"
+	if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	token, err := resolveToken(context.Background(), config{TokenCommand: []string{command}}, "example-org/example-repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "installation-token" {
+		t.Fatalf("token=%q", token)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type config struct {
 	StateFile      string             `json:"state_file"`
 	LockFile       string             `json:"lock_file"`
 	TokenFile      string             `json:"token_file"`
+	TokenCommand   []string           `json:"token_command"`
 	GitHubEndpoint string             `json:"github_endpoint"`
 	Policy         vanishedjob.Policy `json:"policy"`
 	Observation    struct {
@@ -102,18 +104,18 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	token, err := readSecret(configuration.TokenFile)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 	endpoint, _ := url.Parse(configuration.GitHubEndpoint)
-	controller := vanishedjob.Controller{
-		Policy: configuration.Policy, Store: store,
-		Client: vanishedjob.GitHubClient{Endpoint: endpoint, Token: token, HTTP: &http.Client{Timeout: 20 * time.Second}},
-		Events: jsonEvents{json.NewEncoder(stdout)}, Now: time.Now,
-	}
 	for _, job := range jobs {
+		token, tokenErr := resolveToken(context.Background(), configuration, job.Repository)
+		if tokenErr != nil {
+			fmt.Fprintln(stderr, tokenErr)
+			return 1
+		}
+		controller := vanishedjob.Controller{
+			Policy: configuration.Policy, Store: store,
+			Client: vanishedjob.GitHubClient{Endpoint: endpoint, Token: token, HTTP: &http.Client{Timeout: 20 * time.Second}},
+			Events: jsonEvents{json.NewEncoder(stdout)}, Now: time.Now,
+		}
 		if _, err := controller.Reconcile(context.Background(), job); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -137,7 +139,8 @@ func loadConfig(path string) (config, error) {
 		return config{}, err
 	}
 	endpoint, endpointErr := url.Parse(configuration.GitHubEndpoint)
-	if !boundedAbsolute(configuration.StateFile) || !boundedAbsolute(configuration.LockFile) || !boundedAbsolute(configuration.TokenFile) || endpointErr != nil || endpoint.Scheme != "https" && endpoint.Scheme != "http" || endpoint.Host == "" {
+	validTokenSource := boundedAbsolute(configuration.TokenFile) != (len(configuration.TokenCommand) > 0 && filepath.IsAbs(configuration.TokenCommand[0]))
+	if !boundedAbsolute(configuration.StateFile) || !boundedAbsolute(configuration.LockFile) || !validTokenSource || endpointErr != nil || endpoint.Scheme != "https" && endpoint.Scheme != "http" || endpoint.Host == "" {
 		return config{}, fmt.Errorf("recovery config paths or endpoint are invalid")
 	}
 	if err := configuration.Policy.Validate(); err != nil {
@@ -147,6 +150,43 @@ func loadConfig(path string) (config, error) {
 		return config{}, fmt.Errorf("recovery observation command is invalid")
 	}
 	return configuration, nil
+}
+
+func resolveToken(ctx context.Context, configuration config, repository string) (string, error) {
+	if configuration.TokenFile != "" {
+		return readSecret(configuration.TokenFile)
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(commandCtx, configuration.TokenCommand[0], configuration.TokenCommand[1:]...)
+	command.Env = append(os.Environ(), "GHA_VANISHED_REPOSITORY="+repository)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &limitedWriter{buffer: &stdout, remaining: 64*1024 + 1}
+	command.Stderr = &limitedWriter{buffer: &stderr, remaining: 64*1024 + 1}
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("resolve GitHub token: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	if stdout.Len() > 64*1024 {
+		return "", fmt.Errorf("resolved GitHub token exceeds bounded output")
+	}
+	token := strings.TrimSpace(stdout.String())
+	if token == "" || strings.ContainsAny(token, "\r\n") {
+		return "", fmt.Errorf("token command must return one non-empty line")
+	}
+	return token, nil
+}
+
+type limitedWriter struct {
+	buffer    *bytes.Buffer
+	remaining int
+}
+
+func (writer *limitedWriter) Write(value []byte) (int, error) {
+	if len(value) > writer.remaining {
+		return 0, fmt.Errorf("command output exceeds bounded size")
+	}
+	writer.remaining -= len(value)
+	return writer.buffer.Write(value)
 }
 
 func loadJob(path string) (vanishedjob.Job, error) {
