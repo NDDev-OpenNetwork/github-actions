@@ -182,7 +182,7 @@ func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 	directory := t.TempDir()
 	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
 	token := bytes.Repeat([]byte{3}, ClaimTokenBytes)
-	if err := store.Add(context.Background(), "runner-three", "pool", "trusted-writer", token); err != nil {
+	if err := store.Add(context.Background(), "runner-three", "pool", "correlation-only", token); err != nil {
 		t.Fatal(err)
 	}
 	config := Config{SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", Bucket: "github-actions-cache", CAFile: "/tmp/ca", JournalFile: store.Path, JournalLock: store.LockPath, Repositories: []Repository{{Name: "example-org/example-actions", Roles: []Identity{{Role: "trusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/trusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "untrusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/untrusted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}, {Role: "release-reader", Mode: "read-only", Prefix: "example-org/example-actions/trust/promoted", AccessKeyFile: "/tmp/a", SecretKeyFile: "/tmp/s"}}}}}
@@ -204,6 +204,9 @@ func TestUnknownRepositoryBindsClaimWithoutDeliveringSecret(t *testing.T) {
 	}
 	if journal.Claims["runner-three"].ClaimedRepository != "other/repo" {
 		t.Fatalf("optional miss did not bind exact repository: %+v", journal.Claims["runner-three"])
+	}
+	if journal.Claims["runner-three"].Role != "correlation-only" {
+		t.Fatalf("correlation-only claim changed role: %+v", journal.Claims["runner-three"])
 	}
 	var entries []map[string]any
 	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {

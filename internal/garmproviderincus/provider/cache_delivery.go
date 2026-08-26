@@ -130,7 +130,7 @@ func cacheRoleForPool(pool platformconfig.Pool) (string, bool, error) {
 	case pool.Trust == "release" && pool.Capabilities.CacheWriteScope == "none":
 		return "release-reader", true, nil
 	case pool.Capabilities.CacheWriteScope == "none":
-		return "", false, nil
+		return "correlation-only", true, nil
 	default:
 		return "", false, fmt.Errorf(
 			"pool %q has no fail-closed cache identity mapping for trust=%q write_scope=%q",
@@ -154,6 +154,9 @@ func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance
 	role, enabled, err := cacheRoleForPool(pool)
 	if err != nil || !enabled || l.cacheDelivery == nil {
 		return role, enabled && l.cacheDelivery != nil, err
+	}
+	if role == "correlation-only" {
+		return role, false, nil
 	}
 	if l.cacheRepository == nil {
 		return role, false, nil

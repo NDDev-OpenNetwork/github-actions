@@ -62,7 +62,7 @@ func (s Store) Add(ctx context.Context, instance, pool, role string, token []byt
 	if !instancePattern.MatchString(instance) || pool == "" {
 		return errors.New("cache claim ownership is invalid")
 	}
-	if _, _, ok := roleContract(role); !ok {
+	if !validClaimRole(role) {
 		return fmt.Errorf("cache claim role %q is invalid", role)
 	}
 	return s.update(ctx, func(journal *Journal, now time.Time) error {
@@ -304,7 +304,7 @@ func (j Journal) Validate() error {
 		if key != claim.InstanceName || !instancePattern.MatchString(key) || claim.PoolName == "" || !hashPattern.MatchString(claim.TokenSHA256) {
 			return fmt.Errorf("cache claim %q has invalid identity", key)
 		}
-		if _, _, ok := roleContract(claim.Role); !ok || claim.CreatedAt.IsZero() || !claim.ExpiresAt.After(claim.CreatedAt) || claim.ExpiresAt.Sub(claim.CreatedAt) > ClaimTTL {
+		if !validClaimRole(claim.Role) || claim.CreatedAt.IsZero() || !claim.ExpiresAt.After(claim.CreatedAt) || claim.ExpiresAt.Sub(claim.CreatedAt) > ClaimTTL {
 			return fmt.Errorf("cache claim %q has invalid contract", key)
 		}
 		if (claim.ClaimedRepository == "") != claim.ClaimedAt.IsZero() {
@@ -317,4 +317,12 @@ func (j Journal) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validClaimRole(role string) bool {
+	if role == "correlation-only" {
+		return true
+	}
+	_, _, ok := roleContract(role)
+	return ok
 }
