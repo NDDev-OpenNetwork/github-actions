@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.84"
+readonly derivative_version="v0.2.1-nddev.85"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="2c8dcf0f80071a5b488a3c20ac347f18975c7559bdae504091385cf48ac85534"
+readonly expected_binary_sha256="4532d9881b98a3c99acb358c6437c1e738b9d5fc0268c2c5e0cbc3c27327e4c5"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -61,6 +61,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0025-fix-scaleset-delete-error-handling.patch"
   "third_party/garm/patches/0026-normalize-registration-token-errors.patch"
   "third_party/garm/patches/0027-bound-upstream-download-attempts.patch"
+  "third_party/garm/patches/0028-terminal-workflow-run-reconciliation.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -90,6 +91,7 @@ readonly patch_sha256s=(
   "9d3e6a6acccc66424461986905e3343f559c156fd5835adce6b2617b3bee777e"
   "e3c09371d7a67072e1185afc09db823b5ccdc3ce6e524e5e504bc101cd4e06f0"
   "35f257c8016c7999c8780970f673c5b35e04b3b3301565cffea0bd242e168456"
+  "3bc2722e87f1721c6094130d0f07310a796bf8074504ef121acac8ca7402887c"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
