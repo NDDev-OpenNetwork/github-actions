@@ -21,8 +21,8 @@ import (
 
 const (
 	LegacySchemaVersion   = 1
-	PreviousSchemaVersion = 3
-	SchemaVersion         = 4
+	PreviousSchemaVersion = 4
+	SchemaVersion         = 5
 	maxJournalBytes       = 4 * 1024 * 1024
 )
 
@@ -84,6 +84,7 @@ type Journal struct {
 	UpdatedAt     time.Time                  `json:"updated_at"`
 	Intents       map[string]Intent          `json:"intents"`
 	Repositories  map[string]RepositoryState `json:"repositories"`
+	TerminalJobs  map[string]time.Time       `json:"terminal_jobs"`
 }
 
 type Snapshot struct {
@@ -235,6 +236,7 @@ func readJournal(path string) (Journal, error) {
 				SchemaVersion: SchemaVersion,
 				Intents:       map[string]Intent{},
 				Repositories:  map[string]RepositoryState{},
+				TerminalJobs:  map[string]time.Time{},
 			}, nil
 		}
 		return Journal{}, fmt.Errorf("open queue-intent journal: %w", err)
@@ -270,12 +272,17 @@ func readJournal(path string) (Journal, error) {
 	}
 	switch journal.SchemaVersion {
 	case LegacySchemaVersion, 2:
+		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = SchemaVersion
 		for key, intent := range journal.Intents {
 			intent.StateEnteredAt = intent.UpdatedAt
 			journal.Intents[key] = intent
 		}
+	case 3:
+		journal.TerminalJobs = make(map[string]time.Time)
+		journal.SchemaVersion = SchemaVersion
 	case PreviousSchemaVersion:
+		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = SchemaVersion
 	case SchemaVersion:
 	default:
@@ -291,7 +298,7 @@ func (j Journal) Validate() error {
 	if j.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("queue-intent journal schema_version must be %d", SchemaVersion)
 	}
-	if j.Intents == nil || j.Repositories == nil {
+	if j.Intents == nil || j.Repositories == nil || j.TerminalJobs == nil {
 		return fmt.Errorf("queue-intent journal maps must not be null")
 	}
 	for key, intent := range j.Intents {
@@ -320,6 +327,11 @@ func (j Journal) Validate() error {
 	for key, repository := range j.Repositories {
 		if !validAccountOrRepository(key) || repository.Repository != key || repository.Weight == 0 || repository.Weight > 100 {
 			return fmt.Errorf("repository scheduler state %q is invalid", key)
+		}
+	}
+	for jobID, expiry := range j.TerminalJobs {
+		if !validText(jobID) || expiry.IsZero() {
+			return fmt.Errorf("terminal queue job %q is invalid", jobID)
 		}
 	}
 	return nil

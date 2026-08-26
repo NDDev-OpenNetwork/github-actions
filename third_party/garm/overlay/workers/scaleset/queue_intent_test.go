@@ -50,6 +50,35 @@ func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
 	}
 }
 
+func TestCompletedJobCannotBeResurrectedByDelayedAssignedRedelivery(t *testing.T) {
+	now := time.Date(2026, 8, 26, 13, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-fast")
+	job := testQueueJob(101, "example-owner", "example-repository", now)
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{job}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+	if _, exists := journal.Intents[key]; exists {
+		t.Fatalf("delayed JobAssigned resurrected terminal intent: %#v", journal.Intents[key])
+	}
+	if !journal.TerminalJobs[job.JobID].After(now) {
+		t.Fatalf("terminal tombstone is absent or expired: %#v", journal.TerminalJobs)
+	}
+}
+
 func TestAuthoritativeReconciliationReleasesOneExactIntentIdempotently(t *testing.T) {
 	now := time.Now().UTC()
 	coordinator := testQueueCoordinator(t, &now, nil)

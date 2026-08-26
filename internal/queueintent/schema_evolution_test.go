@@ -43,7 +43,7 @@ func jsonFieldNames(t *testing.T, value any) []string {
 // that decision -- internal/providerjournal already carries a worked example of
 // a version ladder that upgrades in memory.
 func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
-	if SchemaVersion != 4 {
+	if SchemaVersion != 5 {
 		t.Fatalf("SchemaVersion = %d; update the golden field sets below with it", SchemaVersion)
 	}
 	for _, testCase := range []struct {
@@ -55,7 +55,7 @@ func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
 			name:  "Journal",
 			value: Journal{},
 			wanted: []string{
-				"schema_version", "generation", "updated_at", "intents", "repositories",
+				"schema_version", "generation", "updated_at", "intents", "repositories", "terminal_jobs",
 			},
 		},
 		{
@@ -119,6 +119,7 @@ func TestUnknownFieldRejectsTheWholeJournalRatherThanOneIntent(t *testing.T) {
 				"repository": "example-org/example-actions", "weight": 1, "pass": 0,
 			},
 		},
+		"terminal_jobs": map[string]any{},
 	}
 	raw, err := json.Marshal(journal)
 	if err != nil {
