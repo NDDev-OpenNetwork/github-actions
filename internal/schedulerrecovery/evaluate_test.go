@@ -44,3 +44,18 @@ func TestEvaluatePreventsDuplicateRecovery(t *testing.T) {
 	observation.RecoveryRunning = true
 	require.Equal(t, "recovery-already-running", Evaluate(policy, observation).Reason)
 }
+
+func TestEvaluateRecoversOverdueProviderRetryDespiteCurrentSiblingHeartbeat(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute, HeartbeatStale: time.Minute}
+	observation := Observation{
+		ObservedAt: now, ActiveIntents: 9, ManagerUptime: time.Hour,
+		HeartbeatAt:    now.Add(-10 * time.Second),
+		OverdueRetries: []ProviderRetry{{ID: "scale-set:example:2:job:stuck", OverdueAge: 2 * time.Minute}},
+	}
+	require.Equal(t, Decision{
+		Recover: true, Reason: "stale-provider-retry-past-next-allowed",
+		Stuck: []string{"scale-set:example:2:job:stuck"},
+	}, Evaluate(policy, observation))
+}

@@ -20,6 +20,7 @@ type observationOutput struct {
 	ObservedAt           time.Time       `json:"observed_at"`
 	ActiveIntents        int             `json:"active_intents"`
 	PendingCreates       []PendingCreate `json:"pending_creates"`
+	OverdueRetries       []ProviderRetry `json:"overdue_provider_retries"`
 	ManagerUptimeSeconds int64           `json:"manager_uptime_seconds"`
 	LastRecoveryAt       time.Time       `json:"last_recovery_at"`
 	RecoveryRunning      bool            `json:"recovery_running"`
@@ -68,9 +69,15 @@ func (observer CommandObserver) Observe(ctx context.Context) (Observation, error
 			return Observation{}, fmt.Errorf("scheduler observation contains an invalid pending create")
 		}
 	}
+	for _, retry := range decoded.OverdueRetries {
+		if retry.ID == "" || retry.OverdueAge < 0 {
+			return Observation{}, fmt.Errorf("scheduler observation contains an invalid overdue provider retry")
+		}
+	}
 	return Observation{
 		ObservedAt: decoded.ObservedAt, ActiveIntents: decoded.ActiveIntents,
-		PendingCreates: decoded.PendingCreates, ManagerUptime: time.Duration(decoded.ManagerUptimeSeconds) * time.Second,
+		PendingCreates: decoded.PendingCreates, OverdueRetries: decoded.OverdueRetries,
+		ManagerUptime:  time.Duration(decoded.ManagerUptimeSeconds) * time.Second,
 		LastRecoveryAt: decoded.LastRecoveryAt, RecoveryRunning: decoded.RecoveryRunning,
 	}, nil
 }
