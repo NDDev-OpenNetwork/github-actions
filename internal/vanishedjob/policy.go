@@ -1,7 +1,9 @@
 package vanishedjob
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -21,11 +23,19 @@ type Policy struct {
 }
 
 func DecodePolicy(reader io.Reader) (Policy, error) {
-	decoder := json.NewDecoder(io.LimitReader(reader, 64*1024+1))
+	data, err := io.ReadAll(io.LimitReader(reader, 64*1024+1))
+	if err != nil || len(data) > 64*1024 {
+		return Policy{}, fmt.Errorf("read vanished-runner recovery policy: invalid bounded content")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var policy Policy
 	if err := decoder.Decode(&policy); err != nil {
 		return Policy{}, fmt.Errorf("decode vanished-runner recovery policy: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return Policy{}, fmt.Errorf("vanished-runner recovery policy has trailing content")
 	}
 	if err := policy.Validate(); err != nil {
 		return Policy{}, err

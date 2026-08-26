@@ -3,17 +3,21 @@ package vanishedjob
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
 const recoveryHistoryLimit = 128
+const maximumStateBytes = 1024 * 1024
 
 type Result struct {
 	Key                string    `json:"key"`
@@ -71,6 +75,9 @@ func (store FileStore) ForRun(repository string, runID int64) (*Record, string, 
 }
 
 func (store FileStore) Begin(record Record) (bool, error) {
+	if err := record.Validate(); err != nil {
+		return false, err
+	}
 	key := RecordKey(record.Repository, record.RunID, record.OriginalAttempt)
 	created := false
 	err := store.locked(func(state *fileState) (bool, error) {
@@ -90,6 +97,9 @@ func (store FileStore) Begin(record Record) (bool, error) {
 }
 
 func (store FileStore) Advance(key string, expected, next Stage, at time.Time) error {
+	if at.IsZero() || expected == StageDetected && next != StageCancelRequested || expected == StageCancelRequested && next != StageRerunRequested || expected == StageRerunRequested {
+		return fmt.Errorf("vanished-runner recovery transition is invalid")
+	}
 	return store.locked(func(state *fileState) (bool, error) {
 		record, exists := state.Records[key]
 		if !exists || record.Stage != expected {
@@ -102,6 +112,9 @@ func (store FileStore) Advance(key string, expected, next Stage, at time.Time) e
 }
 
 func (store FileStore) Finish(key string, expected Stage, result Result) error {
+	if result.ReplacementAttempt <= result.OriginalAttempt || result.Conclusion == "" {
+		return fmt.Errorf("vanished-runner recovery result is invalid")
+	}
 	return store.locked(func(state *fileState) (bool, error) {
 		record, exists := state.Records[key]
 		if !exists || record.Stage != expected || result.Key != key || result.OriginalAttempt != record.OriginalAttempt || result.FinishedAt.IsZero() {
@@ -176,12 +189,17 @@ func (store FileStore) readLocked(read func(fileState) error) error {
 }
 
 func readState(path string) (fileState, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return fileState{SchemaVersion: 1, Records: map[string]Record{}}, nil
 	}
 	if err != nil {
 		return fileState{}, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maximumStateBytes+1))
+	if err != nil || len(data) > maximumStateBytes {
+		return fileState{}, fmt.Errorf("vanished-runner recovery state exceeds its bounded size")
 	}
 	var state fileState
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -189,7 +207,24 @@ func readState(path string) (fileState, error) {
 	if err := decoder.Decode(&state); err != nil || state.SchemaVersion != 1 || state.Records == nil {
 		return fileState{}, fmt.Errorf("vanished-runner recovery state is invalid")
 	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return fileState{}, fmt.Errorf("vanished-runner recovery state has trailing content")
+	}
+	for key, record := range state.Records {
+		if err := record.Validate(); err != nil || key != RecordKey(record.Repository, record.RunID, record.OriginalAttempt) {
+			return fileState{}, fmt.Errorf("vanished-runner recovery record %q is invalid", key)
+		}
+	}
 	return state, nil
+}
+
+func (record Record) Validate() error {
+	parts := strings.Split(record.Repository, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || record.RunID <= 0 || record.JobID <= 0 || record.RunnerID <= 0 || strings.TrimSpace(record.RunnerName) == "" || strings.TrimSpace(record.ScaleSet) == "" || record.OriginalAttempt <= 0 || record.UpdatedAt.IsZero() || record.Stage != StageDetected && record.Stage != StageCancelRequested && record.Stage != StageRerunRequested {
+		return fmt.Errorf("vanished-runner recovery record identity is invalid")
+	}
+	return nil
 }
 
 func writeState(path string, state fileState) error {
