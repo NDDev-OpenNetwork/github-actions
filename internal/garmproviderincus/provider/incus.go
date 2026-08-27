@@ -221,7 +221,7 @@ func (l *Incus) ReconcileMaintenanceLeases(ctx context.Context, apply bool) (pro
 	if err != nil {
 		return providerjournal.MaintenanceReconcileResult{}, errors.Wrap(err, "connecting to Incus")
 	}
-	instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
+	instances, err := cli.GetInstances(api.InstanceTypeAny)
 	if err != nil {
 		return providerjournal.MaintenanceReconcileResult{}, errors.Wrap(err, "listing instances")
 	}
@@ -348,7 +348,7 @@ func (l *Incus) Probe(ctx context.Context, profile string) (CompatibilityProbe, 
 	if err := validateResolvedWorkerImage(image, imagePolicy); err != nil {
 		return CompatibilityProbe{}, err
 	}
-	instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
+	instances, err := cli.GetInstances(api.InstanceTypeAny)
 	if err != nil {
 		return CompatibilityProbe{}, errors.Wrap(err, "listing instances")
 	}
@@ -710,6 +710,7 @@ type InstanceServerInterface interface {
 	CreateInstanceFile(string, string, incus.InstanceFileArgs) error
 	GetInstanceFile(string, string) (io.ReadCloser, *incus.InstanceFileResponse, error)
 	DeleteInstance(string) (incus.Operation, error)
+	GetInstances(api.InstanceType) ([]api.Instance, error)
 	GetInstancesFull(api.InstanceType) ([]api.InstanceFull, error)
 	GetImageAliasArchitectures(string, string) (map[string]*api.ImageAliasesEntry, error)
 	GetImage(string) (*api.Image, string, error)
@@ -1690,7 +1691,7 @@ func (l *Incus) captureDiagnosticsBeforeTeardown(ctx context.Context, instance *
 }
 
 type listResponse struct {
-	instances []api.InstanceFull
+	instances []api.Instance
 	err       error
 }
 
@@ -1709,14 +1710,14 @@ func (l *Incus) ListInstances(ctx context.Context, poolID string) ([]commonParam
 		// external process will allow us to not care if a goroutine leaks. Once a timeout
 		// is reached, the provider can just exit with an error. Something we can't do with
 		// internal providers.
-		instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
+		instances, err := cli.GetInstances(api.InstanceTypeAny)
 		result <- listResponse{
 			instances: instances,
 			err:       err,
 		}
 	}()
 
-	var instances []api.InstanceFull
+	var instances []api.Instance
 	listTimer := time.NewTimer(time.Minute)
 	defer listTimer.Stop()
 	select {
@@ -1742,7 +1743,7 @@ func (l *Incus) ListInstances(ctx context.Context, poolID string) ([]commonParam
 					continue
 				}
 			}
-			projected, err := l.projectGARMInstanceIdentity(ctx, &instance, incusInstanceToAPIInstance(&instance))
+			projected, err := l.projectGARMInstanceIdentity(ctx, &api.InstanceFull{Instance: instance}, incusInventoryInstanceToAPIInstance(&instance))
 			if err != nil {
 				return []commonParams.ProviderInstance{}, errors.Wrapf(err, "projecting instance %q identity", instance.Name)
 			}

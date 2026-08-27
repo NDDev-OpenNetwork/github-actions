@@ -526,7 +526,7 @@ func TestCompatibilityProbeValidatesProfileImageAndReadOnlyInventory(t *testing.
 	provider := newTestProvider(cli)
 	setTestCacheDelivery(t, provider)
 	prepareCreateMocks(cli, testImageDigest)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil)
 
 	result, err := provider.Probe(context.Background(), "nddev-linux-standard")
 	require.NoError(t, err)
@@ -554,7 +554,7 @@ func TestCompatibilityProbeSelectsIntegrationImageByProfile(t *testing.T) {
 		testIntegrationImageDigest,
 		"integration",
 	)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil)
 
 	result, err := provider.Probe(context.Background(), "nddev-linux-integration")
 	require.NoError(t, err)
@@ -578,7 +578,7 @@ func TestCompatibilityProbeReturnsStableSortedInventory(t *testing.T) {
 	provider := newTestProvider(cli)
 	setTestCacheDelivery(t, provider)
 	prepareCreateMocks(cli, testImageDigest)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{
 		{Instance: api.Instance{Name: "runner-z"}},
 		{Instance: api.Instance{Name: "runner-a"}},
 	}, nil)
@@ -1495,7 +1495,7 @@ func TestListInstancesFiltersControllerAndPool(t *testing.T) {
 	foreign := *ownedInstance("foreign")
 	foreign.ExpandedConfig[garmJobNameKey] = foreign.Name
 	foreign.ExpandedConfig[controllerIDKeyName] = "other-controller"
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{owned, wrongPool, foreign}, nil)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{owned, wrongPool, foreign}, nil)
 
 	got, err := provider.ListInstances(context.Background(), "pool-test")
 	require.NoError(t, err)
@@ -1514,7 +1514,7 @@ func TestListInstancesProjectsClaimedWarmVMToLogicalGARMName(t *testing.T) {
 	}}
 	provider.admission = warmControl
 	claimed := *ownedInstance(warmControl.claim.InstanceName)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{claimed}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{claimed}, nil).Once()
 
 	got, err := provider.ListInstances(context.Background(), "pool-test")
 	require.NoError(t, err)
@@ -1528,7 +1528,7 @@ func TestListInstancesRejectsUnboundWarmIdentityProjection(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
 	claimed := *ownedInstance("warm-standard-unbound")
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{claimed}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{claimed}, nil).Once()
 
 	_, err := provider.ListInstances(context.Background(), "pool-test")
 	require.ErrorContains(t, err, `GARM instance identity "runner-test-instance" resolves to "runner-test-instance" instead of provider instance "warm-standard-unbound"`)
