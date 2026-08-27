@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added provider derivative `v0.1.5-nddev.82`: bulk Incus inventory no longer
+  requests recursive runtime statistics from concurrently deleting workers.
 - Use recursion-one Incus inventory for bulk admission, compatibility and GARM
   listing. Exact-instance operations retain full state, while deleting
   containers no longer trigger recursive cgroup and network stat reads.
