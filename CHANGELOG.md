@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add host swap occupancy and major-paging alerts plus CPU, swap usage and
+  paging panels for the five-host OTEL fleet.
 - Spread equal-load burst placement toward the member with more remaining
   capacity and fewer pending workers instead of packing one member first.
 - Raise standard, fast and priority-standard scale-set width from 12 to 16 so

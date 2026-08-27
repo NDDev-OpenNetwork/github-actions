@@ -14,7 +14,7 @@ func TestRenderOpenObserveV8IsDeterministicAndManaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dashboards) != 9 {
+	if len(dashboards) != 10 {
 		t.Fatalf("dashboards=%d", len(dashboards))
 	}
 	for _, dashboard := range dashboards {
@@ -29,7 +29,8 @@ func TestRenderOpenObserveV8IsDeterministicAndManaged(t *testing.T) {
 				t.Fatalf("invalid panel %#v", panel)
 			}
 			stream := panel.Queries[0].Fields.Stream
-			if !strings.HasPrefix(stream, "gha_fleet_") && !strings.HasPrefix(stream, "gha_diagnostic_storage_") && !strings.HasPrefix(stream, "otelcol_exporter_") {
+			if !strings.HasPrefix(stream, "gha_fleet_") && !strings.HasPrefix(stream, "gha_diagnostic_storage_") &&
+				!strings.HasPrefix(stream, "otelcol_exporter_") && stream != "system_cpu_time" && stream != "system_memory_usage" && !strings.HasPrefix(stream, "system_paging_") {
 				t.Fatalf("panel %q stream is not an owned metric: %q", panel.ID, stream)
 			}
 			if panel.Layout.I != index+1 || panel.Layout.W != 96 || panel.Layout.H != 9 {

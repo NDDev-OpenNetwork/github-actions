@@ -226,6 +226,38 @@ rules:
     summary: Standard Ubuntu package updates remain available on a fleet host.
     action: Apply the normal rolling package-maintenance procedure and prove service and runner recovery after each member.
     recovery: Every fleet host reports zero standard updates for one hour.
+  - id: host_swap_high
+    severity: ticket
+    query_language: promql
+    stream_name: system_paging_usage
+    expression: max by (host_name) (system_paging_usage{service_namespace="nddev-github-actions",state="used"}) / clamp_min(sum by (host_name) (system_paging_usage{service_namespace="nddev-github-actions"}), 1)
+    operator: ">"
+    threshold: 0.75
+    evaluation_seconds: 300
+    hold_seconds: 900
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet host has consumed more than seventy-five percent of emergency swap.
+    action: Correlate swap occupancy with memory PSI, worker RSS and queue demand; keep swap outside schedulable capacity.
+    recovery: Every fleet host remains below seventy-five percent swap usage for fifteen minutes.
+  - id: host_swap_thrash
+    severity: page
+    query_language: promql
+    stream_name: system_paging_operations
+    expression: sum by (host_name) (rate(system_paging_operations{service_namespace="nddev-github-actions",type="major"}[5m]))
+    operator: ">"
+    threshold: 67108864
+    evaluation_seconds: 30
+    hold_seconds: 300
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Sustained major paging exceeds sixty-four MiB per second on a fleet host.
+    action: Close admission on the affected member and correlate paging direction with memory PSI and active worker reservations.
+    recovery: Major paging remains below sixty-four MiB per second for five minutes and memory PSI returns inside the envelope.
   - id: kernel_slab_unreclaimable
     severity: ticket
     query_language: promql
