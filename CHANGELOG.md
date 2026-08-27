@@ -5,6 +5,8 @@
 - Permit a measured five-percent RAM reserve with a 768 MiB absolute floor on
   dedicated fleet hosts, while retaining non-schedulable emergency swap,
   pressure admission and hard per-worker memory limits.
+- Added provider derivative `v0.1.5-nddev.83` for the five-percent dedicated
+  burst envelope.
 - Preserved per-host series in audit-suppression and kernel-workqueue slow-burn
   alerts so OpenObserve 0.92 receives a matrix, rather than an unsupported
   scalar, when applying the sustained range subquery.
