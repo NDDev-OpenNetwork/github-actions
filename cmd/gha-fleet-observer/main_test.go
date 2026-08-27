@@ -61,7 +61,7 @@ func TestServiceStateRejectsUnboundedName(t *testing.T) {
 }
 
 func TestServicesRoleBrokerIsInFixedInventory(t *testing.T) {
-	if !serviceNameAllowed("gha-cache-broker") || serviceNameAllowed("ssh") {
+	if !serviceNameAllowed("gha-cache-broker") || !serviceNameAllowed("gha-services-rustfs-route.timer") || serviceNameAllowed("ssh") {
 		t.Fatal("service inventory boundary drifted")
 	}
 }
