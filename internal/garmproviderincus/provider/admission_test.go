@@ -71,7 +71,7 @@ func TestWorkerImageMappingsMatchPlatformPoolsAndCapabilities(t *testing.T) {
 func TestObservedAllocationsRequireCompleteSecurityPolicy(t *testing.T) {
 	cli := new(MockIncusServer)
 	instance := *ownedInstance("runner")
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
 
 	allocations, err := testNDDevAdmission().observedAllocations(context.Background(), cli)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestObservedAllocationsAcceptNMinusOneOnlyForExecutingWorker(t *testing.T) 
 	instance := *ownedInstance("runner-previous")
 	instance.ExpandedConfig[imageFingerprintKey] = previous
 	cli := new(MockIncusServer)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
 	allocations, err := admission.observedAllocations(context.Background(), cli)
 	require.NoError(t, err)
 	require.Equal(t, previous, allocations[0].ImageFingerprint)
@@ -113,7 +113,7 @@ func TestObservedAllocationsAcceptNMinusOneOnlyForExecutingWorker(t *testing.T) 
 	instance.ExpandedConfig[repositoryKey] = ""
 	instance.ExpandedConfig[garmJobNameKey] = ""
 	cli = new(MockIncusServer)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{instance}, nil).Once()
 	_, err = admission.observedAllocations(context.Background(), cli)
 	require.ErrorContains(t, err, "exact current fingerprint")
 }
@@ -137,7 +137,7 @@ func TestObservedAllocationsUseDurableLeaseForIncompleteIncusTransition(t *testi
 	})
 	require.NoError(t, err)
 	cli := new(MockIncusServer)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{{Instance: api.Instance{Name: "runner-pending"}}}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{{Instance: api.Instance{Name: "runner-pending"}}}, nil).Once()
 	allocations, err := admission.observedAllocations(context.Background(), cli)
 	require.NoError(t, err)
 	require.Equal(t, []provideradmission.Allocation{{
@@ -158,7 +158,7 @@ func TestObservedAllocationsClassifyUnjournaledIncompleteMetadata(t *testing.T) 
 	require.NoError(t, err)
 	instance := ownedInstance("runner-incomplete")
 	delete(instance.ExpandedConfig, flavorKey)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
 
 	_, err = admission.observedAllocations(context.Background(), cli)
 	require.ErrorContains(t, err, "incomplete instance metadata")
@@ -189,14 +189,14 @@ func TestReconcileRetainsDeletingLeaseUntilClusterTombstoneDisappears(t *testing
 	require.NoError(t, err)
 
 	cli := new(MockIncusServer)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).
+	cli.On("GetInstances", api.InstanceTypeAny).
 		Return([]api.InstanceFull{{Instance: api.Instance{Name: "runner-deleting"}}}, nil).Once()
 	require.NoError(t, admission.Reconcile(context.Background(), cli))
 	journal, err := admission.controller.Store.ReadOnly(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, providerjournal.StateDeleting, journal.Leases["runner-deleting"].State)
 
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil).Once()
 	require.NoError(t, admission.Reconcile(context.Background(), cli))
 	journal, err = admission.controller.Store.ReadOnly(context.Background())
 	require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestObservedAllocationsShareOneControllerAcrossPinnedPoolImages(t *testing.
 	integration.ExpandedConfig[imageFingerprintKey] = testIntegrationImageDigest
 
 	cli := new(MockIncusServer)
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{standard, integration}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{standard, integration}, nil).Once()
 	allocations, err := admission.observedAllocations(context.Background(), cli)
 	require.NoError(t, err)
 	require.Len(t, allocations, 2)
@@ -262,7 +262,7 @@ func TestObservedAllocationsRejectDrift(t *testing.T) {
 			cli := new(MockIncusServer)
 			instance := ownedInstance("runner")
 			test.mutate(instance)
-			cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+			cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
 			_, err := testNDDevAdmission().observedAllocations(context.Background(), cli)
 			require.Error(t, err)
 		})
@@ -274,7 +274,8 @@ func TestObservedAllocationsIgnoreStoppedCanceledCreateWithoutLease(t *testing.T
 	instance := ownedInstance("runner-canceled")
 	delete(instance.ExpandedConfig, flavorKey)
 	instance.State.Status = "Stopped"
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	instance.Status = "Stopped"
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
 
 	allocations, err := testNDDevAdmission().observedAllocations(context.Background(), cli)
 	require.NoError(t, err)
@@ -286,7 +287,7 @@ func TestObservedAllocationsAccountImageMaintenanceInstance(t *testing.T) {
 	instance := ownedInstance("gha-image-builder-test")
 	instance.Profiles = []string{"nddev-linux-standard"}
 	instance.ExpandedConfig = map[string]string{}
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
 
 	admission := testNDDevAdmission()
 	allocations, err := admission.observedAllocations(context.Background(), cli)

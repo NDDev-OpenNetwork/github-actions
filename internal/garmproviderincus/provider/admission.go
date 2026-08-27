@@ -280,7 +280,7 @@ func (n *nddevAdmission) WarmBlockedByQueue(ctx context.Context) (bool, error) {
 }
 
 func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
-	instances, err := cli.GetInstancesFull(api.InstanceTypeAny)
+	instances, err := cli.GetInstances(api.InstanceTypeAny)
 	if err != nil {
 		return nil, fmt.Errorf("observe Incus allocations: %w", err)
 	}
@@ -309,7 +309,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 				})
 				continue
 			}
-			if instance.State != nil && instance.State.Status == "Stopped" {
+			if instance.Status == "Stopped" {
 				// A canceled create can stop the Incus instance before its
 				// asynchronous delete removes it. It consumes no CPU or memory
 				// and remains visible to orphan/missing reconciliation.

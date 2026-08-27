@@ -89,6 +89,20 @@ func (m *MockIncusServer) GetInstancesFull(instanceType api.InstanceType) (insta
 	return args.Get(0).([]api.InstanceFull), args.Error(1)
 }
 
+func (m *MockIncusServer) GetInstances(instanceType api.InstanceType) (instances []api.Instance, err error) {
+	args := m.Called(instanceType)
+	switch value := args.Get(0).(type) {
+	case []api.Instance:
+		instances = value
+	case []api.InstanceFull:
+		instances = make([]api.Instance, 0, len(value))
+		for _, instance := range value {
+			instances = append(instances, instance.Instance)
+		}
+	}
+	return instances, args.Error(1)
+}
+
 func (m *MockIncusServer) GetImageAliasArchitectures(imageType string, name string) (entries map[string]*api.ImageAliasesEntry, err error) {
 	args := m.Called(imageType, name)
 	return args.Get(0).(map[string]*api.ImageAliasesEntry), args.Error(1)

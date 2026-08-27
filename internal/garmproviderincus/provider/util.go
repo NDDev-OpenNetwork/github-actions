@@ -118,6 +118,19 @@ func incusInstanceToAPIInstance(instance *api.InstanceFull) commonParams.Provide
 	}
 }
 
+func incusInventoryInstanceToAPIInstance(instance *api.Instance) commonParams.ProviderInstance {
+	if instance == nil {
+		return commonParams.ProviderInstance{}
+	}
+	return incusInstanceToAPIInstance(&api.InstanceFull{
+		Instance: *instance,
+		State: &api.InstanceState{
+			Status:     instance.Status,
+			StatusCode: instance.StatusCode,
+		},
+	})
+}
+
 func incusStatusToProviderStatus(status string) commonParams.InstanceStatus {
 	switch status {
 	case "Running":
