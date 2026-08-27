@@ -30,7 +30,7 @@ func TestProjectCeilingsAdmitTheDedicatedShapeAndRefuseBeyondIt(t *testing.T) {
 		"no CPU units at all":                           func(c *Config) { c.Incus.ProjectMaxCPUUnits = 0 },
 		"unbounded instance fanout":                     func(c *Config) { c.Incus.ProjectMaxInstances = 9 },
 		"no instances at all":                           func(c *Config) { c.Incus.ProjectMaxInstances = 0 },
-		"more memory than a member can safely expose":   func(c *Config) { c.Incus.ProjectMaxMemoryMiB = 14337 },
+		"more memory than a member can safely expose":   func(c *Config) { c.Incus.ProjectMaxMemoryMiB = 15361 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

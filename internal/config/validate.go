@@ -327,8 +327,8 @@ func validateIncus(add func(string, string), incus Incus) {
 	// enforces that against the host it observes, so a configuration that asks
 	// for more than the hardware has is refused at runtime rather than here.
 	//
-	// Drakkars exposes the physical eight CPU units and fourteen of sixteen GiB
-	// per member to the shared project. Admission, PSI and placement retain the
+	// Dedicated fleet hosts may expose up to fifteen of sixteen GiB per member
+	// to the shared project. Admission, PSI and placement retain the
 	// live reserve; the project ceiling prevents a configuration typo from
 	// exceeding physical capacity but no longer strands a fixed quarter.
 	if incus.ProjectMaxInstances < 1 || incus.ProjectMaxInstances > 8 {
@@ -337,8 +337,8 @@ func validateIncus(add func(string, string), incus Incus) {
 	if incus.ProjectMaxCPUUnits < 1 || incus.ProjectMaxCPUUnits > 10 {
 		add("incus.project_max_cpu_units", "must be between one and ten logical scheduling units")
 	}
-	if incus.ProjectMaxMemoryMiB < 4096 || incus.ProjectMaxMemoryMiB > 14*1024 {
-		add("incus.project_max_memory_mib", "must be between 4096 and 14336 MiB")
+	if incus.ProjectMaxMemoryMiB < 4096 || incus.ProjectMaxMemoryMiB > 15*1024 {
+		add("incus.project_max_memory_mib", "must be between 4096 and 15360 MiB")
 	}
 	validateServicePort(add, "incus.registry_port", incus.RegistryPort)
 	validateServicePort(add, "incus.rustfs_port", incus.RustFSPort)
