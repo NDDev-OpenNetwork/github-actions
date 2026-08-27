@@ -148,14 +148,14 @@ func TestQueueHostOwnsCentralDiagnosticExporterHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := collector.Collect(context.Background())
-	if !snapshot.Healthy || len(snapshot.Services) != 6 {
+	if !snapshot.Healthy || len(snapshot.Services) != 7 {
 		t.Fatalf("queue host snapshot = %#v", snapshot)
 	}
 	seen := make(map[string]bool, len(snapshot.Services))
 	for _, service := range snapshot.Services {
 		seen[service.Name] = true
 	}
-	for _, name := range []string{"garm", "gha-fleet-gateway", "gha-cache-broker", "gha-diagnostic-exporter.service", "gha-diagnostic-exporter.timer", "otelcol-fleet"} {
+	for _, name := range []string{"garm", "gha-fleet-gateway", "gha-cache-broker", "gha-diagnostic-exporter.service", "gha-diagnostic-exporter.timer", "gha-services-rustfs-route.timer", "otelcol-fleet"} {
 		if !seen[name] {
 			t.Fatalf("queue host omitted required service %q", name)
 		}
