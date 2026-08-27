@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 18 {
-		t.Fatalf("rules = %d, want 18", len(bundle.Rules))
+	if len(bundle.Rules) != 19 {
+		t.Fatalf("rules = %d, want 19", len(bundle.Rules))
 	}
 }
 
@@ -29,6 +29,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"compute_pressure_observer_missing": `count(up{service_name="pressure-state"} == 1)`,
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
 		"compute_root_disk_low":             "system_filesystem_usage",
+		"kernel_slab_unreclaimable":         `state="slab_unreclaimable"`,
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {
