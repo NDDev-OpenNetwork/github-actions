@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/pressureobserve"
 )
 
 type State struct {
@@ -30,6 +32,7 @@ type Handler struct {
 	State        *State
 	MaxStaleness time.Duration
 	Now          func() time.Time
+	HostRoot     string
 }
 
 func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -56,7 +59,8 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	switch request.URL.Path {
 	case "/metrics":
 		writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		_, _ = writer.Write([]byte(RenderPrometheus(snapshot, now, h.MaxStaleness)))
+		metrics := RenderPrometheus(snapshot, now, h.MaxStaleness) + pressureobserve.RenderCompliance(pressureobserve.CollectCompliance(h.HostRoot, now))
+		_, _ = writer.Write([]byte(metrics))
 	case "/snapshot":
 		writer.Header().Set("Content-Type", "application/json")
 		writeHTTPJSON(writer, http.StatusOK, snapshot)

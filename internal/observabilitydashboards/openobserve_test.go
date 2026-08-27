@@ -14,7 +14,7 @@ func TestRenderOpenObserveV8IsDeterministicAndManaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dashboards) != 8 {
+	if len(dashboards) != 9 {
 		t.Fatalf("dashboards=%d", len(dashboards))
 	}
 	for _, dashboard := range dashboards {

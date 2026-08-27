@@ -16,6 +16,7 @@ const DefaultMaxStaleness = 90 * time.Second
 
 type Handler struct {
 	StatePath    string
+	HostRoot     string
 	MaxStaleness time.Duration
 	Now          func() time.Time
 }
@@ -44,7 +45,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "{\"healthy\":%t,\"fresh\":%t}\n", fresh, fresh)
 	case "/metrics":
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte(Render(state, now, h.maxStaleness(), err)))
+		metrics := Render(state, now, h.maxStaleness(), err) + RenderCompliance(CollectCompliance(h.HostRoot, now))
+		_, _ = w.Write([]byte(metrics))
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
