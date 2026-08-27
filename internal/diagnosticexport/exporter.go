@@ -9,7 +9,11 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 )
 
-const remoteRevalidationInterval = time.Hour
+const (
+	remoteRevalidationInterval = time.Hour
+	remoteHeadAttempts         = 4
+	remoteHeadRetryDelay       = 10 * time.Second
+)
 
 var ErrRemoteObjectExists = errors.New("remote object already exists")
 
@@ -50,6 +54,7 @@ type Exporter struct {
 	Store  ObjectStore
 	State  StateStore
 	Now    func() time.Time
+	Sleep  func(context.Context, time.Duration) error
 }
 
 type ExportError struct {
@@ -136,7 +141,7 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 			summary.addToolCacheEvents(bundle)
 			continue
 		}
-		remote, err := e.Store.Head(ctx, e.Config.Bucket, bundle.ObjectKey)
+		remote, err := e.head(ctx, e.Config.Bucket, bundle.ObjectKey)
 		if err != nil {
 			if firstFailure == "" {
 				firstFailure = "remote-head"
@@ -160,7 +165,7 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 				failures++
 				continue
 			}
-			remote, err = e.Store.Head(ctx, e.Config.Bucket, bundle.ObjectKey)
+			remote, err = e.head(ctx, e.Config.Bucket, bundle.ObjectKey)
 			if err != nil || !remoteMatches(remote, bundle) {
 				if firstFailure == "" {
 					firstFailure = "remote-confirm"
@@ -246,6 +251,34 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 		return summary, exportError
 	}
 	return summary, nil
+}
+
+func (e Exporter) head(ctx context.Context, bucket, key string) (RemoteObject, error) {
+	var last error
+	for attempt := 1; attempt <= remoteHeadAttempts; attempt++ {
+		remote, err := e.Store.Head(ctx, bucket, key)
+		if err == nil {
+			return remote, nil
+		}
+		last = err
+		if attempt == remoteHeadAttempts {
+			break
+		}
+		if e.Sleep != nil {
+			if err := e.Sleep(ctx, remoteHeadRetryDelay); err != nil {
+				return RemoteObject{}, errors.Join(last, err)
+			}
+			continue
+		}
+		timer := time.NewTimer(remoteHeadRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return RemoteObject{}, errors.Join(last, ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return RemoteObject{}, last
 }
 
 func (summary *Summary) addToolCacheEvents(bundle Bundle) {
