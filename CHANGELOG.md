@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Keep OpenTelemetry as the sole collection standard, OTLP/HTTP as the
+  transport, and OpenObserve as the only fleet telemetry backend. Classified
+  host warnings are cumulative metrics rather than duplicate raw log records.
+- Added nine managed dashboards and twenty-five managed alerts covering host
+  compliance, classified host signals, diagnostics, lifecycle, capacity,
+  provider reliability, fairness and telemetry durability.
+- Export package/reboot, running-kernel and SRSO state from all fleet hosts
+  through the existing observer and OTEL pipelines.
+- Treat queued and assigned authoritative rehydration gaps as raw diagnostic
+  context; persistent repository/workflow identity paging begins only after a
+  running intent exceeds its own state-entry grace.
+- Bound OpenObserve v0.92 notification silence to ten minutes for pages and
+  fifteen minutes for tickets because the backend pauses outcome evaluation
+  during silence. Sustained range-query hold windows remain unchanged.
 - Encode sustained PromQL holds with range subqueries and keep OpenObserve's
   trigger threshold at one series; v0.92 defines that threshold as coverage,
   not as a consecutive-evaluation counter.
@@ -10,8 +24,6 @@
 - Use recursion-one Incus inventory for bulk admission, compatibility and GARM
   listing. Exact-instance operations retain full state, while deleting
   containers no longer trigger recursive cgroup and network stat reads.
-
-## Unreleased
 
 - Keep diagnostic export within one bounded run across transient private-route
   convergence using repeated bounded HEAD rounds, require sustained failure

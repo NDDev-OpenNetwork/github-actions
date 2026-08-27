@@ -24,12 +24,14 @@ classification:
 product:
   purpose: >-
     Open-source GARM and Incus control-plane components for isolated,
-    disposable GitHub Actions runners.
+    disposable GitHub Actions runners with durable OTEL-native observability.
   capabilities:
     - "Observation-only JobAssigned and durable complete-identity admission"
     - "One job per ephemeral Incus container"
     - "Fail-closed GitHub, provider and instance reconciliation"
     - "Bounded diagnostic WAL with verified remote confirmation"
+    - "OpenTelemetry collection, OTLP transport and OpenObserve asset contracts"
+    - "Bounded host-signal and compliance metrics without duplicate raw logs"
     - "Synthetic configuration examples with no estate data"
   entrypoints:
     - change: "Commands"
