@@ -24,7 +24,7 @@ func TestRenderCPUAwarePlacementFromPortablePolicy(t *testing.T) {
 		"LOAD_TIE_EPSILON = 0.05", "def load_per_core(state, resources)",
 		`getattr(sysinfo, "load_averages", None)`, `getattr(cpu, "total", 0)`,
 		"member_load < chosen_load - LOAD_TIE_EPSILON",
-		"remaining < chosen_remaining", "pending_count > chosen_count",
+		"remaining > chosen_remaining", "pending_count < chosen_count",
 		"user.gha_pressure.state", "get_instances_count(PROJECT, name, True)",
 		"insufficient-memory: no fleet member has room for this worker",
 	} {

@@ -16,8 +16,8 @@ const ServerConfigKey = "instances.placement.scriptlet"
 
 // Render returns a portable Incus Starlark placement scriptlet derived only
 // from typed public platform policy. Every candidate must first pass pressure,
-// disk and hard-memory checks; the least loaded candidate wins, with best-fit
-// memory packing only as a tie-break between comparable CPU loads.
+// disk and hard-memory checks; the least loaded candidate wins, with free
+// capacity spreading as a tie-break between comparable CPU loads.
 func Render(cfg config.Config) (string, error) {
 	if err := cfg.Validate(); err != nil {
 		return "", err
@@ -71,7 +71,7 @@ const placementTemplate = `# Managed by NDDev github-actions. Do not edit live.
 #
 # Hard memory, pressure and disk checks are safety authorities. Eligible
 # workers prefer the least loaded member because CPU is the scarce resource;
-# best-fit memory packing breaks ties without overriding measured load.
+# free-capacity spreading breaks ties without overriding measured load.
 
 PROJECT = {{PROJECT}}
 POOL = {{POOL}}
@@ -161,9 +161,9 @@ def instance_placement(request, candidate_members):
         elif member_load < chosen_load - LOAD_TIE_EPSILON:
             better = True
         elif member_load <= chosen_load + LOAD_TIE_EPSILON:
-            if remaining < chosen_remaining:
+            if remaining > chosen_remaining:
                 better = True
-            elif remaining == chosen_remaining and pending_count > chosen_count:
+            elif remaining == chosen_remaining and pending_count < chosen_count:
                 better = True
 
         if better:

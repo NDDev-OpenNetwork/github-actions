@@ -2,13 +2,15 @@
 
 ## Unreleased
 
+- Spread equal-load burst placement toward the member with more remaining
+  capacity and fewer pending workers instead of packing one member first.
 - Raise standard, fast and priority-standard scale-set width from 12 to 16 so
   four 2-vCPU workers can consume each member's 98% CPU budget.
 - Permit a measured five-percent RAM reserve with a 768 MiB absolute floor on
   dedicated fleet hosts, while retaining non-schedulable emergency swap,
   pressure admission and hard per-worker memory limits.
-- Added provider derivative `v0.1.5-nddev.84` for the five-percent dedicated
-  burst envelope and fifteen-GiB per-member project ceiling.
+- Added provider derivative `v0.1.5-nddev.85` for the five-percent dedicated
+  burst envelope, fifteen-GiB ceiling and spread burst placement.
 - Raise the validated per-member project ceiling to 15 GiB so a dedicated
   16-GiB host can expose a measured 95% reservation envelope.
 - Preserved per-host series in audit-suppression and kernel-workqueue slow-burn
