@@ -275,6 +275,7 @@ func TestQueueSummarySeparatesTransientAndPersistentCorrelationGaps(t *testing.T
 	persistent.JobID = "6c3077ba-3664-5824-b2cf-e22a31b25f44"
 	persistent.QueueTime = observationTime.Add(-queueCorrelationGracePeriod)
 	persistent.StateEnteredAt = observationTime.Add(-queueCorrelationGracePeriod)
+	persistent.State = queueintent.StateRunning
 	summary, err := summarizeQueue(queueintent.Snapshot{Active: []queueintent.Intent{transient, persistent}}, testPlatform(t), observationTime)
 	if err != nil {
 		t.Fatal(err)
@@ -305,14 +306,14 @@ func TestQueueSummaryDoesNotPageOnRehydratedJobWaitingForCapacity(t *testing.T) 
 	}
 }
 
-func TestQueueSummaryStartsCorrelationGraceWhenCapacityWaitEnds(t *testing.T) {
+func TestQueueSummaryDoesNotPageAssignedCapacityWait(t *testing.T) {
 	assigned := queueintent.Intent{
 		Key: "assigned-rehydrated", ScaleSetID: 11, JobID: "6c3077ba-3664-5824-b2cf-e22a31b25f44",
 		ScaleSetName: "nddev-linux-integration", Repository: "owner",
 		WorkflowRef: "authoritative-rehydration", EventName: "push",
 		QueueTime: observationTime.Add(-10 * queueCorrelationGracePeriod),
 		State:     queueintent.StateAssigned, Priority: 1,
-		StateEnteredAt: observationTime.Add(-queueCorrelationGracePeriod + time.Second), UpdatedAt: observationTime.Add(-time.Second),
+		StateEnteredAt: observationTime.Add(-10 * queueCorrelationGracePeriod), UpdatedAt: observationTime.Add(-time.Second),
 		ExpiresAt: observationTime.Add(time.Minute),
 	}
 	summary, err := summarizeQueue(queueintent.Snapshot{Active: []queueintent.Intent{assigned}}, testPlatform(t), observationTime)

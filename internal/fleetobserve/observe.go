@@ -600,7 +600,7 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		correlationAge := now.Sub(correlationSince)
 		if !strings.Contains(intent.Repository, "/") {
 			summary.UnboundRepository++
-			if intent.State != queueintent.StateQueued && correlationAge >= queueCorrelationGracePeriod {
+			if intent.State == queueintent.StateRunning && correlationAge >= queueCorrelationGracePeriod {
 				summary.UnboundRepositoryBeyondGrace++
 			}
 		}
@@ -617,7 +617,7 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			// without a workflow-run identity; the authenticated runner claim
 			// supplies that identity after assignment. Keep the raw gap visible,
 			// but page only after the intent has actually left the queue.
-			if intent.State != queueintent.StateQueued && correlationAge >= queueCorrelationGracePeriod {
+			if intent.State == queueintent.StateRunning && correlationAge >= queueCorrelationGracePeriod {
 				summary.MissingWorkflowRunIDBeyondGrace++
 			}
 		}
