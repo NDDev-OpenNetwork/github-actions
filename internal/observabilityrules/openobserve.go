@@ -71,7 +71,10 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 	}
 	for _, rule := range bundle.Rules {
 		priority := 3
-		silence := 60
+		// OpenObserve v0.92 pauses outcome evaluation during silence rather
+		// than suppressing notification delivery alone. Keep ticket recovery
+		// fresh enough to trust while still spacing repeat notifications.
+		silence := 15
 		if rule.Severity == "page" {
 			priority = 1
 			silence = 10
