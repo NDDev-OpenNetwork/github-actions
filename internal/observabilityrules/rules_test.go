@@ -53,8 +53,15 @@ func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
 	}
 	for _, rule := range bundle.Rules {
 		if rule.ID == "diagnostic_export_failure" {
-			if rule.HoldSecs != 180 || rule.RequiredEvaluations() < 3 {
-				t.Fatalf("diagnostic failure hold = %d, evaluations = %d", rule.HoldSecs, rule.RequiredEvaluations())
+			rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, alert := range rendered.Alerts {
+				if alert.Name == rule.ID && (rule.HoldSecs != 180 || alert.TriggerCondition.Threshold != 1 ||
+					!strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time(")) {
+					t.Fatalf("diagnostic rule=%#v alert=%#v", rule, alert)
+				}
 			}
 			return
 		}
@@ -99,13 +106,16 @@ func TestRenderOpenObserveSeparatesExpressionAndThreshold(t *testing.T) {
 	}
 	for index, alert := range rendered.Alerts {
 		rule := bundle.Rules[index]
-		if alert.Name != rule.ID || alert.StreamName != rule.StreamName || alert.QueryCondition.PromQL != rule.Expression ||
+		if alert.Name != rule.ID || alert.StreamName != rule.StreamName ||
 			alert.QueryCondition.PromQLCondition.Operator != rule.Operator ||
 			alert.QueryCondition.PromQLCondition.Value != rule.Threshold || !alert.Enabled {
 			t.Fatalf("alert %s does not preserve rule semantics: %#v", rule.ID, alert)
 		}
-		if alert.TriggerCondition.Threshold != rule.RequiredEvaluations() {
-			t.Fatalf("alert %s evaluations = %d, want %d", rule.ID, alert.TriggerCondition.Threshold, rule.RequiredEvaluations())
+		if alert.TriggerCondition.Threshold != 1 {
+			t.Fatalf("alert %s coverage threshold = %d, want 1", rule.ID, alert.TriggerCondition.Threshold)
+		}
+		if rule.HoldSecs > rule.EvaluationSecs && !strings.Contains(alert.QueryCondition.PromQL, "_over_time(") {
+			t.Fatalf("alert %s lacks sustained range query: %q", rule.ID, alert.QueryCondition.PromQL)
 		}
 	}
 }
@@ -118,11 +128,11 @@ func TestRenderOpenObserveConvertsSecondsToMinuteSchedule(t *testing.T) {
 		holdSecs         int
 		frequencyMinutes int
 		periodMinutes    int
-		evaluations      int
+		coverage         int
 	}{
-		{name: "thirty seconds", severity: "page", evaluationSecs: 30, holdSecs: 120, frequencyMinutes: 1, periodMinutes: 2, evaluations: 2},
-		{name: "sixty seconds", severity: "page", evaluationSecs: 60, holdSecs: 60, frequencyMinutes: 1, periodMinutes: 1, evaluations: 1},
-		{name: "five minutes", severity: "ticket", evaluationSecs: 300, holdSecs: 900, frequencyMinutes: 5, periodMinutes: 15, evaluations: 3},
+		{name: "thirty seconds", severity: "page", evaluationSecs: 30, holdSecs: 120, frequencyMinutes: 1, periodMinutes: 2, coverage: 1},
+		{name: "sixty seconds", severity: "page", evaluationSecs: 60, holdSecs: 60, frequencyMinutes: 1, periodMinutes: 1, coverage: 1},
+		{name: "five minutes", severity: "ticket", evaluationSecs: 300, holdSecs: 900, frequencyMinutes: 5, periodMinutes: 15, coverage: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bundle := Bundle{SchemaVersion: SchemaVersion, Backend: "openobserve", Organization: "default", Rules: []Rule{{
@@ -138,7 +148,7 @@ func TestRenderOpenObserveConvertsSecondsToMinuteSchedule(t *testing.T) {
 			}
 			trigger := rendered.Alerts[0].TriggerCondition
 			if trigger.FrequencyType != "minutes" || trigger.Frequency != test.frequencyMinutes ||
-				trigger.Period != test.periodMinutes || trigger.Threshold != test.evaluations {
+				trigger.Period != test.periodMinutes || trigger.Threshold != test.coverage {
 				t.Fatalf("trigger = %#v", trigger)
 			}
 		})

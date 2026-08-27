@@ -78,6 +78,10 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 		}
 		frequencyMinutes := (rule.EvaluationSecs + 59) / 60
 		periodMinutes := max((rule.HoldSecs+59)/60, frequencyMinutes)
+		promQL, err := sustainedPromQL(rule)
+		if err != nil {
+			return OpenObserveBundle{}, err
+		}
 		result.Alerts = append(result.Alerts, OpenObserveAlert{
 			Name:       rule.ID,
 			OrgID:      bundle.Organization,
@@ -85,13 +89,16 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			StreamName: rule.StreamName,
 			QueryCondition: OpenObserveQuery{
 				Type:   "promql",
-				PromQL: rule.Expression,
+				PromQL: promQL,
 				PromQLCondition: OpenObserveValueCondition{
 					Column: "value", Operator: rule.Operator, Value: rule.Threshold,
 				},
 			},
 			TriggerCondition: OpenObserveTrigger{
-				Period: periodMinutes, Operator: ">=", Threshold: rule.RequiredEvaluations(),
+				// OpenObserve defines threshold as a PromQL series-coverage gate,
+				// not a consecutive-evaluation counter. Sustained time semantics
+				// live in the range-subquery expression above.
+				Period: periodMinutes, Operator: ">=", Threshold: 1,
 				Frequency: frequencyMinutes, FrequencyType: "minutes", Silence: silence,
 				Timezone: "UTC", AlignTime: true,
 			},
@@ -108,4 +115,33 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 	}
 	sort.Slice(result.Alerts, func(i, j int) bool { return result.Alerts[i].Name < result.Alerts[j].Name })
 	return result, nil
+}
+
+func sustainedPromQL(rule Rule) (string, error) {
+	if rule.HoldSecs <= rule.EvaluationSecs {
+		return rule.Expression, nil
+	}
+	function := ""
+	switch rule.Operator {
+	case ">", ">=":
+		function = "min_over_time"
+	case "<", "<=":
+		function = "max_over_time"
+	default:
+		return "", fmt.Errorf("rule %q cannot express sustained operator %q", rule.ID, rule.Operator)
+	}
+	return fmt.Sprintf(
+		"%s((%s)[%s:%s])",
+		function,
+		rule.Expression,
+		promQLDuration(rule.HoldSecs),
+		promQLDuration(rule.EvaluationSecs),
+	), nil
+}
+
+func promQLDuration(seconds int) string {
+	if seconds%60 == 0 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
