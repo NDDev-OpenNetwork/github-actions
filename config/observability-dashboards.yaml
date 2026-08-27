@@ -111,7 +111,7 @@ dashboards:
       - id: maintenance_pending
         title: Updates and reboot state
         kind: timeseries
-        query: max by (host_name) (gha_fleet_host_standard_updates_available or gha_fleet_host_reboot_required)
+        query: max by (host_name) (gha_fleet_host_standard_updates_available) + on (host_name) max by (host_name) (gha_fleet_host_reboot_required)
         unit: count
         description: Standard package updates or a pending maintenance reboot reported by each host.
       - id: running_kernel
