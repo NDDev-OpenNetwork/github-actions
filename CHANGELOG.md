@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Spread equal-load burst placement toward the member with more remaining
+  capacity and fewer pending workers instead of packing one member first.
 - Raise standard, fast and priority-standard scale-set width from 12 to 16 so
   four 2-vCPU workers can consume each member's 98% CPU budget.
 - Permit a measured five-percent RAM reserve with a 768 MiB absolute floor on
