@@ -75,6 +75,35 @@ func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
 	t.Fatal("diagnostic_export_failure rule is missing")
 }
 
+func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"audit_suppression_burst", "kernel_workqueue_hog"} {
+		found := false
+		for _, alert := range rendered.Alerts {
+			if alert.Name != id {
+				continue
+			}
+			found = true
+			if strings.Contains(alert.QueryCondition.PromQL, "((max(max_over_time(") {
+				t.Fatalf("%s collapses its host series to a scalar before the sustained subquery: %s", id, alert.QueryCondition.PromQL)
+			}
+			if !strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time((max_over_time(") {
+				t.Fatalf("%s does not preserve a vector through the sustained subquery: %s", id, alert.QueryCondition.PromQL)
+			}
+		}
+		if !found {
+			t.Fatalf("%s alert is missing", id)
+		}
+	}
+}
+
 func TestRulesRejectUnsafeOrUnactionableChanges(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
