@@ -50,6 +50,22 @@ rules:
     summary: A compute host pressure publication is invalid or stale.
     action: Preserve the local pressure state and restore the publisher before reopening member admission.
     recovery: Every compute pressure observer reports a fresh valid state.
+  - id: compute_root_disk_low
+    severity: ticket
+    query_language: promql
+    stream_name: system_filesystem_usage
+    expression: min(sum by(host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state="free"}) / sum by(host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state=~"free|used"}))
+    operator: "<"
+    threshold: 0.2
+    evaluation_seconds: 300
+    hold_seconds: 900
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet host root filesystem has less than twenty percent free.
+    action: Preserve usage evidence and prune only unreferenced rebuildable artifacts before placement loses another member.
+    recovery: Every fleet host root filesystem remains at or above twenty percent free.
   - id: diagnostic_export_failure
     severity: page
     query_language: promql

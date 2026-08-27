@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 17 {
-		t.Fatalf("rules = %d, want 17", len(bundle.Rules))
+	if len(bundle.Rules) != 18 {
+		t.Fatalf("rules = %d, want 18", len(bundle.Rules))
 	}
 }
 
@@ -28,6 +28,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"provider_retry_error_persistent":   `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
 		"compute_pressure_observer_missing": `count(up{service_name="pressure-state"} == 1)`,
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
+		"compute_root_disk_low":             "system_filesystem_usage",
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {
