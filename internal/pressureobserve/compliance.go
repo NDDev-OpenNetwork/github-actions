@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -35,6 +36,8 @@ func CollectCompliance(root string, now time.Time) Compliance {
 	kernel, kernelErr := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"))
 	if kernelErr == nil {
 		result.KernelRelease = strings.TrimSpace(string(kernel))
+	} else if root == "/" {
+		result.KernelRelease, kernelErr = runningKernelRelease()
 	}
 	srso, srsoErr := os.ReadFile(filepath.Join(root, "sys", "devices", "system", "cpu", "vulnerabilities", "spec_rstack_overflow"))
 	if srsoErr == nil {
@@ -52,6 +55,24 @@ func CollectCompliance(root string, now time.Time) Compliance {
 	}
 	result.Complete = kernelErr == nil && result.KernelRelease != "" && srsoErr == nil && updatesErr == nil && result.PackageInventoryAgeSeconds >= 0
 	return result
+}
+
+func runningKernelRelease() (string, error) {
+	var identity syscall.Utsname
+	if err := syscall.Uname(&identity); err != nil {
+		return "", err
+	}
+	bytes := make([]byte, 0, len(identity.Release))
+	for _, value := range identity.Release {
+		if value == 0 {
+			break
+		}
+		bytes = append(bytes, byte(value))
+	}
+	if len(bytes) == 0 {
+		return "", fmt.Errorf("uname returned an empty kernel release")
+	}
+	return string(bytes), nil
 }
 
 func RenderCompliance(state Compliance) string {
