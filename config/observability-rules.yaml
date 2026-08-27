@@ -2,6 +2,22 @@ schema_version: 2
 backend: openobserve
 organization: default
 rules:
+  - id: audit_suppression_burst
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_host_signal_events
+    expression: max(max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
+    operator: ">"
+    threshold: 30
+    evaluation_seconds: 300
+    hold_seconds: 600
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Kernel audit delivery is repeatedly suppressing callbacks across the fleet.
+    action: Correlate the affected hosts with AppArmor and workload churn, then remove the noisy rule source without weakening audit coverage.
+    recovery: No member records more than thirty new suppression notices in a rolling fifteen-minute window for ten minutes.
   - id: collector_queue_near_full
     severity: page
     query_language: promql
@@ -162,6 +178,22 @@ rules:
     summary: Unreclaimable kernel slab exceeds two GiB on a fleet host.
     action: Preserve slab, audit and AppArmor evidence; close member admission and roll to the fixed kernel after jobs drain.
     recovery: Every fleet host remains below two GiB unreclaimable slab after workload churn.
+  - id: kernel_workqueue_hog
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_host_signal_events
+    expression: sum(max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 60
+    hold_seconds: 60
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet kernel workqueue reported a CPU hog event.
+    action: Preserve the kernel message and host pressure state, then close admission on the affected member if latency or PSI is elevated.
+    recovery: No workqueue-hog event is present in the rolling fifteen-minute observation window.
   - id: lifecycle_assigned_stall
     severity: page
     query_language: promql

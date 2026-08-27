@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 19 {
-		t.Fatalf("rules = %d, want 19", len(bundle.Rules))
+	if len(bundle.Rules) != 21 {
+		t.Fatalf("rules = %d, want 21", len(bundle.Rules))
 	}
 }
 
@@ -30,6 +30,8 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
 		"compute_root_disk_low":             "system_filesystem_usage",
 		"kernel_slab_unreclaimable":         `state="slab_unreclaimable"`,
+		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
+		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {
@@ -76,7 +78,7 @@ func TestRulesRejectUnsafeOrUnactionableChanges(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Rule){
 		"unknown severity": func(r *Rule) { r.Severity = "noise" },
-		"slow page":        func(r *Rule) { r.HoldSecs = 3600 },
+		"slow page":        func(r *Rule) { r.Severity, r.HoldSecs = "page", 3600 },
 		"fast ticket":      func(r *Rule) { r.Severity, r.HoldSecs = "ticket", 60 },
 		"private runbook":  func(r *Rule) { r.Runbook = "https://example.invalid/private" },
 		"unknown operator": func(r *Rule) { r.Operator = "contains" },
