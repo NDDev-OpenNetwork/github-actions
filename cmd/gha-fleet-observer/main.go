@@ -289,7 +289,7 @@ func serviceNameAllowed(name string) bool {
 			return true
 		}
 	}
-	return name == "gha-cache-broker"
+	return name == "gha-cache-broker" || name == "gha-services-rustfs-route.timer"
 }
 
 func systemdUnitName(name string) string {
