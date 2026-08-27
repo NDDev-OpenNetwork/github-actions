@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Encode sustained PromQL holds with range subqueries and keep OpenObserve's
+  trigger threshold at one series; v0.92 defines that threshold as coverage,
+  not as a consecutive-evaluation counter.
 - Added provider derivative `v0.1.5-nddev.82`: bulk Incus inventory no longer
   requests recursive runtime statistics from concurrently deleting workers.
 - Use recursion-one Incus inventory for bulk admission, compatibility and GARM
