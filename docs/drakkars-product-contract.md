@@ -180,6 +180,18 @@ Signals share repository, commit, workflow, run, job, attempt, priority,
 technology, package manager, intent, reservation, worker, host, image and
 artifact identities where their trust boundary permits them.
 
+OpenTelemetry is the only collection standard and OTLP/HTTP is the transport.
+OpenObserve is the only durable telemetry backend; its PromQL support is a
+query language rather than a separate Prometheus deployment. Known high-volume
+host warnings are classified into bounded cumulative metrics and are not
+duplicated into the application-log stream. Host package/reboot state, running
+kernel identity and kernel-reported vulnerability status use the same path.
+
+Pre-execution identity is intentionally sparse. Queued and assigned intents
+retain raw missing/unbound counters, while persistent correlation alerts begin
+only after an intent reaches running and exceeds its state-entry convergence
+grace. Capacity delay remains owned by lifecycle and capacity signals.
+
 The system must explain queue delay, critical path, retry reason, constrained
 resource, cache benefit, missing technology, failure ownership and telemetry
 coverage. Raw output is bounded and redacted. A telemetry-store outage delays

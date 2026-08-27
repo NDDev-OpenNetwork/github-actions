@@ -36,6 +36,14 @@ whole-pipeline performance standard implemented by this engine.
 - Host-local CPU, memory and I/O PSI is converted into a hysteretic, expiring
   Incus member signal; missing, stale or closed signals remove capacity rather
   than becoming provider failures or hidden overcommit.
+- OpenTelemetry is the only collection standard, OTLP/HTTP is the transport,
+  and OpenObserve is the only telemetry store. PromQL appears only as
+  OpenObserve's metric-query language; it does not imply a Prometheus server.
+  High-volume kernel/LVM notices are exported as bounded cumulative metrics,
+  while package, reboot, kernel and SRSO state remains visible for every host.
+- Raw missing correlation remains visible during queued and assigned capacity
+  phases. Persistent identity alerts begin only for a running intent after its
+  own convergence grace, so capacity delay is not mislabeled as identity loss.
 - Public repository CI runs only on standard GitHub-hosted runners.
 - Private Linux jobs can use the [trust-scoped package cache](docs/package-cache.md)
   over their existing one-job RustFS identity; compiler and package caches
