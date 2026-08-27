@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 21 {
-		t.Fatalf("rules = %d, want 21", len(bundle.Rules))
+	if len(bundle.Rules) != 25 {
+		t.Fatalf("rules = %d, want 25", len(bundle.Rules))
 	}
 }
 
@@ -32,6 +32,10 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"kernel_slab_unreclaimable":         `state="slab_unreclaimable"`,
 		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
 		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
+		"host_compliance_observer_missing":  "gha_fleet_host_compliance_observer_up",
+		"host_package_inventory_stale":      "gha_fleet_host_package_inventory_age_seconds",
+		"host_reboot_required":              "gha_fleet_host_reboot_required",
+		"host_standard_updates_available":   "gha_fleet_host_standard_updates_available",
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {

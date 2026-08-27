@@ -146,6 +146,22 @@ rules:
     summary: GitHub run or repository identity has not converged within two minutes.
     action: Correlate the exact queue UUID with JobAssigned, workflow run, provider lease and runner identity without recovering a transient pre-assignment gap.
     recovery: Both age-qualified correlation metrics remain zero while raw transition counters may continue to change.
+  - id: host_compliance_observer_missing
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_host_compliance_observer_up
+    expression: count(gha_fleet_host_compliance_observer_up == 1)
+    operator: "<"
+    threshold: 5
+    evaluation_seconds: 60
+    hold_seconds: 180
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Kernel or package compliance telemetry is incomplete on a fleet host.
+    action: Restore the local observer or its read-only host inputs before declaring package and reboot state current.
+    recovery: Exactly five fleet hosts continuously export complete compliance state.
   - id: host_oom_detected
     severity: page
     query_language: promql
@@ -162,6 +178,54 @@ rules:
     summary: A fleet host recorded a new OOM kill.
     action: Close admission on the affected member and preserve workload and pressure evidence.
     recovery: No new OOM delta occurs and memory pressure returns inside the promotion envelope.
+  - id: host_package_inventory_stale
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_host_package_inventory_age_seconds
+    expression: max(gha_fleet_host_package_inventory_age_seconds)
+    operator: ">"
+    threshold: 129600
+    evaluation_seconds: 300
+    hold_seconds: 3600
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet host package inventory has not refreshed for more than thirty-six hours.
+    action: Restore the Ubuntu metadata refresh path and preserve apt output before changing package state.
+    recovery: Every fleet host package inventory remains younger than thirty-six hours for one hour.
+  - id: host_reboot_required
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_host_reboot_required
+    expression: max(gha_fleet_host_reboot_required)
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 300
+    hold_seconds: 600
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A fleet host still requires a reboot after package maintenance.
+    action: Drain jobs naturally and use the rolling reboot procedure while preserving cluster quorum.
+    recovery: No fleet host reports a pending reboot for ten minutes.
+  - id: host_standard_updates_available
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_host_standard_updates_available
+    expression: max(gha_fleet_host_standard_updates_available)
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 300
+    hold_seconds: 3600
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Standard Ubuntu package updates remain available on a fleet host.
+    action: Apply the normal rolling package-maintenance procedure and prove service and runner recovery after each member.
+    recovery: Every fleet host reports zero standard updates for one hour.
   - id: kernel_slab_unreclaimable
     severity: ticket
     query_language: promql

@@ -95,6 +95,37 @@ dashboards:
         query: max(gha_diagnostic_storage_oldest_object_age_seconds)
         unit: seconds
         description: Age of the oldest retained diagnostic object.
+  - id: host_compliance
+    title: Fleet host compliance
+    refresh_seconds: 60
+    default_range: 24h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: compliance_coverage
+        title: Complete compliance observers
+        kind: stat
+        query: count(gha_fleet_host_compliance_observer_up == 1)
+        unit: count
+        description: Number of fleet hosts with readable kernel, vulnerability and package inventory state.
+      - id: maintenance_pending
+        title: Updates and reboot state
+        kind: timeseries
+        query: max by (host_name) (gha_fleet_host_standard_updates_available or gha_fleet_host_reboot_required)
+        unit: count
+        description: Standard package updates or a pending maintenance reboot reported by each host.
+      - id: running_kernel
+        title: Running kernel identity
+        kind: stat
+        query: max by (host_name, release) (gha_fleet_host_kernel_info)
+        unit: state
+        description: Exact running kernel release on every fleet host.
+      - id: srso_status
+        title: SRSO hardware status
+        kind: stat
+        query: max by (host_name, status) (gha_fleet_host_srso_status)
+        unit: state
+        description: Kernel-reported speculative return stack overflow status, including hardware microcode boundaries.
   - id: host_signals
     title: Classified host signals
     refresh_seconds: 60
