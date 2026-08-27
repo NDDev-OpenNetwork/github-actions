@@ -18,6 +18,38 @@ rules:
     summary: A persistent Collector queue is above ninety percent of capacity.
     action: Restore the backend path or storage before overflow and preserve the queue directory.
     recovery: Queue ratio stays below fifty percent and enqueue/refusal counters remain zero.
+  - id: compute_pressure_observer_missing
+    severity: page
+    query_language: promql
+    stream_name: up
+    expression: count(up{service_name="pressure-state"} == 1)
+    operator: "<"
+    threshold: 4
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: One or more compute pressure observers are not being scraped.
+    action: Restore the loopback observer or collector target before trusting compute OOM coverage.
+    recovery: Exactly four compute pressure targets remain scrapeable.
+  - id: compute_pressure_state_stale
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_pressure_observer_up
+    expression: min(gha_fleet_pressure_observer_up)
+    operator: "<"
+    threshold: 1
+    evaluation_seconds: 30
+    hold_seconds: 120
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A compute host pressure publication is invalid or stale.
+    action: Preserve the local pressure state and restore the publisher before reopening member admission.
+    recovery: Every compute pressure observer reports a fresh valid state.
   - id: diagnostic_export_failure
     severity: page
     query_language: promql
