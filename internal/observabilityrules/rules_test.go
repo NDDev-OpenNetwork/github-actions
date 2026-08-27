@@ -160,3 +160,23 @@ func TestRenderOpenObserveConvertsSecondsToMinuteSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderOpenObserveBoundsStaleRecoveryDuringSilence(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, alert := range rendered.Alerts {
+		want := 15
+		if bundle.Rules[index].Severity == "page" {
+			want = 10
+		}
+		if alert.TriggerCondition.Silence != want {
+			t.Fatalf("alert %s silence=%d, want %d", alert.Name, alert.TriggerCondition.Silence, want)
+		}
+	}
+}
