@@ -100,14 +100,14 @@ type ScaleSetClass struct {
 // fails every create with a pool that has no pinned worker image.
 func PublishedScaleSets() []ScaleSetClass {
 	return []ScaleSetClass{
-		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, false, 2, 4096, 30, false),
+		class(DefaultScaleSetName, DefaultImage, DefaultFlavor, 16, "trusted", "repository", "public-internet", "trusted", false, false, 2, 4096, 30, false),
 		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, true, 4, 6144, 50, false),
-		class(FastScaleSetName, FastImage, FastFlavor, 12, "trusted", "repository", "public-internet", "trusted", false, false, 2, 3072, 30, false),
+		class(FastScaleSetName, FastImage, FastFlavor, 16, "trusted", "repository", "public-internet", "trusted", false, false, 2, 3072, 30, false),
 		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, false),
 		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, false, 4, 6144, 40, false),
 		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, false, 2, 2048, 20, false),
 		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, false, 2, 4096, 30, false),
-		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 12, "trusted", "repository", "public-internet", "none", false, false, 2, 4096, 30, true),
+		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 16, "trusted", "repository", "public-internet", "none", false, false, 2, 4096, 30, true),
 		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "none", true, true, 4, 6144, 50, true),
 		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, true),
 	}
