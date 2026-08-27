@@ -5,8 +5,8 @@
 - Permit a measured five-percent RAM reserve with a 768 MiB absolute floor on
   dedicated fleet hosts, while retaining non-schedulable emergency swap,
   pressure admission and hard per-worker memory limits.
-- Added provider derivative `v0.1.5-nddev.83` for the five-percent dedicated
-  burst envelope.
+- Added provider derivative `v0.1.5-nddev.84` for the five-percent dedicated
+  burst envelope and fifteen-GiB per-member project ceiling.
 - Raise the validated per-member project ceiling to 15 GiB so a dedicated
   16-GiB host can expose a measured 95% reservation envelope.
 - Preserved per-host series in audit-suppression and kernel-workqueue slow-burn
