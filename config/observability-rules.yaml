@@ -146,6 +146,22 @@ rules:
     summary: A fleet host recorded a new OOM kill.
     action: Close admission on the affected member and preserve workload and pressure evidence.
     recovery: No new OOM delta occurs and memory pressure returns inside the promotion envelope.
+  - id: kernel_slab_unreclaimable
+    severity: ticket
+    query_language: promql
+    stream_name: system_memory_usage
+    expression: max(system_memory_usage{service_namespace="nddev-github-actions",state="slab_unreclaimable"})
+    operator: ">"
+    threshold: 2147483648
+    evaluation_seconds: 300
+    hold_seconds: 900
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Unreclaimable kernel slab exceeds two GiB on a fleet host.
+    action: Preserve slab, audit and AppArmor evidence; close member admission and roll to the fixed kernel after jobs drain.
+    recovery: Every fleet host remains below two GiB unreclaimable slab after workload churn.
   - id: lifecycle_assigned_stall
     severity: page
     query_language: promql
