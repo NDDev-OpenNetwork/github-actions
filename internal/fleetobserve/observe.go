@@ -593,7 +593,11 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		}
 		summary.ByPriority[intent.Priority]++
 		summary.ByScaleSet[intent.ScaleSetName]++
-		correlationAge := now.Sub(intent.QueueTime)
+		correlationSince := intent.QueueTime
+		if intent.State != queueintent.StateQueued {
+			correlationSince = intent.StateEnteredAt
+		}
+		correlationAge := now.Sub(correlationSince)
 		if !strings.Contains(intent.Repository, "/") {
 			summary.UnboundRepository++
 			if intent.State != queueintent.StateQueued && correlationAge >= queueCorrelationGracePeriod {
