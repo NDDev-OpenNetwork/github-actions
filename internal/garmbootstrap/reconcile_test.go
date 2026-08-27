@@ -204,7 +204,7 @@ func TestReconcileCapacityMigrationIsExplicitAndDisablesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if migrated.ScaleSet == nil || !migrated.ScaleSet.Enabled || migrated.ScaleSet.MaximumRunners != 12 ||
+	if migrated.ScaleSet == nil || !migrated.ScaleSet.Enabled || migrated.ScaleSet.MaximumRunners != 16 ||
 		!reflect.DeepEqual(migrated.Actions, []string{"disable_and_migrate_scale_set_capacity", "enable_verified_scale_set"}) {
 		t.Fatalf("unexpected capacity migration result: %#v", migrated)
 	}

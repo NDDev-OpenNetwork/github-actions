@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Raise standard, fast and priority-standard scale-set width from 12 to 16 so
+  four 2-vCPU workers can consume each member's 98% CPU budget.
 - Permit a measured five-percent RAM reserve with a 768 MiB absolute floor on
   dedicated fleet hosts, while retaining non-schedulable emergency swap,
   pressure admission and hard per-worker memory limits.
