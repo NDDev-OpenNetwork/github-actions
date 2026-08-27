@@ -100,12 +100,14 @@ func (c Config) Validate() error {
 	// to keep them alive under fleet load. A dedicated host protects only the
 	// control plane, measured below 1 GiB, and the operating system. The 2 GiB
 	// emergency swap absorbs a short anonymous-memory spike without turning
-	// swap into scheduled capacity; the ten-percent reserve remains larger.
+	// swap into scheduled capacity. Dedicated fleet hosts may use a measured
+	// five-percent RAM reserve when at least 768 MiB remains for the host; PSI
+	// and the hard worker limits remain the runtime stop before swap thrash.
 	cpuFloor, memoryFloor := 4, 16*1024
 	switch c.HostReserve.Mode {
 	case "retained-workloads":
 	case "dedicated":
-		cpuFloor, memoryFloor = 2, 1024
+		cpuFloor, memoryFloor = 2, 768
 	default:
 		add("host_reserve.mode", "must be retained-workloads or dedicated")
 	}
@@ -115,8 +117,8 @@ func (c Config) Validate() error {
 	if c.HostReserve.MinimumMemoryMiB < memoryFloor {
 		add("host_reserve.minimum_memory_mib", fmt.Sprintf("must be at least %d for a %s host", memoryFloor, c.HostReserve.Mode))
 	}
-	if c.HostReserve.MinimumPercent < 10 || c.HostReserve.MinimumPercent > 50 {
-		add("host_reserve.minimum_percent", "must be between 10 and 50")
+	if c.HostReserve.MinimumPercent < 5 || c.HostReserve.MinimumPercent > 50 {
+		add("host_reserve.minimum_percent", "must be between 5 and 50")
 	}
 	if c.HostReserve.MaximumFleetCPUPercent < 80 || c.HostReserve.MaximumFleetCPUPercent > 98 {
 		add("host_reserve.maximum_fleet_cpu_percent", "must be between 80 and 98 so the hard host-wide CPU ceiling leaves operating-system headroom")

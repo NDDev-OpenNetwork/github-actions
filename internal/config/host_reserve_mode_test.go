@@ -17,6 +17,12 @@ func TestHostReserveFloorFollowsDeclaredMode(t *testing.T) {
 	if err := base.Validate(); err != nil {
 		t.Fatalf("the dedicated shape the fleet runs was rejected: %v", err)
 	}
+	burst := base
+	burst.HostReserve.MinimumMemoryMiB = 768
+	burst.HostReserve.MinimumPercent = 5
+	if err := burst.Validate(); err != nil {
+		t.Fatalf("a dedicated five-percent burst envelope was rejected: %v", err)
+	}
 
 	retained := base
 	retained.HostReserve.Mode = "retained-workloads"
@@ -46,6 +52,11 @@ func TestHostReserveFloorFollowsDeclaredMode(t *testing.T) {
 		{"dedicated host below its own floor", func(c *Config) {
 			c.HostReserve.MinimumMemoryMiB = 512
 		}, "minimum_memory_mib"},
+		{"dedicated percent below burst floor", func(c *Config) {
+			c.HostReserve.Mode = "dedicated"
+			c.HostReserve.MinimumMemoryMiB = 768
+			c.HostReserve.MinimumPercent = 4
+		}, "minimum_percent"},
 		{"dedicated host below its own cpu floor", func(c *Config) {
 			c.HostReserve.MinimumCPUUnits = 1
 		}, "minimum_cpu_units"},
