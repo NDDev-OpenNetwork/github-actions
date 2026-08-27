@@ -10,8 +10,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 25 {
-		t.Fatalf("rules = %d, want 25", len(bundle.Rules))
+	if len(bundle.Rules) != 27 {
+		t.Fatalf("rules = %d, want 27", len(bundle.Rules))
 	}
 }
 
@@ -36,6 +36,8 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"host_package_inventory_stale":      "gha_fleet_host_package_inventory_age_seconds",
 		"host_reboot_required":              "gha_fleet_host_reboot_required",
 		"host_standard_updates_available":   "gha_fleet_host_standard_updates_available",
+		"host_swap_high":                    `state="used"`,
+		"host_swap_thrash":                  `type="major"`,
 	}
 	seen := make(map[string]bool, len(wanted))
 	for _, rule := range bundle.Rules {

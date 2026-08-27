@@ -7,7 +7,7 @@ import (
 
 const managedDescriptionPrefix = "managed-by:gds;dashboard-contract:v1;"
 
-var metricPattern = regexp.MustCompile(`(?:gha_fleet_|gha_diagnostic_storage_|otelcol_exporter_)[a-zA-Z0-9_:]*`)
+var metricPattern = regexp.MustCompile(`(?:gha_fleet_|gha_diagnostic_storage_|otelcol_exporter_|system_cpu_time|system_memory_usage|system_paging_)[a-zA-Z0-9_:]*`)
 
 type OpenObserveDashboard struct {
 	Version                 int              `json:"version"`
@@ -135,6 +135,8 @@ func RenderOpenObserve(bundle Bundle) ([]OpenObserveDashboard, error) {
 func openObserveUnit(unit string) string {
 	switch unit {
 	case "bytes":
+		return "bytes"
+	case "bytes_per_second":
 		return "bytes"
 	case "percent":
 		return "percent-1"

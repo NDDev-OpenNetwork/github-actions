@@ -157,6 +157,37 @@ dashboards:
         query: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
         unit: count
         description: Firewall block volume retained as an OTEL metric rather than repeated kernel log records.
+  - id: host_utilization
+    title: Fleet host utilization
+    refresh_seconds: 30
+    default_range: 6h
+    owner: fleet-performance
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: host_cpu_utilization
+        title: Host CPU utilization
+        kind: timeseries
+        query: 100 * (1 - sum by (host_name) (rate(system_cpu_time{service_namespace="nddev-github-actions",state="idle"}[5m])) / clamp_min(sum by (host_name) (rate(system_cpu_time{service_namespace="nddev-github-actions"}[5m])), 0.001))
+        unit: percent
+        description: CPU use derived from cumulative OTEL host CPU time for all five fleet hosts.
+      - id: host_memory_utilization
+        title: Host memory utilization
+        kind: timeseries
+        query: 100 * max by (host_name) (system_memory_usage{service_namespace="nddev-github-actions",state="used"}) / clamp_min(sum by (host_name) (system_memory_usage{service_namespace="nddev-github-actions"}), 1)
+        unit: percent
+        description: Physical RAM use for each fleet host, independent of measured worker reservations.
+      - id: host_swap_io
+        title: Major paging by direction
+        kind: timeseries
+        query: sum by (host_name, direction) (rate(system_paging_operations{service_namespace="nddev-github-actions",type="major"}[5m]))
+        unit: bytes_per_second
+        description: Sustained swap-related major paging used to distinguish cold-page protection from thrashing.
+      - id: host_swap_usage
+        title: Emergency swap usage
+        kind: timeseries
+        query: 100 * max by (host_name) (system_paging_usage{service_namespace="nddev-github-actions",state="used"}) / clamp_min(sum by (host_name) (system_paging_usage{service_namespace="nddev-github-actions"}), 1)
+        unit: percent
+        description: Fraction of the non-schedulable four-GiB emergency swap consumed on each fleet host.
   - id: lifecycle_latency
     title: Job lifecycle latency
     refresh_seconds: 30

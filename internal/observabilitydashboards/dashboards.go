@@ -127,11 +127,17 @@ func (p Panel) Validate() error {
 	if _, ok := map[string]struct{}{"stat": {}, "table": {}, "timeseries": {}}[p.Kind]; !ok {
 		return fmt.Errorf("kind is invalid")
 	}
-	if _, ok := map[string]struct{}{"bytes": {}, "count": {}, "percent": {}, "seconds": {}, "state": {}}[p.Unit]; !ok {
+	if _, ok := map[string]struct{}{"bytes": {}, "bytes_per_second": {}, "count": {}, "percent": {}, "seconds": {}, "state": {}}[p.Unit]; !ok {
 		return fmt.Errorf("unit is invalid")
 	}
-	if !strings.Contains(p.Query, "gha_fleet_") && !strings.Contains(p.Query, "gha_diagnostic_storage_") && !strings.Contains(p.Query, "otelcol_exporter_") {
+	if !strings.Contains(p.Query, "gha_fleet_") && !strings.Contains(p.Query, "gha_diagnostic_storage_") &&
+		!strings.Contains(p.Query, "otelcol_exporter_") && !strings.Contains(p.Query, "system_cpu_time") &&
+		!strings.Contains(p.Query, "system_memory_usage") && !strings.Contains(p.Query, "system_paging_") {
 		return fmt.Errorf("query does not use an owned fleet or Collector metric")
+	}
+	if (strings.Contains(p.Query, "system_cpu_time") || strings.Contains(p.Query, "system_memory_usage") || strings.Contains(p.Query, "system_paging_")) &&
+		!strings.Contains(p.Query, `service_namespace="nddev-github-actions"`) {
+		return fmt.Errorf("system host metric query is not scoped to the fleet namespace")
 	}
 	return nil
 }
