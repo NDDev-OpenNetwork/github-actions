@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Keep diagnostic export within one bounded run across transient private-route
+  convergence, require sustained failure before paging, and include the route
+  reconciler timer in queue-host platform health.
+
 - Added GARM derivative `v0.2.1-nddev.81`: all embedded bootstrap downloads
   now use the same three-total-attempt contract as provider `.78`, preventing
   an incompatible wrapper rollout from blocking every new runner.

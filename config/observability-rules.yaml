@@ -74,7 +74,7 @@ rules:
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
-    hold_seconds: 60
+    hold_seconds: 180
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations

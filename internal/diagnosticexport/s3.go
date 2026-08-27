@@ -30,6 +30,7 @@ import (
 const (
 	maxCredentialBytes = 512
 	maxCABytes         = 1024 * 1024
+	s3RetryMaxAttempts = 5
 )
 
 var secretPattern = regexp.MustCompile(`^[A-Za-z0-9_+/=-]{32,256}$`)
@@ -85,12 +86,15 @@ func NewS3Store(config Config) (*S3Store, error) {
 	}
 	provider := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 	client := s3.New(s3.Options{
-		BaseEndpoint:     aws.String(strings.TrimSuffix(config.Endpoint, "/")),
-		Credentials:      aws.NewCredentialsCache(provider),
-		Region:           config.Region,
-		UsePathStyle:     config.PathStyle,
-		HTTPClient:       httpClient,
-		RetryMaxAttempts: 3,
+		BaseEndpoint: aws.String(strings.TrimSuffix(config.Endpoint, "/")),
+		Credentials:  aws.NewCredentialsCache(provider),
+		Region:       config.Region,
+		UsePathStyle: config.PathStyle,
+		HTTPClient:   httpClient,
+		// A reconciled private route can legitimately take up to one minute to
+		// return after host-network startup. Keep retries bounded inside this
+		// run so one transient does not become a failed exporter generation.
+		RetryMaxAttempts: s3RetryMaxAttempts,
 		RetryMode:        aws.RetryModeStandard,
 		AppID:            "nddev-diagnostic-exporter",
 	})

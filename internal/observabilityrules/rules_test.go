@@ -46,6 +46,22 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 	}
 }
 
+func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range bundle.Rules {
+		if rule.ID == "diagnostic_export_failure" {
+			if rule.HoldSecs != 180 || rule.RequiredEvaluations() < 3 {
+				t.Fatalf("diagnostic failure hold = %d, evaluations = %d", rule.HoldSecs, rule.RequiredEvaluations())
+			}
+			return
+		}
+	}
+	t.Fatal("diagnostic_export_failure rule is missing")
+}
+
 func TestRulesRejectUnsafeOrUnactionableChanges(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
