@@ -243,21 +243,21 @@ rules:
     action: Preserve slab, audit and AppArmor evidence; close member admission and roll to the fixed kernel after jobs drain.
     recovery: Every fleet host remains below two GiB unreclaimable slab after workload churn.
   - id: kernel_workqueue_hog
-    severity: page
+    severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_signal_events
-    expression: sum(max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
+    expression: max(max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
     operator: ">"
-    threshold: 0
-    evaluation_seconds: 60
-    hold_seconds: 60
+    threshold: 10
+    evaluation_seconds: 300
+    hold_seconds: 600
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: A fleet kernel workqueue reported a CPU hog event.
-    action: Preserve the kernel message and host pressure state, then close admission on the affected member if latency or PSI is elevated.
-    recovery: No workqueue-hog event is present in the rolling fifteen-minute observation window.
+    summary: A fleet member repeatedly reports kernel workqueue CPU-hog events.
+    action: Correlate the affected member with workqueue identity, host pressure and workload churn before changing admission or kernel policy.
+    recovery: No member records more than ten new workqueue-hog notices in a rolling hour for ten minutes.
   - id: lifecycle_assigned_stall
     severity: page
     query_language: promql
