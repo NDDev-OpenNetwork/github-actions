@@ -14,15 +14,21 @@ import (
 )
 
 type fakeObjectStore struct {
-	objects   map[string]RemoteObject
-	headCalls int
-	putCalls  int
-	putError  error
-	putHook   func(Bundle)
+	objects    map[string]RemoteObject
+	headCalls  int
+	putCalls   int
+	putError   error
+	putHook    func(Bundle)
+	headErrors []error
 }
 
 func (f *fakeObjectStore) Head(_ context.Context, bucket, key string) (RemoteObject, error) {
 	f.headCalls++
+	if len(f.headErrors) > 0 {
+		err := f.headErrors[0]
+		f.headErrors = f.headErrors[1:]
+		return RemoteObject{}, err
+	}
 	return f.objects[bucket+"/"+key], nil
 }
 
@@ -56,6 +62,30 @@ func exporterFixture(t *testing.T) (Exporter, *fakeObjectStore, time.Time) {
 		Now:    func() time.Time { return now },
 	}
 	return exporter, remote, now
+}
+
+func TestExporterRetriesRemoteHeadAcrossRouteConvergence(t *testing.T) {
+	exporter, remote, _ := exporterFixture(t)
+	remote.headErrors = []error{errors.New("route absent"), errors.New("route absent"), errors.New("route absent")}
+	sleeps := 0
+	exporter.Sleep = func(context.Context, time.Duration) error {
+		sleeps++
+		return nil
+	}
+	summary, err := exporter.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sleeps != 3 || remote.headCalls != 5 || summary.PendingBundles != 0 || summary.ExportedBundles != 1 {
+		t.Fatalf("summary=%#v sleeps=%d heads=%d", summary, sleeps, remote.headCalls)
+	}
+	status, err := ReadStatus(exporter.Config.StateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ConsecutiveFailures != 0 || status.LastErrorCode != "" {
+		t.Fatalf("status=%#v", status)
+	}
 }
 
 func TestExporterUploadsConfirmsAndUsesFreshJournal(t *testing.T) {
