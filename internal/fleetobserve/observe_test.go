@@ -284,6 +284,26 @@ func TestQueueSummarySeparatesTransientAndPersistentCorrelationGaps(t *testing.T
 	}
 }
 
+func TestQueueSummaryDoesNotPageOnRehydratedJobWaitingForCapacity(t *testing.T) {
+	queued := queueintent.Intent{
+		Key: "rehydrated", ScaleSetID: 11, JobID: "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+		ScaleSetName: "nddev-linux-integration", Repository: "owner",
+		WorkflowRef: "authoritative-rehydration", EventName: "push",
+		QueueTime: observationTime.Add(-10 * queueCorrelationGracePeriod),
+		State:     queueintent.StateQueued, Priority: 1,
+		StateEnteredAt: observationTime.Add(-time.Minute), UpdatedAt: observationTime.Add(-time.Second),
+		ExpiresAt: observationTime.Add(time.Minute),
+	}
+	summary, err := summarizeQueue(queueintent.Snapshot{Active: []queueintent.Intent{queued}}, testPlatform(t), observationTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.MissingWorkflowRunID != 1 || summary.MissingWorkflowRunIDBeyondGrace != 0 ||
+		summary.UnboundRepository != 1 || summary.UnboundRepositoryBeyondGrace != 0 {
+		t.Fatalf("queued correlation classification = %#v", summary)
+	}
+}
+
 func TestCollectorMarksRunningIntentWithoutExecutionLeaseUnhealthy(t *testing.T) {
 	collector := healthyCollector(t)
 	collector.Journal = func(context.Context) (providerjournal.Journal, error) {

@@ -596,7 +596,7 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		correlationAge := now.Sub(intent.QueueTime)
 		if !strings.Contains(intent.Repository, "/") {
 			summary.UnboundRepository++
-			if correlationAge >= queueCorrelationGracePeriod {
+			if intent.State != queueintent.StateQueued && correlationAge >= queueCorrelationGracePeriod {
 				summary.UnboundRepositoryBeyondGrace++
 			}
 		}
@@ -609,7 +609,11 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		}
 		if intent.WorkflowRunID == 0 {
 			summary.MissingWorkflowRunID++
-			if correlationAge >= queueCorrelationGracePeriod {
+			// A rehydrated GitHub job can wait in queued state for capacity
+			// without a workflow-run identity; the authenticated runner claim
+			// supplies that identity after assignment. Keep the raw gap visible,
+			// but page only after the intent has actually left the queue.
+			if intent.State != queueintent.StateQueued && correlationAge >= queueCorrelationGracePeriod {
 				summary.MissingWorkflowRunIDBeyondGrace++
 			}
 		}
