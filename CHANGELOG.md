@@ -5,6 +5,9 @@
 - Preserved per-host series in audit-suppression and kernel-workqueue slow-burn
   alerts so OpenObserve 0.92 receives a matrix, rather than an unsupported
   scalar, when applying the sustained range subquery.
+- Added an explicit zero vector for sparse host-signal windows, so no-event
+  periods evaluate as normal instead of collapsing the sustained subquery to
+  a scalar.
 
 - Keep OpenTelemetry as the sole collection standard, OTLP/HTTP as the
   transport, and OpenObserve as the only fleet telemetry backend. Classified

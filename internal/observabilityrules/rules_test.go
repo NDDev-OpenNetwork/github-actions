@@ -94,7 +94,10 @@ func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) 
 			if strings.Contains(alert.QueryCondition.PromQL, "((max(max_over_time(") {
 				t.Fatalf("%s collapses its host series to a scalar before the sustained subquery: %s", id, alert.QueryCondition.PromQL)
 			}
-			if !strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time((max_over_time(") {
+			if !strings.Contains(alert.QueryCondition.PromQL, "or vector(0)") {
+				t.Fatalf("%s lacks a zero vector for a sparse no-event window: %s", id, alert.QueryCondition.PromQL)
+			}
+			if !strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time(((max_over_time(") {
 				t.Fatalf("%s does not preserve a vector through the sustained subquery: %s", id, alert.QueryCondition.PromQL)
 			}
 		}
