@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserved per-host series in audit-suppression and kernel-workqueue slow-burn
+  alerts so OpenObserve 0.92 receives a matrix, rather than an unsupported
+  scalar, when applying the sustained range subquery.
+
 - Keep OpenTelemetry as the sole collection standard, OTLP/HTTP as the
   transport, and OpenObserve as the only fleet telemetry backend. Classified
   host warnings are cumulative metrics rather than duplicate raw log records.
