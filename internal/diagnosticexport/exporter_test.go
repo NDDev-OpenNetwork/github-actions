@@ -88,6 +88,42 @@ func TestExporterRetriesRemoteHeadAcrossRouteConvergence(t *testing.T) {
 	}
 }
 
+func TestExporterBoundsRemoteOutageOncePerBatch(t *testing.T) {
+	exporter, remote, now := exporterFixture(t)
+	store := workerdiagnostics.Store{
+		Directory: exporter.Config.SourceDirectory, Retention: 7 * 24 * time.Hour,
+		MaxBundleBytes: exporter.Config.MaxBundleBytes, MaxTotalBytes: 1024 * 1024 * 1024,
+		MaxArtifacts: workerdiagnostics.DefaultMaxArtifacts,
+		Now:          func() time.Time { return now.Add(time.Second) },
+		Random:       strings.NewReader(strings.Repeat("abcdef", 600)),
+	}
+	for index := 0; index < 2; index++ {
+		_, err := store.Write(context.Background(), workerdiagnostics.Instance{
+			Name: fmt.Sprintf("runner-outage-%d", index), ControllerID: "controller-test",
+			PoolID: "pool-test", PoolName: "nddev-linux-standard", ScaleSet: "nddev-linux-standard",
+			Repository: validConfig().Repositories[1], ImageFingerprint: strings.Repeat("a", 64),
+			RunnerVersion: "v2.336.0", ProviderVersion: "v0.1.5-nddev.3",
+			ProviderCommit: strings.Repeat("b", 40), State: "Stopped",
+		}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	remote.headErrors = []error{
+		errors.New("route absent"), errors.New("route absent"),
+		errors.New("route absent"), errors.New("route absent"),
+	}
+	exporter.Sleep = func(context.Context, time.Duration) error { return nil }
+	summary, err := exporter.Run(context.Background())
+	var exportError ExportError
+	if !errors.As(err, &exportError) || exportError.Code != "remote-head" || exportError.Failed != 1 {
+		t.Fatalf("error=%v", err)
+	}
+	if summary.ScannedBundles != 3 || summary.PendingBundles != 3 || remote.headCalls != remoteHeadAttempts {
+		t.Fatalf("summary=%#v heads=%d", summary, remote.headCalls)
+	}
+}
+
 func TestExporterUploadsConfirmsAndUsesFreshJournal(t *testing.T) {
 	exporter, remote, now := exporterFixture(t)
 	summary, err := exporter.Run(context.Background())

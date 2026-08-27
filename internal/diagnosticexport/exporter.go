@@ -147,7 +147,11 @@ func (e Exporter) Run(ctx context.Context) (Summary, error) {
 				firstFailure = "remote-head"
 			}
 			failures++
-			continue
+			// Remote availability is shared by the whole batch. Preserve the
+			// remaining WAL and end this generation after one bounded probe;
+			// repeating the same retry budget for every bundle makes run time
+			// proportional to backlog size during an outage.
+			break
 		}
 		if remote.Exists {
 			if !remoteMatches(remote, bundle) {

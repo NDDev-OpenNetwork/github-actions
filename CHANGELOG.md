@@ -15,6 +15,8 @@
   before paging, and include the route reconciler timer in platform health.
 - Permit the queue-only route reconciler timer through the observer's fixed
   systemd inventory when evaluating that platform-health requirement.
+- Bound a remote outage to one retry sequence per exporter generation instead
+  of multiplying the network wait by every bundle already present in the WAL.
 
 - Added GARM derivative `v0.2.1-nddev.81`: all embedded bootstrap downloads
   now use the same three-total-attempt contract as provider `.78`, preventing
