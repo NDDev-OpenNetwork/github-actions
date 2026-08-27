@@ -35,8 +35,8 @@ func TestHexDigest(t *testing.T) {
 	}
 }
 
-func TestS3RetryBudgetCoversBoundedRouteConvergence(t *testing.T) {
-	if s3RetryMaxAttempts != 5 {
-		t.Fatalf("S3 retry attempts = %d, want 5", s3RetryMaxAttempts)
+func TestS3RetryBudgetRemainsBoundedPerRequest(t *testing.T) {
+	if s3RetryMaxAttempts != 3 {
+		t.Fatalf("S3 retry attempts = %d, want 3", s3RetryMaxAttempts)
 	}
 }

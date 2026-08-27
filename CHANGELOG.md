@@ -11,8 +11,8 @@
 ## Unreleased
 
 - Keep diagnostic export within one bounded run across transient private-route
-  convergence, require sustained failure before paging, and include the route
-  reconciler timer in queue-host platform health.
+  convergence using repeated bounded HEAD rounds, require sustained failure
+  before paging, and include the route reconciler timer in platform health.
 - Permit the queue-only route reconciler timer through the observer's fixed
   systemd inventory when evaluating that platform-health requirement.
 
