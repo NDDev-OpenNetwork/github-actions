@@ -113,7 +113,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:a500eea7de26244acff99ab7f034ee5a0c431b5ca5992f071324217b35aed336" {
+	if first != "sha256:0615848aae600e6d165cb4375d3aa14b51a74c1c24be116a40cb4d60a153daf3" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)

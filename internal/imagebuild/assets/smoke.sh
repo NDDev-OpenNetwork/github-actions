@@ -61,7 +61,13 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   [[ "$(jq -er --arg name "${smoke_toolchain}" '.toolchains[$name].version' /etc/nddev/image-build.json)" == "${expected_version}" ]]
   [[ "$(jq -er --arg name "${smoke_toolchain}" '.toolchains[$name].archive_sha256' /etc/nddev/image-build.json)" == "${expected_sha256}" ]]
 	case "${smoke_toolchain}" in
-	  bun) [[ "$(bun --version)" == "${expected_version}" ]] ;;
+	  bun)
+	    [[ "$(bun --version)" == "${expected_version}" ]]
+	    # The path oven-sh/setup-bun probes before deciding to download.
+	    test -x /home/runner/.bun/bin/bun
+	    test -x /home/runner/.bun/bin/bunx
+	    [[ "$(/home/runner/.bun/bin/bun --version)" == "${expected_version}" ]]
+	    ;;
 	  gh)
 	    [[ "$(gh --version | head -n 1)" == "gh version ${expected_version} "* ]]
 	    gh attestation --help >/dev/null
@@ -94,6 +100,12 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
     uv)
       [[ "$(uv --version)" == "uv ${expected_version}"* ]]
       test -x /usr/local/bin/uvx
+      # The tool-cache entry astral-sh/setup-uv resolves before downloading.
+      uv_root="${runner_tool_cache}/uv/${expected_version}"
+      test -f "${uv_root}/x86_64.complete"
+      test -x "${uv_root}/x86_64/uv"
+      [[ "$(stat --format='%U' -- "${uv_root}/x86_64/uv")" == runner ]]
+      [[ "$("${uv_root}/x86_64/uv" --version)" == "uv ${expected_version}"* ]]
       ;;
 	yarn) [[ "$(yarn --version)" == "${expected_version}" ]] ;;
   esac
