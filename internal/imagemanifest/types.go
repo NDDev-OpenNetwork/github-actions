@@ -113,6 +113,14 @@ func BakedToolchains() []string {
 	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}
 }
 
+// OptionalToolchains may be pinned by an image that needs them and omitted by
+// one that does not. Flutter is optional rather than baked because its SDK is
+// 1.55 GB compressed: the standard container image carries it for the mobile
+// job classes, and the integration image has no reason to pay for it.
+func OptionalToolchains() []string {
+	return []string{"flutter"}
+}
+
 type Guest struct {
 	BuilderDiskGiB      int               `json:"builder_disk_gib" yaml:"builder_disk_gib"`
 	Packages            []string          `json:"packages" yaml:"packages"`

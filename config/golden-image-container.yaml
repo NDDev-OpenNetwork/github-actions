@@ -2,7 +2,7 @@ schema_version: 1
 
 image:
   type: container
-  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b13
+  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b14
   current_alias: nddev-ubuntu-24.04-amd64-container-current
   previous_alias: nddev-ubuntu-24.04-amd64-container-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801
@@ -58,6 +58,11 @@ toolchains:
     archive: go1.26.6.linux-amd64.tar.gz
     download_url: https://go.dev/dl/go1.26.6.linux-amd64.tar.gz
     archive_sha256: 708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+  - name: flutter
+    version: 3.44.9
+    archive: flutter_linux_3.44.9-stable.tar.xz
+    download_url: https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.9-stable.tar.xz
+    archive_sha256: a9120fa4a01048bdef438ddc3a2d4b7389662ea98a95db86eeaf10382bc4efcb
   - name: gh
     version: 2.97.0
     archive: gh_2.97.0_linux_amd64.tar.gz
@@ -100,7 +105,7 @@ toolchains:
     archive_sha256: 606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497
 
 guest:
-  builder_disk_gib: 12
+  builder_disk_gib: 16
   packages:
     - build-essential
     - ca-certificates
