@@ -73,15 +73,17 @@ func TestBuildProducesDeterministicBoundedPlan(t *testing.T) {
 	if first.InstanceConfig["security.privileged"] != "false" || first.InstanceConfig["security.idmap.isolated"] != "true" || first.InstanceConfig["security.nesting"] != "false" {
 		t.Fatalf("container isolation is not explicit: %#v", first.InstanceConfig)
 	}
-	if first.BuilderDiskGiB != 12 || first.SmokeRootDiskGiB != 30 {
+	if first.BuilderDiskGiB != 16 || first.SmokeRootDiskGiB != 30 {
 		t.Fatalf("unexpected image/runtime disk policy: %#v", first)
 	}
 	names := make([]string, 0, len(first.Toolchains))
 	for _, toolchain := range first.Toolchains {
 		names = append(names, toolchain.Name)
 	}
-	if !slices.Equal(names, []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}) {
-		t.Fatalf("plan toolchains are not the canonical sorted baked set: %v", names)
+	// The baked set plus the optional Flutter SDK this manifest pins, still
+	// sorted: the plan's ordering is what makes the recipe fingerprint stable.
+	if !slices.Equal(names, []string{"bun", "flutter", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}) {
+		t.Fatalf("plan toolchains are not the canonical sorted set: %v", names)
 	}
 	if first.CompilerCache.Name != "sccache" || first.CompilerCache.Version != "v0.17.0" ||
 		first.CompilerCache.BinarySHA256 != "066c5a84c85044c8f48b3ab571ac114293ea717c3d36985db022af8206e21e63" {

@@ -113,7 +113,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:e0ecadb567a413c076136bff771c6be8c527126a30ebdf7bdcb9ddd6f6f9c24e" {
+	if first != "sha256:f40a682f0328d1dd6b36ac03c05410a51853f72f166cdda512081061514ecc80" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -478,7 +478,7 @@ func TestInstanceInitArgsPinContainerIsolation(t *testing.T) {
 			t.Fatalf("instance init args %q do not contain %q", args, want)
 		}
 	}
-	if !strings.Contains(strings.Join(args, " "), "--device root,size=12GiB") {
+	if !strings.Contains(strings.Join(args, " "), "--device root,size=16GiB") {
 		t.Fatalf("builder init args do not contain bounded root disk: %q", args)
 	}
 	smokeArgs := (&Orchestrator{}).instanceInitArgs(plan, strings.Repeat("b", 64), "smoke", 0)

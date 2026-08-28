@@ -23,6 +23,14 @@ var (
 	commitPattern         = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
+// supportedToolchains lists every toolchain a manifest may pin, baked or
+// optional, sorted so the validation message is stable.
+func supportedToolchains() []string {
+	names := append(BakedToolchains(), OptionalToolchains()...)
+	sort.Strings(names)
+	return names
+}
+
 // toolchainAssets maps each baked toolchain to the exact release asset it must
 // pin. The archive name and URL path are rendered from the pinned version, so a
 // manifest cannot silently point at a different platform, channel or vendor.
@@ -36,6 +44,13 @@ var toolchainAssets = map[string]struct {
 		Archive: func(string) string { return "bun-linux-x64.zip" },
 		Path: func(version string) string {
 			return "/oven-sh/bun/releases/download/bun-v" + version + "/bun-linux-x64.zip"
+		},
+	},
+	"flutter": {
+		Host:    "storage.googleapis.com",
+		Archive: func(version string) string { return "flutter_linux_" + version + "-stable.tar.xz" },
+		Path: func(version string) string {
+			return "/flutter_infra_release/releases/stable/linux/flutter_linux_" + version + "-stable.tar.xz"
 		},
 	},
 	"gh": {
@@ -326,7 +341,7 @@ func validateToolchains(add func(string, string), toolchains []Toolchain) {
 		field := fmt.Sprintf("toolchains[%d]", index)
 		asset, supported := toolchainAssets[toolchain.Name]
 		if !supported {
-			add(field+".name", "must be one of "+strings.Join(BakedToolchains(), ", "))
+			add(field+".name", "must be one of "+strings.Join(supportedToolchains(), ", "))
 			continue
 		}
 		if _, duplicate := seen[toolchain.Name]; duplicate {
