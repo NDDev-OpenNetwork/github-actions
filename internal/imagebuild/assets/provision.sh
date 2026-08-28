@@ -163,6 +163,16 @@ for toolchain_name in "${toolchain_names[@]}"; do
       install -o root -g root -m 0755 \
         "${toolchain_scratch}/bun-linux-x64/bun" /usr/local/bin/bun
 	    [[ "$(bun --version)" == "${toolchain_version}" ]]
+      # oven-sh/setup-bun does not read the runner tool cache. It looks for
+      # ~/.bun/bin/bun, and when that binary already reports the requested
+      # version it records a cache hit and performs no download at all. Exposing
+      # the baked binary there is what makes the action free for a consumer
+      # pinned to this version.
+      install -d -o runner -g runner -m 0755 /home/runner/.bun /home/runner/.bun/bin
+      ln -sfn /usr/local/bin/bun /home/runner/.bun/bin/bun
+      ln -sfn /usr/local/bin/bun /home/runner/.bun/bin/bunx
+      chown -h runner:runner /home/runner/.bun/bin/bun /home/runner/.bun/bin/bunx
+      [[ "$(runuser -u runner -- /home/runner/.bun/bin/bun --version)" == "${toolchain_version}" ]]
 	    ;;
 	  gh)
 	    tar --extract --gzip --file "${toolchain_archive}" \
@@ -234,6 +244,17 @@ for toolchain_name in "${toolchain_names[@]}"; do
       install -o root -g root -m 0755 \
         "${toolchain_scratch}/uv-x86_64-unknown-linux-gnu/uvx" /usr/local/bin/uvx
       [[ "$(uv --version)" == "uv ${toolchain_version}"* ]]
+      # astral-sh/setup-uv resolves through the runner tool cache, and its
+      # directory is named for the target triple rather than the Node arch the
+      # go and node entries use: uv/<version>/x86_64, observed live on a worker
+      # the action had already provisioned.
+      uv_root="${runner_tool_cache}/uv/${toolchain_version}"
+      install -d -o runner -g runner -m 0755 "${runner_tool_cache}/uv" "${uv_root}" \
+        "${uv_root}/x86_64"
+      install -o runner -g runner -m 0755 /usr/local/bin/uv "${uv_root}/x86_64/uv"
+      install -o runner -g runner -m 0755 /usr/local/bin/uvx "${uv_root}/x86_64/uvx"
+      install -o runner -g runner -m 0644 /dev/null "${uv_root}/x86_64.complete"
+      [[ "$("${uv_root}/x86_64/uv" --version)" == "uv ${toolchain_version}"* ]]
       ;;
 	yarn)
 		package_root="/usr/local/libexec/gha-toolchains/yarn-${toolchain_version}"
