@@ -9,7 +9,7 @@ runtime=${NDDEV_PACKAGE_CACHE_RUNTIME:?}
 lock_input=${NDDEV_PACKAGE_CACHE_LOCK_FILE:?}
 
 case "$operation" in restore|save) ;; *) echo "unsupported package-cache operation" >&2; exit 2 ;; esac
-case "$ecosystem" in go|npm|pnpm|yarn|bun|uv|pip|cargo|maven|gradle) ;; *) echo "unsupported package-cache ecosystem" >&2; exit 2 ;; esac
+case "$ecosystem" in go|npm|pnpm|yarn|bun|uv|pip|cargo|maven|gradle|pub) ;; *) echo "unsupported package-cache ecosystem" >&2; exit 2 ;; esac
 [[ "$runtime" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]
 : "${GITHUB_WORKSPACE:?}"
 : "${GITHUB_OUTPUT:?}"
@@ -78,6 +78,18 @@ case "$ecosystem" in
   cargo)
     cargo_home=${CARGO_HOME:-$HOME/.cargo}
     cache_paths+=("$cargo_home/registry" "$cargo_home/git")
+    ;;
+  pub)
+    # Dart has no command that prints its cache directory, and the default has
+    # moved between SDK versions, so the location is not guessed. Every Flutter
+    # setup action exports PUB_CACHE before dependency resolution; requiring it
+    # fails loudly rather than caching some other directory that happens to
+    # exist.
+    if [[ -z "${PUB_CACHE:-}" ]]; then
+      echo "package-cache pub requires PUB_CACHE to be exported by the Flutter or Dart setup step" >&2
+      exit 2
+    fi
+    cache_paths+=("$PUB_CACHE")
     ;;
   maven) cache_paths+=("$HOME/.m2/repository") ;;
   gradle)

@@ -30,7 +30,13 @@ and one save step after successful validation:
 The key binds schema, ecosystem, exact runtime, lock digest, OS and
 architecture. Stored data contains package/module downloads only, never build
 outputs. Supported ecosystems are Go, npm, pnpm, Yarn, Bun, uv, pip, Cargo,
-Maven and Gradle.
+Maven, Gradle and pub.
+
+`pub` reads `PUB_CACHE` rather than deriving a path. Dart has no command that
+prints its cache directory and the default has moved between SDK versions, so
+the step fails when `PUB_CACHE` is absent instead of caching whichever
+directory happens to exist. Every Flutter and Dart setup action exports it
+before dependency resolution.
 
 The action enforces the delivered trust mode. Trusted and untrusted writers can
 read and populate only their own repository prefix. A release reader consumes

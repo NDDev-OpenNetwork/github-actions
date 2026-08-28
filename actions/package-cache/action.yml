@@ -6,7 +6,7 @@ inputs:
     description: Exactly restore or save.
     required: true
   ecosystem:
-    description: One of go, npm, pnpm, yarn, bun, uv, pip, cargo, maven, or gradle.
+    description: One of go, npm, pnpm, yarn, bun, uv, pip, cargo, maven, gradle, or pub.
     required: true
   runtime-version:
     description: Exact package-manager or language runtime version used in the cache identity.
