@@ -75,7 +75,8 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       flutter_root="${runner_tool_cache}/flutter/stable-${expected_version}-x64"
       test -x "${flutter_root}/flutter/bin/flutter"
       [[ "$(stat --format='%U' -- "${flutter_root}/flutter/bin/flutter")" == runner ]]
-      [[ "$(cat "${flutter_root}/flutter/version")" == "${expected_version}" ]]
+      [[ "$(jq -er .frameworkVersion \
+        "${flutter_root}/flutter/bin/cache/flutter.version.json")" == "${expected_version}" ]]
       test -x "${flutter_root}/flutter/bin/dart"
       ;;
 	  gh)
