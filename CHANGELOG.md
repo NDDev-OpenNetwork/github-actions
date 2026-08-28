@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Score burst placement with the greater of measured load-per-core and
+  projected CPU allowance, including pending creates not yet visible in the
+  instance inventory. This prevents rapid create waves from herding onto a
+  member while one-minute load averages lag behind admission leases.
 - Add host swap occupancy and major-paging alerts plus CPU, swap usage and
   paging panels for the five-host OTEL fleet.
 - Spread equal-load burst placement toward the member with more remaining
@@ -25,7 +29,7 @@
 - Keep OpenTelemetry as the sole collection standard, OTLP/HTTP as the
   transport, and OpenObserve as the only fleet telemetry backend. Classified
   host warnings are cumulative metrics rather than duplicate raw log records.
-- Added nine managed dashboards and twenty-five managed alerts covering host
+- Added ten managed dashboards and twenty-seven managed alerts covering host
   compliance, classified host signals, diagnostics, lifecycle, capacity,
   provider reliability, fairness and telemetry durability.
 - Export package/reboot, running-kernel and SRSO state from all fleet hosts
