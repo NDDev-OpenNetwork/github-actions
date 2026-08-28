@@ -194,10 +194,13 @@ for toolchain_name in "${toolchain_names[@]}"; do
 	    # user owns, so the runner must own it and claim it explicitly.
 	    runuser -u runner -- git config --global --add safe.directory \
 	      "${flutter_root}/flutter"
-	    # The SDK ships its own version file. Reading it keeps provisioning
-	    # offline: `flutter --version` triggers the first-run engine precache,
-	    # which would pull hundreds of megabytes during the image build.
-	    [[ "$(cat "${flutter_root}/flutter/version")" == "${toolchain_version}" ]]
+	    # Read the SDK's own manifest rather than running `flutter --version`,
+	    # which starts the first-run machinery during the image build. The plain
+	    # `version` file older SDKs carried is gone; bin/cache/flutter.version.json
+	    # is what 3.x ships, and the archive already contains the engine
+	    # artifacts, so nothing is fetched here.
+	    [[ "$(jq -er .frameworkVersion \
+	      "${flutter_root}/flutter/bin/cache/flutter.version.json")" == "${toolchain_version}" ]]
 	    test -x "${flutter_root}/flutter/bin/dart"
 	    ;;
 	  gh)
