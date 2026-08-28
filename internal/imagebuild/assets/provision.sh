@@ -143,7 +143,9 @@ toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
 toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-if [[ "${toolchain_set}" != bun,gh,go,rust,uv && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]; then
+if [[ "${toolchain_set}" != bun,gh,go,rust,uv \
+  && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn \
+  && "${toolchain_set}" != bun,flutter,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -173,6 +175,30 @@ for toolchain_name in "${toolchain_names[@]}"; do
       ln -sfn /usr/local/bin/bun /home/runner/.bun/bin/bunx
       chown -h runner:runner /home/runner/.bun/bin/bun /home/runner/.bun/bin/bunx
       [[ "$(runuser -u runner -- /home/runner/.bun/bin/bun --version)" == "${toolchain_version}" ]]
+	    ;;
+	  flutter)
+	    # Almaty's vendored setup-flutter skips its download only when
+	    # "$CACHE_PATH/flutter/bin/flutter" is executable, where CACHE_PATH is
+	    # "$RUNNER_TOOL_CACHE/flutter/<channel>-<version>-<arch>". The nested
+	    # flutter directory is not a typo: the archive carries its own top-level
+	    # flutter/, and the action extracts it into CACHE_PATH. Placing the SDK
+	    # one level higher leaves the guard false and the download happens anyway.
+	    flutter_root="${runner_tool_cache}/flutter/stable-${toolchain_version}-x64"
+	    install -d -o runner -g runner -m 0755 \
+	      "${runner_tool_cache}/flutter" "${flutter_root}"
+	    tar --extract --xz --file "${toolchain_archive}" \
+	      --directory "${flutter_root}" --no-same-owner --no-same-permissions
+	    chown -R runner:runner "${flutter_root}"
+	    test -x "${flutter_root}/flutter/bin/flutter"
+	    # The SDK ships as a git checkout and refuses to run from a tree another
+	    # user owns, so the runner must own it and claim it explicitly.
+	    runuser -u runner -- git config --global --add safe.directory \
+	      "${flutter_root}/flutter"
+	    # The SDK ships its own version file. Reading it keeps provisioning
+	    # offline: `flutter --version` triggers the first-run engine precache,
+	    # which would pull hundreds of megabytes during the image build.
+	    [[ "$(cat "${flutter_root}/flutter/version")" == "${toolchain_version}" ]]
+	    test -x "${flutter_root}/flutter/bin/dart"
 	    ;;
 	  gh)
 	    tar --extract --gzip --file "${toolchain_archive}" \
