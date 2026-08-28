@@ -129,7 +129,11 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 		return Artifacts{}, fmt.Errorf("download Go cache seed: %w", err)
 	}
 	for _, toolchain := range plan.Toolchains {
-		if _, err := download(ctx, client, toolchain.DownloadURL, artifacts.Toolchains[toolchain.Name], toolchain.ArchiveSHA256, 768<<20); err != nil {
+		// 2 GiB rather than 768 MiB because the Flutter SDK archive alone is
+		// 1.55 GB. The cap bounds an accidental or hostile response size; the
+		// manifest-pinned SHA-256 verified below is what makes the bytes
+		// trustworthy, and it does not weaken with the ceiling.
+		if _, err := download(ctx, client, toolchain.DownloadURL, artifacts.Toolchains[toolchain.Name], toolchain.ArchiveSHA256, 2<<30); err != nil {
 			return Artifacts{}, fmt.Errorf("download %s toolchain: %w", toolchain.Name, err)
 		}
 	}

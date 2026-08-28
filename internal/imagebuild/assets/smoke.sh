@@ -53,7 +53,9 @@ runner_tool_cache="$(jq -er .runner_tool_cache /etc/nddev/image-build.json)"
 smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
 smoke_toolchain_set="$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-[[ "${smoke_toolchain_set}" == bun,gh,go,rust,uv || "${smoke_toolchain_set}" == bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]
+[[ "${smoke_toolchain_set}" == bun,gh,go,rust,uv \
+  || "${smoke_toolchain_set}" == bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn \
+  || "${smoke_toolchain_set}" == bun,flutter,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -68,6 +70,14 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
 	    test -x /home/runner/.bun/bin/bunx
 	    [[ "$(/home/runner/.bun/bin/bun --version)" == "${expected_version}" ]]
 	    ;;
+    flutter)
+      # The exact path the consumer's setup action probes before downloading.
+      flutter_root="${runner_tool_cache}/flutter/stable-${expected_version}-x64"
+      test -x "${flutter_root}/flutter/bin/flutter"
+      [[ "$(stat --format='%U' -- "${flutter_root}/flutter/bin/flutter")" == runner ]]
+      [[ "$(cat "${flutter_root}/flutter/version")" == "${expected_version}" ]]
+      test -x "${flutter_root}/flutter/bin/dart"
+      ;;
 	  gh)
 	    [[ "$(gh --version | head -n 1)" == "gh version ${expected_version} "* ]]
 	    gh attestation --help >/dev/null
