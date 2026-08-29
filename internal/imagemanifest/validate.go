@@ -253,6 +253,7 @@ func (m Manifest) Validate() error {
 	}
 	validatePackages(add, m.Guest.Packages, m.Guest.PackageVersions, variant)
 	validateProvides(add, m.Guest.Provides)
+	validatePathBinaries(add, m.Guest.PathBinaries, m.Guest.Provides)
 
 	if len(issues) == 0 {
 		return nil
@@ -469,5 +470,45 @@ func validateProvides(add func(string, string), provides []string) {
 			add(fmt.Sprintf("guest.provides[%d]", index), "is a duplicate")
 		}
 		seen[name] = struct{}{}
+	}
+}
+
+// validatePathBinaries keeps a PATH tool as exactly pinned as the compiler
+// cache, and requires the manifest to promise it: a binary installed but not
+// declared is a tool nobody knows they have, which is half of what this whole
+// mechanism exists to end.
+func validatePathBinaries(add func(string, string), binaries []Tool, provides []string) {
+	promised := make(map[string]struct{}, len(provides))
+	for _, name := range provides {
+		promised[name] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(binaries))
+	for index, tool := range binaries {
+		field := fmt.Sprintf("guest.path_binaries[%d]", index)
+		if !providedCommandPattern.MatchString(tool.Name) {
+			add(field+".name", "must be a bare command name")
+		}
+		if _, duplicate := seen[tool.Name]; duplicate {
+			add(field+".name", "is a duplicate")
+		}
+		seen[tool.Name] = struct{}{}
+		if index > 0 && binaries[index-1].Name >= tool.Name {
+			add(field+".name", "must be sorted and unique")
+		}
+		if tool.Version == "" || tool.Archive == "" || tool.DownloadURL == "" {
+			add(field, "must pin a version, archive and download URL")
+		}
+		if !sha256Pattern.MatchString(tool.ArchiveSHA256) {
+			add(field+".archive_sha256", "must be a sha256 digest")
+		}
+		if !sha256Pattern.MatchString(tool.BinarySHA256) {
+			add(field+".binary_sha256", "must be a sha256 digest")
+		}
+		if tool.BinaryPath == "" || strings.Contains(tool.BinaryPath, "..") || strings.HasPrefix(tool.BinaryPath, "/") {
+			add(field+".binary_path", "must be a bounded path inside the archive")
+		}
+		if _, ok := promised[tool.Name]; !ok {
+			add(field+".name", "must appear in guest.provides")
+		}
 	}
 }

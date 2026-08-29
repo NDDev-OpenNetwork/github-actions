@@ -3,6 +3,7 @@ package imagemanifest
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -49,6 +50,12 @@ func TestEveryPromisedCommandComesFromThisManifest(t *testing.T) {
 	fromProvisioning := map[string]struct{}{
 		"sccache": {}, "python": {}, "python3": {}, "pip": {},
 	}
+	// A pinned PATH binary is its own justification: it is installed by name.
+	for _, path := range goldenManifestPaths(t) {
+		for _, binary := range loadGolden(t, path).Guest.PathBinaries {
+			fromProvisioning[binary.Name] = struct{}{}
+		}
+	}
 	for _, path := range goldenManifestPaths(t) {
 		manifest := loadGolden(t, path)
 		packages := make(map[string]struct{}, len(manifest.Guest.Packages))
@@ -91,4 +98,25 @@ func loadGolden(t *testing.T, path string) Manifest {
 		t.Fatalf("load %s: %v", path, err)
 	}
 	return manifest
+}
+
+// A tool on PATH is part of what every worker promises, so a version that
+// drifts between the standard and integration images would make the same
+// command mean two things depending on where a job landed.
+func TestVariantsPinTheSamePathBinaries(t *testing.T) {
+	var reference []Tool
+	var referenceName string
+	for _, path := range goldenManifestPaths(t) {
+		manifest := loadGolden(t, path)
+		if reference == nil {
+			reference, referenceName = manifest.Guest.PathBinaries, filepath.Base(path)
+			continue
+		}
+		if !reflect.DeepEqual(reference, manifest.Guest.PathBinaries) {
+			t.Errorf("%s pins different path binaries from %s", filepath.Base(path), referenceName)
+		}
+	}
+	if len(reference) == 0 {
+		t.Fatal("no manifest pins a path binary; actionlint is the reason this mechanism exists")
+	}
 }

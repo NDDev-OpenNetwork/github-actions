@@ -33,7 +33,9 @@ type Artifacts struct {
 	BrowserSmoke  string `json:"browser_smoke,omitempty"`
 	// Toolchains maps each pinned toolchain name to its verified local archive.
 	Toolchains map[string]string `json:"toolchains"`
-	VerifiedBy string            `json:"verified_by"`
+	// PathBinaries maps each pinned PATH tool to its verified local archive.
+	PathBinaries map[string]string `json:"path_binaries,omitempty"`
+	VerifiedBy   string            `json:"verified_by"`
 }
 
 func (a Artifacts) Cleanup() error {
@@ -65,6 +67,7 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
 		GoCacheSeed:   filepath.Join(directory, plan.GoCacheSeed.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),
+		PathBinaries:  make(map[string]string, len(plan.PathBinaries)),
 	}
 	if plan.Image.EffectiveType() == "container" {
 		artifacts.Rootfs = filepath.Join(directory, plan.Source.RootfsFile)
@@ -73,6 +76,9 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = filepath.Join(directory, toolchain.Archive)
+	}
+	for _, binary := range plan.PathBinaries {
+		artifacts.PathBinaries[binary.Name] = filepath.Join(directory, binary.Archive)
 	}
 	if plan.BrowserSmoke != nil {
 		artifacts.BrowserSmoke = filepath.Join(directory, plan.BrowserSmoke.Archive)
@@ -135,6 +141,13 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 		// trustworthy, and it does not weaken with the ceiling.
 		if _, err := download(ctx, client, toolchain.DownloadURL, artifacts.Toolchains[toolchain.Name], toolchain.ArchiveSHA256, 2<<30); err != nil {
 			return Artifacts{}, fmt.Errorf("download %s toolchain: %w", toolchain.Name, err)
+		}
+	}
+	for _, binary := range plan.PathBinaries {
+		// A single-binary release with its docs; 64 MiB matches the compiler
+		// cache, and the pinned digest is what makes the bytes trustworthy.
+		if _, err := download(ctx, client, binary.DownloadURL, artifacts.PathBinaries[binary.Name], binary.ArchiveSHA256, 64<<20); err != nil {
+			return Artifacts{}, fmt.Errorf("download %s: %w", binary.Name, err)
 		}
 	}
 	if plan.BrowserSmoke != nil {

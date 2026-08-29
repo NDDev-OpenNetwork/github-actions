@@ -340,6 +340,15 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		wanted[key] = toolchain.Archive
 		actual[key] = path
 	}
+	for _, binary := range plan.PathBinaries {
+		path, ok := artifacts.PathBinaries[binary.Name]
+		if !ok || filepath.Base(path) != binary.Archive {
+			return fmt.Errorf("fetched artifact for %s does not match its pinned archive", binary.Name)
+		}
+	}
+	if len(artifacts.PathBinaries) != len(plan.PathBinaries) {
+		return fmt.Errorf("fetched %d path binary artifacts, expected %d", len(artifacts.PathBinaries), len(plan.PathBinaries))
+	}
 	if len(artifacts.Toolchains) != len(plan.Toolchains) {
 		return fmt.Errorf("fetched %d toolchain artifacts, expected %d", len(artifacts.Toolchains), len(plan.Toolchains))
 	}
@@ -570,6 +579,16 @@ exit 1`); err != nil {
 	if err != nil {
 		return "", "", err
 	}
+	var pathBinaryLines strings.Builder
+	for _, binary := range plan.PathBinaries {
+		destination := plan.BuilderName + "/var/tmp/" + binary.Archive
+		if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.PathBinaries[binary.Name], destination, "--mode", "0600")...); err != nil {
+			return "", "", fmt.Errorf("push verified %s archive: %w", binary.Name, err)
+		}
+		fmt.Fprintf(&pathBinaryLines, "%s\t%s\t%s\t%s\t%s\n",
+			binary.Name, binary.Archive, binary.ArchiveSHA256, binary.BinaryPath, binary.BinarySHA256)
+	}
+	encodedPathBinaries := base64.StdEncoding.EncodeToString([]byte(pathBinaryLines.String()))
 	provision, _ := scripts.ReadFile("assets/provision.sh")
 	recipeSHA := strings.TrimPrefix(recipe, "sha256:")
 	guestArchive := "/var/tmp/" + plan.Runner.Archive
@@ -594,6 +613,7 @@ exit 1`); err != nil {
 		"GHA_GO_CACHE_SEED_SHA256":   plan.GoCacheSeed.ArchiveSHA256,
 		"GHA_GO_CACHE_SEED_COMMIT":   plan.GoCacheSeed.Commit,
 		"GHA_GO_CACHE_SEED_PACKAGES": strings.Join(plan.GoCacheSeed.Packages, " "),
+		"GHA_PATH_BINARIES_B64":      encodedPathBinaries,
 	}
 	if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, environment, string(provision)); err != nil {
 		return "", "", fmt.Errorf("provision image builder: %w", err)

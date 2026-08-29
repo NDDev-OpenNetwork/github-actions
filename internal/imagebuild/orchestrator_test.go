@@ -90,11 +90,15 @@ func TestContainerBuilderUsesRootfsAndNeverRequestsVM(t *testing.T) {
 		Directory: "/var/tmp/gha-fleet-image-test", Checksums: "/var/tmp/gha-fleet-image-test/SHA256SUMS",
 		Signature: "/var/tmp/gha-fleet-image-test/SHA256SUMS.gpg", Metadata: "/var/tmp/gha-fleet-image-test/" + plan.Source.MetadataFile,
 		Rootfs: "/var/tmp/gha-fleet-image-test/" + plan.Source.RootfsFile, Runner: "/var/tmp/gha-fleet-image-test/" + plan.Runner.Archive,
-		CompilerCache: "/var/tmp/gha-fleet-image-test/" + plan.CompilerCache.Archive, Toolchains: map[string]string{}, VerifiedBy: plan.Source.SignerFingerprint,
+		CompilerCache: "/var/tmp/gha-fleet-image-test/" + plan.CompilerCache.Archive, Toolchains: map[string]string{},
+		PathBinaries: map[string]string{}, VerifiedBy: plan.Source.SignerFingerprint,
 		GoCacheSeed: "/var/tmp/gha-fleet-image-test/" + plan.GoCacheSeed.Archive,
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = artifacts.Directory + "/" + toolchain.Archive
+	}
+	for _, binary := range plan.PathBinaries {
+		artifacts.PathBinaries[binary.Name] = artifacts.Directory + "/" + binary.Archive
 	}
 	if err := validateArtifactPaths(plan, artifacts); err != nil {
 		t.Fatal(err)
@@ -115,7 +119,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:eabbddb32bc7e8985c62159c7d069ef637b35dc22cefe5cc06eba61fc91b3e06" {
+	if first != "sha256:64de25c167e1de747994e7ed7c3b2be0ec6fb8a93f952ec4610d8c3823eb16a9" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -504,10 +508,14 @@ func TestValidateArtifactPathsRejectsSubstitution(t *testing.T) {
 		CompilerCache: filepath.Join(directory, plan.CompilerCache.Archive),
 		GoCacheSeed:   filepath.Join(directory, plan.GoCacheSeed.Archive),
 		Toolchains:    make(map[string]string, len(plan.Toolchains)),
+		PathBinaries:  make(map[string]string, len(plan.PathBinaries)),
 		VerifiedBy:    plan.Source.SignerFingerprint,
 	}
 	for _, toolchain := range plan.Toolchains {
 		artifacts.Toolchains[toolchain.Name] = filepath.Join(directory, toolchain.Archive)
+	}
+	for _, binary := range plan.PathBinaries {
+		artifacts.PathBinaries[binary.Name] = filepath.Join(directory, binary.Archive)
 	}
 	if err := validateArtifactPaths(plan, artifacts); err != nil {
 		t.Fatalf("valid artifact set rejected: %v", err)
