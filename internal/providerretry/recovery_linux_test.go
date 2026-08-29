@@ -284,3 +284,70 @@ func TestInspectCountsSchemaTwoReservationsWithoutExposingIdentity(t *testing.T)
 		t.Fatalf("reservation identity leaked from snapshot: %s", encoded)
 	}
 }
+
+// The record outlives the refusal that wrote it, so reporting its existence as
+// a live fact made gha_fleet_shared_capacity_saturated read 1 in 80.3% of
+// samples over seven days. Measured on the live fleet 2026-08-29 at 12:47 it
+// read 1 with zero queue intents, zero visible instances, zero waiters, no
+// probe, and a state record already 900 seconds old -- while the metric's help
+// text claims a provider refusal "has proven" the domain saturated.
+//
+// Anyone tuning capacity against it was reading a fact from the past as one
+// about the present.
+func TestInspectDoesNotCallAnExpiredCapacityDomainSaturated(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	now := time.Date(2026, 8, 29, 12, 47, 0, 0, time.UTC)
+	// The shape observed live: the domain record is present and stale, its
+	// retry window closed a quarter of an hour ago, and nothing is waiting.
+	state := journal{SchemaVersion: 1, Generation: 91, UpdatedAt: now, Records: map[string]record{
+		"capacity-domain:measured-fleet": {
+			JobID: "capacity-domain:measured-fleet", Attempts: 2, LastErrorClass: "capacity",
+			UpdatedAt: now.Add(-900 * time.Second), NextAllowedAt: now.Add(-870 * time.Second),
+			WakeReason: "worker-deleted",
+		},
+	}}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(journalPath, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SharedCapacitySaturated {
+		t.Errorf("an expired capacity domain still reports saturated: age=%ds next_allowed=%s",
+			snapshot.SharedCapacityAgeSeconds, state.Records["capacity-domain:measured-fleet"].NextAllowedAt)
+	}
+	// The record itself must still be observable -- the age and wake reason are
+	// how the last refusal is explained. Only the present-tense claim goes.
+	if snapshot.SharedCapacityAgeSeconds != 900 || snapshot.SharedCapacityWakeReason != "worker-deleted" {
+		t.Errorf("expiring the claim also erased the evidence: %#v", snapshot)
+	}
+}
+
+// A terminal domain is still holding creates back even after its retry window
+// passes, so it stays saturated until the terminal window closes.
+func TestInspectKeepsATerminalCapacityDomainSaturated(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "create-retries.json")
+	now := time.Date(2026, 8, 29, 12, 47, 0, 0, time.UTC)
+	state := journal{SchemaVersion: 1, Generation: 92, UpdatedAt: now, Records: map[string]record{
+		"capacity-domain:measured-fleet": {
+			JobID: "capacity-domain:measured-fleet", Attempts: 5, LastErrorClass: "capacity",
+			UpdatedAt: now.Add(-60 * time.Second), NextAllowedAt: now.Add(-30 * time.Second),
+			TerminalUntil: now.Add(300 * time.Second), WakeReason: "capacity-refused",
+		},
+	}}
+	content, _ := json.Marshal(state)
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Inspect(journalPath, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.SharedCapacitySaturated {
+		t.Error("a terminal capacity domain stopped reporting saturated while it still blocks creates")
+	}
+}
