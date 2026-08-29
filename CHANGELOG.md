@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add `make build-controller`, which stamps `gha-fleet` and `gha-fleet-observer`
+  with the provider derivative version and the exact commit. All five hosts
+  reported `version: dev, commit: unknown` because `build` compiles without
+  ldflags and no other target ever produced these two, while
+  `runProviderRelease`'s own comment already claimed the Makefile stamped them.
+  A dirty tree is refused rather than stamped with a commit that does not
+  describe the bytes.
+
 - Advance the declared worker images to b14 (standard) and b9 (integration).
   Both are built, smoke-passed and promoted on the cluster: b14 at
   `710eb85f42e9`, b9 at `fed9cf7727eb`, with b13 and b8 as the exact N-1
