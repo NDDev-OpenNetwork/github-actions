@@ -38,6 +38,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/memberdrain"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilitydashboards"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilityrules"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
@@ -79,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPreflight(args[1:], stdout, stderr)
 	case "publish-pressure":
 		return runPublishPressure(args[1:], stdout, stderr)
+	case "drain-member":
+		return runDrainMember(args[1:], stdout, stderr)
 	case "reconcile-incus":
 		return runReconcileIncus(args[1:], stdout, stderr)
 	case "reconcile-image":
@@ -1514,6 +1517,169 @@ func runPublishPressure(args []string, stdout, stderr io.Writer) int {
 	return writeJSONOrFail(stdout, stderr, result)
 }
 
+// systemdUnits is the drain's control over the timer that owns the member's
+// gate. The pressure publisher reasserts the gate every eleven seconds, so this
+// is what makes a close hold rather than last one cycle.
+type systemdUnits struct{}
+
+func (systemdUnits) Stop(ctx context.Context, unit string) error {
+	if output, err := exec.CommandContext(ctx, "systemctl", "stop", unit).CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl stop %s: %v: %s", unit, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (systemdUnits) Start(ctx context.Context, unit string) error {
+	if output, err := exec.CommandContext(ctx, "systemctl", "start", unit).CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl start %s: %v: %s", unit, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (systemdUnits) IsActive(ctx context.Context, unit string) (bool, error) {
+	// `is-active` exits non-zero for every inactive state, so the exit code
+	// alone cannot tell "the unit is stopped" from "systemctl is missing". The
+	// word it prints can.
+	output, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).CombinedOutput()
+	state := strings.TrimSpace(string(output))
+	switch state {
+	case "active", "activating", "reloading":
+		return true, nil
+	case "inactive", "deactivating", "failed", "unknown":
+		return false, nil
+	}
+	return false, fmt.Errorf("systemctl is-active %s: %v: %s", unit, err, state)
+}
+
+// pressureGate closes and reopens the member's gate through the publisher that
+// owns it. Writing scheduler.instance directly is overwritten within one cycle.
+type pressureGate struct {
+	client     pressurepublish.Client
+	memberName string
+	statePath  string
+	policy     pressuregate.Policy
+}
+
+func (g pressureGate) publish(ctx context.Context, sample pressuregate.Sample, reason string) (string, error) {
+	now := time.Now().UTC()
+	sample.ObservedAt = now
+	result, err := pressurepublish.Reconcile(ctx, g.client, pressurepublish.Options{
+		MemberName: g.memberName, StatePath: g.statePath, Policy: g.policy,
+		Sample: sample, Apply: true, Now: now, ForceCloseReason: reason,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Scheduler, nil
+}
+
+func (g pressureGate) ForceClose(ctx context.Context, reason string) (string, error) {
+	return g.publish(ctx, pressuregate.Sample{}, reason)
+}
+
+// Reopen does not force the gate open. It publishes from live pressure, so a
+// member that is genuinely under pressure stays closed on its own merits.
+func (g pressureGate) Reopen(ctx context.Context) (string, error) {
+	host, err := hostprobe.Collect(ctx)
+	if err != nil {
+		return "", fmt.Errorf("collect pressure: %w", err)
+	}
+	if !host.Pressure.Available {
+		return "", fmt.Errorf("Linux PSI is unavailable")
+	}
+	return g.publish(ctx, pressuregate.Sample{
+		CPUSomeAvg10:    host.Pressure.CPU.Some.Avg10,
+		MemoryFullAvg10: host.Pressure.Memory.Full.Avg10,
+		IOFullAvg10:     host.Pressure.IO.Full.Avg10,
+		OOMKillsTotal:   host.Memory.OOMKillsTotal,
+	}, "")
+}
+
+func runDrainMember(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("drain-member", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "", "exact platform configuration path")
+	statePath := flags.String("state-path", "/var/lib/gha-fleet/pressure-gate.json", "private pressure gate state")
+	incusSocket := flags.String("incus-socket", "/var/lib/incus/unix.socket", "local Incus unix socket")
+	timerUnit := flags.String("timer-unit", memberdrain.DefaultTimerUnit, "the timer that owns this member's gate")
+	reason := flags.String("reason", "", "why the member is being taken out of service, published as the gate's close reason")
+	restore := flags.Bool("restore", false, "hand the member back: republish from live pressure and start the timer")
+	timeout := flags.Duration("timeout", memberdrain.DefaultTimeout, "how long to wait for running jobs to finish")
+	poll := flags.Duration("poll", memberdrain.DefaultPoll, "how often to re-read what the member is carrying")
+	apply := flags.Bool("apply", false, "stop the timer and publish, rather than reporting what would happen")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: drain-member requires --config and no positional arguments")
+		return 2
+	}
+	if *restore && *reason != "" {
+		fmt.Fprintln(stderr, "gha-fleet: drain-member --restore takes no --reason")
+		return 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if !cfg.Incus.Cluster.Enabled || cfg.Incus.Cluster.MemberName == "" {
+		fmt.Fprintln(stderr, "gha-fleet: drain-member requires an Incus cluster member config")
+		return 1
+	}
+	if !cfg.Pressure.Required {
+		fmt.Fprintln(stderr, "gha-fleet: drain-member requires an enabled pressure_admission policy")
+		return 1
+	}
+	// The gate is per-member and published by the member itself, so draining
+	// one host from another would write somebody else's state.
+	hostname, err := os.Hostname()
+	if err != nil || hostname != cfg.Platform.Host || hostname != cfg.Incus.Cluster.MemberName {
+		fmt.Fprintf(stderr, "gha-fleet: drain host %q differs from platform/member %q/%q\n", hostname, cfg.Platform.Host, cfg.Incus.Cluster.MemberName)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout+2*time.Minute)
+	defer cancel()
+	client, err := incusclient.ConnectIncusUnixWithContext(ctx, *incusSocket, &incusclient.ConnectionArgs{})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: connect Incus: %v\n", err)
+		return 1
+	}
+	// Cluster members are not project-scoped; workers are. The gate is read and
+	// written on the unscoped connection, the occupancy on the worker project.
+	deps := memberdrain.Deps{
+		Client: client.UseProject(cfg.Incus.Project),
+		Units:  systemdUnits{},
+		Gate: pressureGate{
+			client: client, memberName: cfg.Incus.Cluster.MemberName,
+			statePath: *statePath, policy: cfg.Pressure,
+		},
+	}
+	options := memberdrain.Options{
+		MemberName: cfg.Incus.Cluster.MemberName, Reason: *reason,
+		TimerUnit: *timerUnit, Timeout: *timeout, Poll: *poll, Apply: *apply,
+	}
+	var result memberdrain.Result
+	if *restore {
+		result, err = memberdrain.Restore(ctx, deps, options)
+	} else {
+		result, err = memberdrain.Drain(ctx, deps, options)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: drain-member: %v\n", err)
+		return 1
+	}
+	if writeJSONOrFail(stdout, stderr, result) != 0 {
+		return 1
+	}
+	// A drain that ran out of time left somebody's job running and the member
+	// closed. That is not a success, and a caller scripting a reboot must see it.
+	if result.TimedOut {
+		return 1
+	}
+	return 0
+}
+
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -1879,5 +2045,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|drain-member|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
 }
