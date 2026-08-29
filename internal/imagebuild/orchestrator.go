@@ -42,6 +42,21 @@ type Result struct {
 type Orchestrator struct {
 	Runner CommandRunner
 
+	// PreserveFailedBuilder keeps the builder instance when a build fails,
+	// instead of deleting it.
+	//
+	// The default is to delete, because a failed build must not strand a
+	// member. But three integration-image publishes have failed with
+	// `websocket: close 1006` and `readdirent ... bad file descriptor`
+	// (NDDev-OpenNetwork/github-actions#265), and each attempt deleted the one
+	// artifact that could explain them: the rootfs at the path the error names.
+	// Two sessions have now reasoned about that failure from the message alone.
+	//
+	// Nothing is preserved silently -- the caller is told the instance name and
+	// the member it is on, because a preserved builder holds disk and a
+	// capacity lease until someone removes it.
+	PreserveFailedBuilder bool
+
 	// clusterMember is this server's name when it is part of a cluster, and
 	// empty when it is standalone. Resolved once, before the first mutation.
 	clusterMember string
@@ -462,11 +477,25 @@ func (o Orchestrator) ensureSourceImage(ctx context.Context, plan imageplan.Plan
 func (o Orchestrator) buildTarget(ctx context.Context, plan imageplan.Plan, artifacts Artifacts, sourceFingerprint, recipe string) (fingerprint, packageSHA string, err error) {
 	created := false
 	defer func() {
-		if created {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			_, _ = o.Runner.Run(cleanupCtx, o.incus(plan.Project, "delete", plan.BuilderName, "--force")...)
+		if !created {
+			return
 		}
+		if o.PreserveFailedBuilder {
+			// Say where it is and that it costs something, so preserving is a
+			// decision with a visible price rather than a leak.
+			member, _ := o.localClusterMember(context.Background())
+			if member == "" {
+				member = "this server"
+			}
+			err = fmt.Errorf(
+				"%w (builder %q preserved on %s for inspection; it holds disk and a capacity lease until `incus delete --project %s %s --force`)",
+				err, plan.BuilderName, member, plan.Project, plan.BuilderName,
+			)
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _ = o.Runner.Run(cleanupCtx, o.incus(plan.Project, "delete", plan.BuilderName, "--force")...)
 	}()
 
 	if _, err = o.Runner.Run(ctx, o.instanceInitArgs(plan, sourceFingerprint, plan.BuilderName, plan.BuilderDiskGiB)...); err != nil {

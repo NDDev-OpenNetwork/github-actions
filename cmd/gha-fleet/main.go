@@ -1145,6 +1145,7 @@ func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 	profile := flags.String("profile", "nddev-linux-standard", "existing Incus profile whose Docker capability matches the manifest")
 	apply := flags.Bool("apply", false, "download, verify, build, smoke, and promote the image")
 	stageOnly := flags.Bool("stage-only", false, "with --apply, build and smoke the immutable alias without changing current/previous aliases")
+	preserveFailed := flags.Bool("preserve-failed-builder", false, "keep the builder instance when the build fails, so the rootfs can be inspected; it holds disk and a capacity lease until deleted")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -1255,7 +1256,7 @@ func runReconcileImage(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeImagePreflightRejection(stderr, "pre-mutation", launchDecision)
 	}
-	orchestrator := &imagebuild.Orchestrator{Runner: imagebuild.ExecRunner{}}
+	orchestrator := &imagebuild.Orchestrator{Runner: imagebuild.ExecRunner{}, PreserveFailedBuilder: *preserveFailed}
 	result, applyErr := orchestrator.ApplyWithOptions(
 		ctx,
 		plan,
