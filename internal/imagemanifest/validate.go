@@ -252,6 +252,7 @@ func (m Manifest) Validate() error {
 		add("browser_smoke", "must be empty when the image has no browser capability")
 	}
 	validatePackages(add, m.Guest.Packages, m.Guest.PackageVersions, variant)
+	validateProvides(add, m.Guest.Provides)
 
 	if len(issues) == 0 {
 		return nil
@@ -443,5 +444,30 @@ func validatePackages(add func(string, string), packages []string, versions map[
 		}
 	} else if len(versions) != 0 {
 		add("guest.package_versions", "must be empty for the standard image")
+	}
+}
+
+// validateProvides keeps the promised command surface a list a reader can
+// check: sorted, unique, and plain command names rather than paths or
+// arguments, because a job invokes a name on PATH.
+var providedCommandPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_-]*$`)
+
+func validateProvides(add func(string, string), provides []string) {
+	if len(provides) == 0 {
+		add("guest.provides", "must name the commands the image guarantees")
+		return
+	}
+	seen := make(map[string]struct{}, len(provides))
+	for index, name := range provides {
+		switch {
+		case !providedCommandPattern.MatchString(name):
+			add(fmt.Sprintf("guest.provides[%d]", index), "must be a bare command name")
+		case index > 0 && provides[index-1] >= name:
+			add(fmt.Sprintf("guest.provides[%d]", index), "must be sorted and unique")
+		}
+		if _, duplicate := seen[name]; duplicate {
+			add(fmt.Sprintf("guest.provides[%d]", index), "is a duplicate")
+		}
+		seen[name] = struct{}{}
 	}
 }

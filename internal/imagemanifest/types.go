@@ -122,8 +122,16 @@ func OptionalToolchains() []string {
 }
 
 type Guest struct {
-	BuilderDiskGiB      int               `json:"builder_disk_gib" yaml:"builder_disk_gib"`
-	Packages            []string          `json:"packages" yaml:"packages"`
+	BuilderDiskGiB int      `json:"builder_disk_gib" yaml:"builder_disk_gib"`
+	Packages       []string `json:"packages" yaml:"packages"`
+	// Provides is the command surface the image guarantees a job can invoke
+	// without installing anything. Nothing stated it before, so consumers
+	// guessed: two repositories opened their command with actionlint, which the
+	// image does not carry, and their CI did not start for weeks; another
+	// apt-installs cmake and ninja-build on every job, both of which it has
+	// carried all along. The smoke proves every name here resolves inside the
+	// built image, so the image cannot ship promising a tool it lacks.
+	Provides            []string          `json:"provides" yaml:"provides"`
 	PackageVersions     map[string]string `json:"package_versions,omitempty" yaml:"package_versions,omitempty"`
 	Variant             string            `json:"variant,omitempty" yaml:"variant,omitempty"`
 	DockerActionBaseRef string            `json:"docker_action_base_ref,omitempty" yaml:"docker_action_base_ref,omitempty"`

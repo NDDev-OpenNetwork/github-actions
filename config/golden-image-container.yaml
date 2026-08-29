@@ -106,23 +106,53 @@ toolchains:
 
 guest:
   builder_disk_gib: 16
+  provides:
+    - cmake
+    - ctest
+    - curl
+    - g++
+    - gcc
+    - git
+    - git-lfs
+    - java
+    - javac
+    - jq
+    - make
+    - mvn
+    - ninja
+    - pip
+    - pip3
+    - pkg-config
+    - python
+    - python3
+    - rg
+    - rsync
+    - sccache
+    - shellcheck
+    - sudo
+    - tar
+    - unzip
+    - xz
+    - zip
+    - zstd
   packages:
     - build-essential
     - ca-certificates
-    - curl
     - cmake
+    - curl
     - git
     - git-lfs
     - jq
+    - libssl-dev
     - maven
     - ninja-build
     - openjdk-21-jdk-headless
-    - libssl-dev
     - pkg-config
     - python3-pip
     - python3-venv
     - ripgrep
     - rsync
+    - shellcheck
     - sudo
     - tar
     - unzip
