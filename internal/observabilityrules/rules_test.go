@@ -1,6 +1,7 @@
 package observabilityrules
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,17 @@ func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
 	t.Fatal("diagnostic_export_failure rule is missing")
 }
 
+// The host-signal slow burns must keep a per-host vector all the way through
+// the sustained subquery: collapsing them with max() before the subquery is
+// what produced OpenObserve error 20008, "the return value should have been a
+// matrix but got scalar".
+//
+// This test used to also require `or vector(0)` on both, as a fallback for a
+// window with no events. That requirement was the defect: `or` evaluates to an
+// empty result on this backend regardless of its left side, so the fallback
+// blinded both alerts on every window, and a test asserting the form could not
+// tell the difference. It now asserts the behaviour that matters and forbids
+// the operator that broke it.
 func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
@@ -96,11 +108,17 @@ func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) 
 			if strings.Contains(alert.QueryCondition.PromQL, "((max(max_over_time(") {
 				t.Fatalf("%s collapses its host series to a scalar before the sustained subquery: %s", id, alert.QueryCondition.PromQL)
 			}
-			if !strings.Contains(alert.QueryCondition.PromQL, "or vector(0)") {
-				t.Fatalf("%s lacks a zero vector for a sparse no-event window: %s", id, alert.QueryCondition.PromQL)
+			if strings.Contains(alert.QueryCondition.PromQL, " or ") {
+				t.Fatalf("%s cannot fire: the backend evaluates `or` to an empty result: %s", id, alert.QueryCondition.PromQL)
 			}
-			if !strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time(((max_over_time(") {
-				t.Fatalf("%s does not preserve a vector through the sustained subquery: %s", id, alert.QueryCondition.PromQL)
+			// No outer subquery at all: an empty inner vector inside one is
+			// error 20008, which records outcome 3 and notifies nobody. The
+			// windowed delta is already the sustained statement.
+			if strings.Contains(alert.QueryCondition.PromQL, "min_over_time((max_over_time(") {
+				t.Fatalf("%s still wraps its windowed delta in a subquery a quiet window cannot satisfy: %s", id, alert.QueryCondition.PromQL)
+			}
+			if !strings.HasPrefix(alert.QueryCondition.PromQL, "max_over_time(") {
+				t.Fatalf("%s is not the plain windowed delta: %s", id, alert.QueryCondition.PromQL)
 			}
 		}
 		if !found {
@@ -211,6 +229,83 @@ func TestRenderOpenObserveBoundsStaleRecoveryDuringSilence(t *testing.T) {
 		}
 		if alert.TriggerCondition.Silence != want {
 			t.Fatalf("alert %s silence=%d, want %d", alert.Name, alert.TriggerCondition.Silence, want)
+		}
+	}
+}
+
+// queue_wait_slow_burn and lifecycle_queued_delivery_stall read the identical
+// series. Before this bound, any queued age past 300 seconds satisfied both --
+// a ticket at > 120 sustained fifteen minutes and a page at > 300 sustained
+// five -- so one stall produced two messages on two cadences. Over seven days
+// the pair accounted for 43 of 115 firing transitions.
+//
+// The two rules must now partition the range rather than overlap on it.
+func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var burn, page *Rule
+	for i := range bundle.Rules {
+		switch bundle.Rules[i].ID {
+		case "queue_wait_slow_burn":
+			burn = &bundle.Rules[i]
+		case "lifecycle_queued_delivery_stall":
+			page = &bundle.Rules[i]
+		}
+	}
+	if burn == nil || page == nil {
+		t.Fatal("both queued-age rules must exist; they are the pair being partitioned")
+	}
+	if page.Severity != "page" || burn.Severity != "ticket" {
+		t.Fatalf("severities changed: burn=%q page=%q", burn.Severity, page.Severity)
+	}
+	// The bound must name the page's own threshold, so moving one moves both
+	// or fails here rather than silently reopening the overlap.
+	bound := "< bool " + strconv.FormatFloat(page.Threshold, 'f', -1, 64)
+	if !strings.Contains(burn.Expression, bound) {
+		t.Errorf("the ticket bound %q does not track the page threshold %v", burn.Expression, page.Threshold)
+	}
+	// The gate has to be the bool-modified product, not the obvious filter.
+	// Measured against the live backend, `vector(200) < 300` returns an empty
+	// result and `(vector(200) < 300) or vector(0)` returns empty too, so a
+	// filtered expression would make this rule report an evaluation error --
+	// which notifies nobody -- instead of "not firing".
+	if strings.Contains(burn.Expression, "or vector(") {
+		t.Errorf("the ticket relies on an or-fallthrough this backend does not evaluate: %q", burn.Expression)
+	}
+	if !strings.Contains(burn.Expression, "* (max(") {
+		t.Errorf("the ticket does not gate its own value to zero above the page threshold: %q", burn.Expression)
+	}
+}
+
+// `or` returns an empty result on the backend these rules run against, whether
+// or not its left side has data. Measured against the live engine:
+//
+//	max(gha_fleet_platform_healthy)                 -> 1
+//	max(gha_fleet_platform_healthy) or vector(0)    -> empty
+//	max(A) -> 0, max(B) -> 0, max(A) or max(B)      -> empty
+//
+// An empty result satisfies no threshold, so an expression containing `or`
+// cannot fire. Four rules carried one -- audit_suppression_burst,
+// kernel_workqueue_hog, github_correlation_persistent and the
+// lifecycle_inventory_gap page -- and none of them had fired since the
+// 2026-08-27 22:09 rewrite that introduced the last two of them, while the
+// rollout that shipped it recorded `evaluation_errors_after: 0` and
+// `all_alerts_normal: true`, which is precisely what a blinded alert looks
+// like.
+//
+// Non-negative counters compared against zero say the same thing with `+`, and
+// a window with no events says it with an empty result, which is honest and
+// does not fire.
+func TestNoRuleDependsOnAnOperatorTheBackendDiscards(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range bundle.Rules {
+		if strings.Contains(rule.Expression, " or ") {
+			t.Errorf("rule %s cannot fire: its expression uses `or`, which this backend evaluates to an empty result: %q", rule.ID, rule.Expression)
 		}
 	}
 }

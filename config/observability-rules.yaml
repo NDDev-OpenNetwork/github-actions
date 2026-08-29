@@ -6,10 +6,31 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_signal_events
-    expression: (max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m])) or vector(0)
+    # The `or vector(0)` that used to close this expression made it return
+    # nothing at all. Measured against the live backend: this delta returns
+    # per-host values (8, 6, 6, 5 over fifteen minutes) while the same
+    # expression with `or vector(0)` appended returns an empty result, and so
+    # does `max(gha_fleet_platform_healthy) or vector(0)` against a series that
+    # plainly reads 1. `or` discards the result on OpenObserve 0.92 whether or
+    # not the left side has data, so the fallback did not cover a sparse window
+    # -- it blinded the alert on every window.
+    #
+    # A window with no events now returns an empty result, which is the honest
+    # answer to "how many events", evaluates without error, and does not fire.
+    expression: max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m])
     operator: ">"
     threshold: 30
-    evaluation_seconds: 300
+    # No outer subquery: evaluation and hold are equal, so the renderer emits
+    # the windowed delta as written. The delta is already the sustained
+    # statement -- "this many events over the window" -- and wrapping it in a
+    # second sustained subquery is what made a quiet window fatal: with no
+    # samples the inner delta is empty, and an empty vector inside a subquery
+    # raises OpenObserve error 20008, "the return value should have been a
+    # matrix but got scalar", which records outcome 3 and notifies no one.
+    # Reproduced live on kernel_workqueue_hog, whose class had no samples in
+    # the last hour. Unwrapped, a quiet window returns an empty result at HTTP
+    # 200: no rows, no firing, no error.
+    evaluation_seconds: 600
     hold_seconds: 600
     destination_ref: fleet_oncall
     enabled: false
@@ -134,7 +155,12 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_queue_missing_workflow_run_id_beyond_grace
-    expression: max(gha_fleet_queue_missing_workflow_run_id_beyond_grace) or max(gha_fleet_queue_unbound_repository_beyond_grace)
+    # `or` between the two counters returned an empty result on this backend
+    # even with both sides present, so this page could not fire. Both operands
+    # are non-negative counts compared against zero, so their sum is positive
+    # exactly when either is -- the same alert, in an operator the backend
+    # evaluates.
+    expression: max(gha_fleet_queue_missing_workflow_run_id_beyond_grace) + max(gha_fleet_queue_unbound_repository_beyond_grace)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -278,10 +304,21 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_signal_events
-    expression: (max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h])) or vector(0)
+    # Same `or vector(0)` removal as audit_suppression_burst; see there.
+    expression: max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h])
     operator: ">"
     threshold: 10
-    evaluation_seconds: 300
+    # No outer subquery: evaluation and hold are equal, so the renderer emits
+    # the windowed delta as written. The delta is already the sustained
+    # statement -- "this many events over the window" -- and wrapping it in a
+    # second sustained subquery is what made a quiet window fatal: with no
+    # samples the inner delta is empty, and an empty vector inside a subquery
+    # raises OpenObserve error 20008, "the return value should have been a
+    # matrix but got scalar", which records outcome 3 and notifies no one.
+    # Reproduced live on kernel_workqueue_hog, whose class had no samples in
+    # the last hour. Unwrapped, a quiet window returns an empty result at HTTP
+    # 200: no rows, no firing, no error.
+    evaluation_seconds: 600
     hold_seconds: 600
     destination_ref: fleet_oncall
     enabled: false
@@ -326,7 +363,11 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_incus_orphan_instances
-    expression: max(gha_fleet_incus_orphan_instances) or max(gha_fleet_journal_missing_instances) or max(gha_fleet_queue_uncovered_running)
+    # `or` between the three counters returned an empty result on this
+    # backend, so this page has never fired in its life. All three are
+    # non-negative counts compared against zero, so their sum is positive
+    # exactly when any one of them is.
+    expression: max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances) + max(gha_fleet_queue_uncovered_running)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -406,7 +447,22 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
-    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"})
+    # Bounded above by the page's threshold so one fact produces one message.
+    # This rule and lifecycle_queued_delivery_stall read the identical series;
+    # any age past 300s satisfied both, so a single stall opened a ticket and
+    # paged on two cadences. Over seven days that pair was 43 of 115 firing
+    # transitions. The band below the page is what this rule is actually about
+    # -- latency drifting above the objective while no individual job is stuck
+    # -- and above it the page is the better message, not a second one.
+    #
+    # Written as a bool-gated product rather than the obvious filter, because
+    # this backend does not evaluate the filter. Measured against the live
+    # engine: `vector(200) < 300` returns an empty result, and so does
+    # `(vector(200) < 300) or vector(0)` -- the `or` does not fall through an
+    # empty left side. `X * (X < bool 300)` returns 200 for 200 and 0 for 400,
+    # which is the intent, and it is never empty, so the sustained subquery
+    # always receives a matrix.
+    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) * (max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) < bool 300)
     operator: ">"
     threshold: 120
     evaluation_seconds: 300
@@ -415,9 +471,9 @@ rules:
     enabled: false
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: Queue latency is persistently above the initial two-minute objective.
+    summary: Queue latency is persistently between the two-minute objective and the five-minute page.
     action: Create a capacity or fairness ticket using phase-specific and class metrics.
-    recovery: Queue age remains below two minutes for the hold window.
+    recovery: Queue age remains below two minutes for the hold window, or a stuck job crosses five minutes and lifecycle_queued_delivery_stall owns it instead.
   - id: snapshot_stale
     severity: page
     query_language: promql
