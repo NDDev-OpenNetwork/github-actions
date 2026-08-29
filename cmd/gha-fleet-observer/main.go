@@ -254,11 +254,26 @@ func sample(ctx context.Context, collector fleetobserve.Collector, queueReader q
 				phaseEmitter.Observe(ctx, queueSnapshot, time.Now().UTC())
 			}
 			if !snapshot.Healthy {
+				// Every input to snapshot.Healthy, because printing a subset
+				// produced a page whose own diagnostic said nothing was wrong.
+				// On 2026-08-28 at 23:24 this line reported collection_errors
+				// 0, orphan_instances 0, missing_instances 0 and an empty error
+				// list while the platform was unhealthy; the cause was
+				// queue.uncovered_running = 1, which it did not print. An
+				// inactive service was equally invisible.
+				inactive := make([]string, 0, len(snapshot.Services))
+				for _, service := range snapshot.Services {
+					if !service.Active {
+						inactive = append(inactive, service.Name+"="+service.State)
+					}
+				}
 				logger.Warn(
 					"NDDev Drakkars observer sample is unhealthy",
 					"collection_errors", len(snapshot.CollectionErrors),
 					"orphan_instances", snapshot.Incus.OrphanInstances,
 					"missing_instances", snapshot.Incus.MissingInstances,
+					"uncovered_running", snapshot.Queue.UncoveredRunning,
+					"inactive_services", inactive,
 					"errors", snapshot.CollectionErrors,
 				)
 			}

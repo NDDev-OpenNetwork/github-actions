@@ -79,6 +79,12 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			priority = 1
 			silence = 10
 		}
+		// A rule that states its own repeat cadence overrides the default. See
+		// Rule.RepeatSecs: two constants cannot be right for both a queue that
+		// drains by itself and a host that needs patching.
+		if rule.RepeatSecs > 0 {
+			silence = rule.RepeatSecs / 60
+		}
 		frequencyMinutes := (rule.EvaluationSecs + 59) / 60
 		periodMinutes := max((rule.HoldSecs+59)/60, frequencyMinutes)
 		promQL, err := sustainedPromQL(rule)

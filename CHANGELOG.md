@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Let a rule state how often its own standing fact is repeated, instead of two
+  constants for every alert. Measured over 103 hours of recorded transitions,
+  the fleet sent 352 notifications from 116 episodes -- 82 a day -- and half of
+  them were two conditions no amount of repetition could change:
+  `kernel_slab_unreclaimable` held one alerting episode for 23.6 hours and
+  announced it 95 times, and `host_standard_updates_available` sent 82 for a
+  fact that changed four times. `repeat_seconds` is per rule because the cost
+  of a longer cadence -- OpenObserve pauses outcome evaluation while silenced,
+  so recovery is observed that much later -- is cheap for a condition cleared
+  by a reboot you performed on purpose and expensive for one that clears
+  itself. Absent, the previous ten and fifteen minutes still apply. Four
+  human-cleared conditions now repeat every four to twelve hours.
+- Make the observer name every reason it is unhealthy. `snapshot.Healthy` has
+  five inputs and the warning printed three, so on 2026-08-28 at 23:24 a page
+  fired while its own log line read `collection_errors 0, orphan_instances 0,
+  missing_instances 0, errors []`. The cause was `queue.uncovered_running = 1`,
+  which it did not print; an inactive service was equally invisible. Both are
+  now logged, with the failing service named.
+
 - Forbid every PromQL set operator, not just `or`. Measured against the live
   backend with two series that plainly read 1 and 0, `or`, `and`, `unless` and
   `and on()` all return an empty result -- they do not fail to default an
