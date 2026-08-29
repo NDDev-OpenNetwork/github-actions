@@ -19,9 +19,20 @@ rules:
     # not blindness; three in an hour is.
     #
     # No outer subquery: evaluation and hold are equal, so the renderer emits
-    # the windowed delta as written and an hour with no failures returns an
-    # empty result rather than error 20008.
-    expression: max_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h])
+    # the windowed sum as written and an hour with no failures returns an empty
+    # result rather than error 20008.
+    #
+    # The counter is delta, not cumulative, and the window is summed rather than
+    # spanned. Both were measured on this engine, not assumed. The count
+    # connector emits Delta (proved by running it in isolation against the real
+    # journal format), and on a sparse series max_over_time - min_over_time
+    # returns the span between the first and last sample, not their number: three
+    # failures scored 2 and would not have crossed a threshold of two. Worse, a
+    # cumulative counter resets when the collector restarts, so a restart plus
+    # one failure would have subtracted a post-restart minimum from a
+    # pre-restart maximum and paged the on-call over nothing. Summing deltas
+    # counts exactly and survives a restart.
+    expression: sum_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_DELTA"}[1h])
     operator: ">"
     threshold: 2
     evaluation_seconds: 60
