@@ -224,3 +224,99 @@ func TestEvaluatePressurePolicyAdmitsBelowThresholds(t *testing.T) {
 		t.Fatalf("decision=%#v err=%v", decision, err)
 	}
 }
+
+// The fleet's own numbers: four members declaring ten CPU units each, an
+// allowance envelope of 98%, and the priority integration class whose declared
+// share is four units against a measured p90 of 0.72 cores. Strict one-to-one
+// stops that class at nine workers cluster-wide while the members sit near
+// idle; the multiplier is what lets the memory ledger and PSI decide instead.
+func TestEvaluateOvercommitAdmitsWhatStrictShareAccountingRefuses(t *testing.T) {
+	t.Parallel()
+
+	snapshot, policy, request := validInputs()
+	policy.MaximumFleetCPUPercent = 98
+	snapshot.TotalCPUUnits = 40
+	snapshot.AllocatedCPUUnits = 16
+	snapshot.AllocatedCPUAllowanceUnits = 36
+	request.VCPU = 2
+	request.CPUAllowanceUnits = 4
+
+	strict, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strict.Admitted || strict.Reason != ReasonCPUAllowance {
+		t.Fatalf("strict share accounting did not refuse the tenth worker: %#v", strict)
+	}
+
+	policy.CPUAllowanceOvercommit = 3
+	overcommitted, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !overcommitted.Admitted || overcommitted.Reason != ReasonAdmitted {
+		t.Fatalf("measured overcommit did not admit the same worker: %#v", overcommitted)
+	}
+	if overcommitted.RemainingCPUAllowanceUnits <= strict.RemainingCPUAllowanceUnits {
+		t.Fatalf("overcommit did not widen the envelope: strict=%d overcommitted=%d",
+			strict.RemainingCPUAllowanceUnits, overcommitted.RemainingCPUAllowanceUnits)
+	}
+}
+
+// The multiplier applies to the share and to nothing else. The reservation
+// ledger is per-worker measured consumption and stays the bound it was, so a
+// fleet whose reservations are spent is still refused however wide the share
+// envelope is opened.
+func TestEvaluateOvercommitLeavesTheReservationLedgerBinding(t *testing.T) {
+	t.Parallel()
+
+	snapshot, policy, request := validInputs()
+	policy.MaximumFleetCPUPercent = 98
+	policy.CPUAllowanceOvercommit = 4
+	snapshot.TotalCPUUnits = 40
+	snapshot.AllocatedCPUUnits = 39
+	snapshot.AllocatedCPUAllowanceUnits = 0
+	request.VCPU = 2
+	request.CPUAllowanceUnits = 4
+
+	decision, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Admitted || decision.Reason != ReasonInsufficientCPU {
+		t.Fatalf("overcommit leaked into the reservation ledger: %#v", decision)
+	}
+}
+
+// A policy written before the field existed keeps refusing exactly what it
+// refused, so the deployment order between binary and configuration is free.
+func TestEvaluateUnsetOvercommitKeepsStrictShareAccounting(t *testing.T) {
+	t.Parallel()
+
+	snapshot, policy, request := validInputs()
+	policy.MaximumFleetCPUPercent = 98
+	snapshot.TotalCPUUnits = 40
+	snapshot.AllocatedCPUUnits = 16
+	snapshot.AllocatedCPUAllowanceUnits = 36
+	request.VCPU = 2
+	request.CPUAllowanceUnits = 4
+
+	decision, err := Evaluate(snapshot, policy, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Admitted || decision.Reason != ReasonCPUAllowance {
+		t.Fatalf("unset overcommit changed the previous decision: %#v", decision)
+	}
+}
+
+func TestEvaluateRejectsOvercommitBeyondTheMeasuredCeiling(t *testing.T) {
+	t.Parallel()
+
+	snapshot, policy, request := validInputs()
+	policy.MaximumFleetCPUPercent = 98
+	policy.CPUAllowanceOvercommit = 5
+	if _, err := Evaluate(snapshot, policy, request); err == nil {
+		t.Fatal("an overcommit past the measured p99 was accepted")
+	}
+}

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Let the CPU allowance envelope overcommit, because the quantity it bounds is
+  a work-conserving share and not a reservation. `limits.cpu.allowance` is
+  written as a percentage, so a worker declaring 400% takes four cores only
+  while four are idle; summing those shares against the physical unit count
+  enforced strict one-to-one non-overcommit and became the tightest bound on
+  the fleet, refusing the four-unit integration class at nine workers
+  cluster-wide while members carried load averages near one against eight
+  cores. `host_reserve.cpu_allowance_overcommit` multiplies that one bound;
+  absent or zero reads as one, so an existing policy keeps its previous
+  decisions. Measured: per-instance CPU peak over 24 hours and 3036 instances
+  was p50 0.12, p90 0.72, p99 1.30 cores against a declared 2 or 4.
+- Added provider derivative `v0.1.5-nddev.86` for the overcommittable CPU
+  allowance envelope.
 - Score burst placement with the greater of measured load-per-core and
   projected CPU allowance, including pending creates not yet visible in the
   instance inventory. This prevents rapid create waves from herding onto a

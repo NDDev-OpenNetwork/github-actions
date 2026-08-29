@@ -131,6 +131,28 @@ type HostReserve struct {
 	// worker processes it owns. It is deliberately below the host-wide SLO so
 	// the kernel, telemetry and member services retain CPU during a burst.
 	MaximumFleetCPUPercent int `json:"maximum_fleet_cpu_percent" yaml:"maximum_fleet_cpu_percent"`
+	// CPUAllowanceOvercommit multiplies the allowance envelope, because the
+	// number the envelope bounds is a share and not a reservation.
+	//
+	// limits.cpu.allowance is written as a percentage, and a percentage
+	// allowance in Incus is a work-conserving share: a worker declaring 400%
+	// takes four cores only when four cores are otherwise idle, and yields
+	// them the moment anything else asks. guardrails.cpu_scheduling_mode says
+	// so in one word -- weighted-overcommit -- and internal/config/validate.go
+	// refuses any other value for exactly this reason.
+	//
+	// Summing those shares against the physical unit count therefore enforces
+	// strict one-to-one non-overcommit on a quantity that is explicitly not a
+	// reservation. Measured against the fleet, the declared share overstates
+	// demand by three to five times: over 24 hours and 3036 worker instances
+	// the per-instance CPU peak was p50 0.12, p90 0.72 and p99 1.30 cores,
+	// against a declared 2 or 4.
+	//
+	// Zero means one, so a policy that does not set it keeps the previous
+	// strict behaviour. The reservation ledger, the memory ledger, the
+	// per-project instance cap and the PSI gate are unchanged and remain the
+	// bounds that decide admission once this one stops being the tightest.
+	CPUAllowanceOvercommit int `json:"cpu_allowance_overcommit,omitempty" yaml:"cpu_allowance_overcommit,omitempty"`
 	MinimumFreeDiskPercent int `json:"minimum_free_disk_percent" yaml:"minimum_free_disk_percent"`
 }
 

@@ -123,6 +123,13 @@ func (c Config) Validate() error {
 	if c.HostReserve.MaximumFleetCPUPercent < 80 || c.HostReserve.MaximumFleetCPUPercent > 98 {
 		add("host_reserve.maximum_fleet_cpu_percent", "must be between 80 and 98 so the hard host-wide CPU ceiling leaves operating-system headroom")
 	}
+	// Four is the measured ceiling, not a round number: the declared share is 2
+	// or 4 units against a measured p90 of 0.72 cores per instance, so anything
+	// above four would admit past the p99 of 1.30 with no ledger left to catch
+	// it. Zero is the unset value and means one.
+	if c.HostReserve.CPUAllowanceOvercommit < 0 || c.HostReserve.CPUAllowanceOvercommit > 4 {
+		add("host_reserve.cpu_allowance_overcommit", "must be between 1 and 4, or absent for no overcommit, because the allowance is a work-conserving share and not a reservation")
+	}
 	if c.HostReserve.MinimumFreeDiskPercent < 20 || c.HostReserve.MinimumFreeDiskPercent > 80 {
 		add("host_reserve.minimum_free_disk_percent", "must be between 20 and 80")
 	}
