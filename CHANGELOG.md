@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Advance the declared worker images to b14 (standard) and b9 (integration).
+  Both are built, smoke-passed and promoted on the cluster: b14 at
+  `710eb85f42e9`, b9 at `fed9cf7727eb`, with b13 and b8 as the exact N-1
+  rollback. b9 is the publish that failed three times in #265 and succeeded on
+  the fourth attempt with no change to the publish path -- the earlier failures
+  were not reproduced and no cause was established, so the issue stays open for
+  the cause even though the image now exists.
+
 - Add `reconcile-image --preserve-failed-builder`, so a failed build leaves the
   one artifact that can explain it. Three integration-image publishes have
   failed with `websocket: close 1006` and `readdirent ... bad file descriptor`
