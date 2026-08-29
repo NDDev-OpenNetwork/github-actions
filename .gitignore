@@ -29,3 +29,6 @@
 /.serena/.flow_blocker_ack.json
 /.serena/.flow_post_task_state.json
 /.serena/.flow_sync_marker
+
+# Stamped controller binaries from .
+dist/
