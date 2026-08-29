@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/psimetrics"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
@@ -35,41 +35,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_host_memory_total_bytes", "Total host memory in bytes.", float64(snapshot.Host.Memory.TotalMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_memory_available_bytes", "Available host memory in bytes.", float64(snapshot.Host.Memory.AvailableMiB)*1024*1024)
 	counter(&output, "gha_fleet_host_oom_kills_total", "Kernel OOM kills observed since host boot.", float64(snapshot.Host.Memory.OOMKillsTotal))
-	gauge(&output, "gha_fleet_host_psi_available", "Whether Linux pressure stall information is available.", boolFloat(snapshot.Host.Pressure.Available))
-	labeledGaugeHeader(&output, "gha_fleet_host_psi_stall_percent", "Percentage of wall time stalled over each Linux PSI averaging window.")
-	labeledCounterHeader(&output, "gha_fleet_host_psi_stall_seconds_total", "Cumulative Linux PSI stall time since host boot.")
-	for _, resource := range []struct {
-		name     string
-		pressure hostprobe.PressureResource
-	}{
-		{name: "cpu", pressure: snapshot.Host.Pressure.CPU},
-		{name: "memory", pressure: snapshot.Host.Pressure.Memory},
-		{name: "io", pressure: snapshot.Host.Pressure.IO},
-	} {
-		for _, mode := range []struct {
-			name   string
-			window hostprobe.PressureWindow
-		}{
-			{name: "some", window: resource.pressure.Some},
-			{name: "full", window: resource.pressure.Full},
-		} {
-			for _, average := range []struct {
-				window string
-				value  float64
-			}{
-				{window: "10", value: mode.window.Avg10},
-				{window: "60", value: mode.window.Avg60},
-				{window: "300", value: mode.window.Avg300},
-			} {
-				metric(&output, "gha_fleet_host_psi_stall_percent", map[string]string{
-					"resource": resource.name, "mode": mode.name, "window_seconds": average.window,
-				}, average.value)
-			}
-			metric(&output, "gha_fleet_host_psi_stall_seconds_total", map[string]string{
-				"resource": resource.name, "mode": mode.name,
-			}, float64(mode.window.TotalMicros)/1_000_000)
-		}
-	}
+	output.WriteString(psimetrics.Render(snapshot.Host.Pressure))
 	gauge(&output, "gha_fleet_host_root_available_bytes", "Available bytes on the root filesystem.", float64(snapshot.Host.RootFilesystem.AvailableMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_root_free_percent", "Free block percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreePercent))
 	gauge(&output, "gha_fleet_host_root_free_inodes_percent", "Free inode percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreeInodesPercent))
