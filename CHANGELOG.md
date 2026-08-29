@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `alert_evaluation_failed`, so the one failure the alerting system cannot
+  report about itself becomes visible. A failed evaluation writes outcome 3 into
+  `alert_states` and sends nothing, so the alert goes blind and its silence is
+  indistinguishable from health; ten such transitions are on record, eight of
+  them in one two-hour stretch during which the alert that watches for missing
+  pressure observers could not evaluate itself. The services-host collector now
+  classifies the scheduler's journal line into a signal and counts it, the same
+  shape the host signals already use, and the rule watches that counter.
+
 - Add `make build-controller`, which stamps `gha-fleet` and `gha-fleet-observer`
   with the provider derivative version and the exact commit. All five hosts
   reported `version: dev, commit: unknown` because `build` compiles without
