@@ -1,7 +1,9 @@
 package imagebuild
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"maps"
 	"os"
 	"os/exec"
@@ -541,5 +543,89 @@ func TestClusteredImageBuildPinsItsInstancesToTheVerifiedMember(t *testing.T) {
 	clustered := (&Orchestrator{clusterMember: "gha-runner-4"}).instanceInitArgs(plan, strings.Repeat("a", 64), "probe", plan.BuilderDiskGiB)
 	if !strings.Contains(strings.Join(clustered, " "), "--target gha-runner-4") {
 		t.Fatalf("clustered build did not pin its member: %q", clustered)
+	}
+}
+
+// scriptedRunner answers a fixed number of commands and then fails, so a build
+// can be driven to a chosen step without an Incus server.
+type scriptedRunner struct {
+	commands   [][]string
+	failAfter  int
+	failWith   error
+	jsonByPath map[string]string
+}
+
+func (r *scriptedRunner) Run(_ context.Context, args ...string) ([]byte, error) {
+	r.commands = append(r.commands, args)
+	for path, body := range r.jsonByPath {
+		for _, arg := range args {
+			if arg == path {
+				return []byte(body), nil
+			}
+		}
+	}
+	if r.failAfter > 0 && len(r.commands) >= r.failAfter {
+		return nil, r.failWith
+	}
+	return []byte("{}"), nil
+}
+
+func (r *scriptedRunner) deleted(instance string) bool {
+	for _, command := range r.commands {
+		hasDelete, hasInstance := false, false
+		for _, arg := range command {
+			if arg == "delete" {
+				hasDelete = true
+			}
+			if arg == instance {
+				hasInstance = true
+			}
+		}
+		if hasDelete && hasInstance {
+			return true
+		}
+	}
+	return false
+}
+
+// Three integration-image publishes failed with errors that name a path inside
+// the builder's rootfs, and each attempt deleted that rootfs before anyone
+// could look at it (#265). Preserving is opt-in, and it must say where the
+// builder is, because it holds disk and a capacity lease until removed.
+func TestFailedBuildPreservesTheBuilderOnlyWhenAsked(t *testing.T) {
+	plan := testIntegrationImagePlan(t)
+	publishFailure := errors.New("publish immutable worker image: websocket: close 1006 (abnormal closure): unexpected EOF")
+
+	deleting := &scriptedRunner{failAfter: 2, failWith: publishFailure}
+	deletingOrchestrator := &Orchestrator{Runner: deleting}
+	_, _, err := deletingOrchestrator.buildTarget(context.Background(), plan, Artifacts{}, strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64))
+	if err == nil {
+		t.Fatal("the default build reported success on a failing runner")
+	}
+	if !deleting.deleted(plan.BuilderName) {
+		t.Error("the default no longer deletes the builder, which would strand a member on every failure")
+	}
+	if strings.Contains(err.Error(), "preserved") {
+		t.Errorf("the default claimed to preserve: %v", err)
+	}
+
+	preserving := &scriptedRunner{failAfter: 2, failWith: publishFailure}
+	preservingOrchestrator := &Orchestrator{Runner: preserving, PreserveFailedBuilder: true}
+	_, _, err = preservingOrchestrator.buildTarget(context.Background(), plan, Artifacts{}, strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64))
+	if err == nil {
+		t.Fatal("the preserving build reported success on a failing runner")
+	}
+	if preserving.deleted(plan.BuilderName) {
+		t.Error("the builder was deleted despite PreserveFailedBuilder")
+	}
+	// The original failure must survive, or preserving would hide the reason
+	// the builder is worth inspecting.
+	if !errors.Is(err, publishFailure) {
+		t.Errorf("preserving discarded the underlying failure: %v", err)
+	}
+	for _, expected := range []string{plan.BuilderName, "preserved", "incus delete"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("preserved-builder message does not say %q: %v", expected, err)
+		}
 	}
 }

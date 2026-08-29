@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `reconcile-image --preserve-failed-builder`, so a failed build leaves the
+  one artifact that can explain it. Three integration-image publishes have
+  failed with `websocket: close 1006` and `readdirent ... bad file descriptor`
+  (#265), and every attempt deleted the rootfs the error names before anyone
+  could look at it; two sessions have now reasoned about that failure from the
+  message alone. Preserving is opt-in and never silent -- the error names the
+  instance, the member it is on, and the command that removes it, because a
+  preserved builder holds disk and a capacity lease.
+
 - Report `shared_capacity_saturated` as the present-tense fact its help text
   claims. It was set by the mere existence of the `capacity-domain:measured-fleet`
   record, which outlives the refusal that wrote it, so it read 1 in 80.3% of
