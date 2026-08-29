@@ -15,6 +15,26 @@
   was p50 0.12, p90 0.72, p99 1.30 cores against a declared 2 or 4.
 - Added provider derivative `v0.1.5-nddev.86` for the overcommittable CPU
   allowance envelope.
+- Remove `or` from every alert expression. The backend these rules run against
+  evaluates `or` to an empty result whether or not its left side has data --
+  `max(gha_fleet_platform_healthy)` reads 1 and
+  `max(gha_fleet_platform_healthy) or vector(0)` reads nothing -- and an empty
+  result satisfies no threshold. Four rules carried one and none had fired
+  since the 2026-08-27 rewrite that added the last two: the
+  `lifecycle_inventory_gap` and `github_correlation_persistent` pages, plus
+  `audit_suppression_burst` and `kernel_workqueue_hog`. Non-negative counters
+  compared against zero say the same thing with `+`.
+- Stop wrapping the two host-signal windowed deltas in a second sustained
+  subquery. A window with no samples makes the inner delta empty, and an empty
+  vector inside a subquery raises error 20008 -- which records outcome 3 and
+  notifies nobody. Reproduced live on `kernel_workqueue_hog`. Unwrapped, a
+  quiet window returns an empty result at HTTP 200: no rows, no firing, no
+  error.
+- Bound `queue_wait_slow_burn` below the `lifecycle_queued_delivery_stall`
+  threshold, so one stall produces one message. The two read the identical
+  series and every age past 300s satisfied both, which was 43 of 115 firing
+  transitions over seven days.
+
 - Score burst placement with the greater of measured load-per-core and
   projected CPU allowance, including pending creates not yet visible in the
   instance inventory. This prevents rapid create waves from herding onto a
