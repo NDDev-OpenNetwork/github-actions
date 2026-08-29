@@ -213,6 +213,15 @@ func TestRenderOpenObserveConvertsSecondsToMinuteSchedule(t *testing.T) {
 	}
 }
 
+// Recovery is observed at most one silence window late, because OpenObserve
+// pauses outcome evaluation while silenced. This asserts that bound, which is
+// what the name promises -- not the two constants that used to be the whole
+// policy. Asserting the constants would have made every deliberate cadence a
+// test failure and left the flood in place.
+//
+// It also matches by name rather than by index: RenderOpenObserve sorts its
+// output, so the positional comparison this replaces was only ever correct by
+// accident of the bundle already being alphabetical.
 func TestRenderOpenObserveBoundsStaleRecoveryDuringSilence(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
@@ -222,13 +231,29 @@ func TestRenderOpenObserveBoundsStaleRecoveryDuringSilence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, alert := range rendered.Alerts {
-		want := 15
-		if bundle.Rules[index].Severity == "page" {
-			want = 10
+	byID := make(map[string]Rule, len(bundle.Rules))
+	for _, rule := range bundle.Rules {
+		byID[rule.ID] = rule
+	}
+	if len(rendered.Alerts) != len(byID) {
+		t.Fatalf("rendered %d alerts from %d rules", len(rendered.Alerts), len(byID))
+	}
+	for _, alert := range rendered.Alerts {
+		rule, exists := byID[alert.Name]
+		if !exists {
+			t.Fatalf("rendered alert %s has no rule", alert.Name)
 		}
+		want := repeatOrDefault(rule) / 60
 		if alert.TriggerCondition.Silence != want {
-			t.Fatalf("alert %s silence=%d, want %d", alert.Name, alert.TriggerCondition.Silence, want)
+			t.Errorf("alert %s silence=%d minutes, want %d from its declared cadence", alert.Name, alert.TriggerCondition.Silence, want)
+		}
+		// The bound itself: a page is re-stated within the hour, and nothing
+		// goes quiet for more than a day.
+		if rule.Severity == "page" && alert.TriggerCondition.Silence > 60 {
+			t.Errorf("page %s would observe recovery up to %d minutes late", alert.Name, alert.TriggerCondition.Silence)
+		}
+		if alert.TriggerCondition.Silence > 1440 {
+			t.Errorf("alert %s would observe recovery up to %d minutes late", alert.Name, alert.TriggerCondition.Silence)
 		}
 	}
 }
@@ -321,4 +346,77 @@ func TestNoRuleDependsOnASetOperatorTheBackendDiscards(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The whole repeat policy used to be two constants: ten minutes for a page,
+// fifteen for a ticket. Measured over 103 hours of recorded transitions, that
+// sent 352 messages from 116 episodes -- 82 a day -- and half of them were two
+// conditions that cannot clear without a person. kernel_slab_unreclaimable held
+// a single alerting episode for 23.6 hours and announced it 95 times.
+//
+// A rule that says how often its own standing fact should be repeated is the
+// fix; these assert the bound rather than the value, so retuning one is not a
+// test change but removing the policy is.
+func TestStandingConditionsDoNotRepeatAtPageCadence(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Conditions that end only when a person patches, reboots or reruns
+	// something. Nothing about the fleet's own behaviour clears them.
+	humanCleared := map[string]bool{
+		"kernel_slab_unreclaimable":       true,
+		"host_standard_updates_available": true,
+		"host_reboot_required":            true,
+		"host_package_inventory_stale":    true,
+	}
+	seen := 0
+	for _, rule := range bundle.Rules {
+		if !humanCleared[rule.ID] {
+			continue
+		}
+		seen++
+		if rule.RepeatSecs < 3600 {
+			t.Errorf("%s repeats every %ds; it cannot clear without maintenance, so that is a message every few minutes for a fact that will not change",
+				rule.ID, repeatOrDefault(rule))
+		}
+		if rule.Severity != "ticket" {
+			t.Errorf("%s is severity %q; a condition only a person can clear is not a page", rule.ID, rule.Severity)
+		}
+	}
+	if seen != len(humanCleared) {
+		t.Fatalf("expected %d human-cleared rules, found %d", len(humanCleared), seen)
+	}
+}
+
+// The counter-check: every other rule keeps the short default, so widening the
+// cadence stays a deliberate per-rule statement rather than a global retreat
+// from alerting.
+func TestSelfClearingRulesKeepTheShortDefault(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	widened := 0
+	for _, rule := range bundle.Rules {
+		if rule.RepeatSecs > 0 {
+			widened++
+		}
+		if rule.Severity == "page" && rule.RepeatSecs > 3600 {
+			t.Errorf("page %s stays quiet for %ds", rule.ID, rule.RepeatSecs)
+		}
+	}
+	if widened > 6 {
+		t.Errorf("%d rules have widened their repeat cadence; that is a policy change, not four exceptions", widened)
+	}
+}
+
+func repeatOrDefault(rule Rule) int {
+	if rule.RepeatSecs > 0 {
+		return rule.RepeatSecs
+	}
+	if rule.Severity == "page" {
+		return 600
+	}
+	return 900
 }

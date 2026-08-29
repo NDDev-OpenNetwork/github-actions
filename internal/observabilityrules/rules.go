@@ -34,13 +34,32 @@ type Rule struct {
 	Threshold      float64 `json:"threshold" yaml:"threshold"`
 	EvaluationSecs int     `json:"evaluation_seconds" yaml:"evaluation_seconds"`
 	HoldSecs       int     `json:"hold_seconds" yaml:"hold_seconds"`
-	DestinationRef string  `json:"destination_ref" yaml:"destination_ref"`
-	Enabled        bool    `json:"enabled" yaml:"enabled"`
-	Owner          string  `json:"owner" yaml:"owner"`
-	Runbook        string  `json:"runbook" yaml:"runbook"`
-	Summary        string  `json:"summary" yaml:"summary"`
-	Action         string  `json:"action" yaml:"action"`
-	Recovery       string  `json:"recovery" yaml:"recovery"`
+	// RepeatSecs is how long a condition that is still true stays quiet before
+	// it is announced again. Zero keeps the previous behaviour: ten minutes for
+	// a page, fifteen for a ticket.
+	//
+	// It exists because those two constants were the whole policy, and they are
+	// wrong for a condition that cannot clear without human maintenance.
+	// kernel_slab_unreclaimable held one alerting episode for 23.6 hours and
+	// sent 95 messages; host_standard_updates_available sent 82. Together they
+	// were half of everything that reached the chat over four days, and neither
+	// was going to stop until someone rebooted a member or patched the hosts.
+	// Announcing that every fifteen minutes does not make it happen sooner; it
+	// teaches the reader to skim past the channel that also carries the pages.
+	//
+	// The cost is stated rather than hidden: OpenObserve pauses outcome
+	// evaluation while silenced, so recovery is observed up to this late. That
+	// is cheap for a condition whose recovery is a deliberate act you already
+	// know you performed, and expensive for one that clears on its own -- which
+	// is why this is per rule and not another constant.
+	RepeatSecs     int    `json:"repeat_seconds,omitempty" yaml:"repeat_seconds,omitempty"`
+	DestinationRef string `json:"destination_ref" yaml:"destination_ref"`
+	Enabled        bool   `json:"enabled" yaml:"enabled"`
+	Owner          string `json:"owner" yaml:"owner"`
+	Runbook        string `json:"runbook" yaml:"runbook"`
+	Summary        string `json:"summary" yaml:"summary"`
+	Action         string `json:"action" yaml:"action"`
+	Recovery       string `json:"recovery" yaml:"recovery"`
 }
 
 func Load(path string) (Bundle, error) {
@@ -108,6 +127,20 @@ func (r Rule) Validate() error {
 	}
 	if r.Severity == "ticket" && r.HoldSecs < 600 {
 		return fmt.Errorf("ticket rule must represent sustained slow burn")
+	}
+	// A page that is not repeated within the hour is not a page, and no rule
+	// may go quiet for more than a day, because a standing condition still has
+	// to be said out loud once per working day.
+	if r.RepeatSecs != 0 {
+		if r.RepeatSecs < 600 || r.RepeatSecs > 86400 {
+			return fmt.Errorf("repeat interval must be between 600 and 86400 seconds")
+		}
+		if r.Severity == "page" && r.RepeatSecs > 3600 {
+			return fmt.Errorf("a page may not stay quiet for more than an hour")
+		}
+		if r.RepeatSecs%60 != 0 {
+			return fmt.Errorf("repeat interval must be a whole number of minutes")
+		}
 	}
 	if !idPattern.MatchString(r.DestinationRef) || r.Owner == "" || r.Summary == "" || r.Action == "" || r.Recovery == "" {
 		return fmt.Errorf("ownership or response contract is incomplete")

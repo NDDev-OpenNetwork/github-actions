@@ -213,6 +213,10 @@ rules:
     threshold: 129600
     evaluation_seconds: 300
     hold_seconds: 3600
+    # Six hours. Staleness only ends when the inventory next runs, and the
+    # threshold is already thirty-six hours, so a quarter-hourly repeat says
+    # nothing new.
+    repeat_seconds: 21600
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations
@@ -229,6 +233,10 @@ rules:
     threshold: 0
     evaluation_seconds: 300
     hold_seconds: 600
+    # Twelve hours, for the same reason as host_standard_updates_available: the
+    # flag is set by the package manager and cleared by a reboot, so repeating
+    # it every fifteen minutes cannot make the reboot happen sooner.
+    repeat_seconds: 43200
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations
@@ -245,6 +253,10 @@ rules:
     threshold: 0
     evaluation_seconds: 300
     hold_seconds: 3600
+    # Twelve hours. Standard updates stay available until someone applies them,
+    # so this sent 82 messages over four days for a fact that changed four
+    # times. Twice a day is the cadence of the work it asks for.
+    repeat_seconds: 43200
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations
@@ -293,6 +305,13 @@ rules:
     threshold: 2147483648
     evaluation_seconds: 300
     hold_seconds: 900
+    # Four hours, not fifteen minutes. This condition clears when a compute
+    # member reboots and at no other time, so it held one alerting episode for
+    # 23.6 hours and sent 95 messages -- more than a quarter of everything that
+    # reached the chat over four days. Six a day says the same thing.
+    # Recovery is observed up to four hours late, which is acceptable for a
+    # state whose recovery is a reboot you performed on purpose.
+    repeat_seconds: 14400
     destination_ref: fleet_oncall
     enabled: false
     owner: fleet-operations
