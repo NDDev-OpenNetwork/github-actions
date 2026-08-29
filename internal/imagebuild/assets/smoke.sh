@@ -10,6 +10,7 @@ set -Eeuo pipefail
 : "${GHA_GO_CACHE_SEED_COMMIT:?}"
 : "${GHA_GO_CACHE_SEED_SHA256:?}"
 : "${GHA_INSTANCE_TYPE:?}"
+: "${GHA_PROVIDES:?}"
 
 for _ in $(seq 1 300); do
   if [[ "$(systemctl is-active gha-incus-cloud-init.service 2>/dev/null || true)" == "active" ]] || [[ "${GHA_INSTANCE_TYPE}" == "virtual-machine" ]]; then
@@ -218,6 +219,25 @@ if timeout 3 bash -c "</dev/tcp/${GHA_PUBLIC_HOST_ADDRESS}/22" 2>/dev/null; then
   exit 1
 fi
 
+# The command surface the manifest promises a job. Nothing stated it before, so
+# consumers guessed: two repositories opened their command with actionlint,
+# which the image does not carry, and their CI did not start for weeks; another
+# apt-installs cmake and ninja-build every job, both of which have been here all
+# along. Checked as a job sees it -- as runner, through a login shell -- because
+# a tool on root's PATH is not a tool the job can call. A promise the image
+# cannot keep fails the build rather than reaching a consumer.
+missing_provided=()
+for provided in ${GHA_PROVIDES}; do
+  if ! sudo -u runner -- bash -lc "command -v -- '${provided}' >/dev/null 2>&1"; then
+    missing_provided+=("${provided}")
+  fi
+done
+if [[ "${#missing_provided[@]}" -gt 0 ]]; then
+  printf 'image promises commands it does not carry: %s\n' "${missing_provided[*]}" >&2
+  exit 1
+fi
+provided_count="$(printf '%s\n' ${GHA_PROVIDES} | wc -l)"
+
 jq -n \
   --arg runner_version "${actual_version}" \
   --arg sccache_version "${GHA_SCCACHE_VERSION}" \
@@ -230,4 +250,5 @@ jq -n \
   --arg nested_cpu_flags "${nested_cpu_flags}" \
   --argjson root_disk_bytes "${root_disk_bytes}" \
   --argjson root_filesystem_bytes "${root_bytes}" \
-  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
+  --argjson provided_commands "${provided_count}" \
+  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,provided_commands:$provided_commands,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'

@@ -102,12 +102,44 @@ guest:
   builder_disk_gib: 24
   variant: integration
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
+  provides:
+    - busybox
+    - cmake
+    - ctest
+    - curl
+    - docker
+    - g++
+    - gcc
+    - git
+    - git-lfs
+    - java
+    - javac
+    - jq
+    - make
+    - mvn
+    - ninja
+    - pigz
+    - pip
+    - pip3
+    - pkg-config
+    - python
+    - python3
+    - rg
+    - rsync
+    - sccache
+    - shellcheck
+    - sudo
+    - tar
+    - unzip
+    - xz
+    - zip
+    - zstd
   packages:
     - build-essential
     - busybox-static
     - ca-certificates
-    - curl
     - cmake
+    - curl
     - docker-buildx
     - docker-compose-v2
     - docker.io
@@ -124,6 +156,7 @@ guest:
     - python3-venv
     - ripgrep
     - rsync
+    - shellcheck
     - sudo
     - tar
     - unzip

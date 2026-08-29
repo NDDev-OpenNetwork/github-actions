@@ -30,6 +30,7 @@ type Plan struct {
 	BrowserSmoke        *imagemanifest.BrowserSmoke `json:"browser_smoke,omitempty"`
 	Packages            []string                    `json:"packages"`
 	PackageInstallSpecs []string                    `json:"package_install_specs"`
+	Provides            []string                    `json:"provides"`
 	Variant             string                      `json:"variant"`
 	DockerActionBaseRef string                      `json:"docker_action_base_ref,omitempty"`
 	Browser             string                      `json:"browser,omitempty"`
@@ -128,6 +129,7 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		BrowserSmoke:        manifest.BrowserSmoke,
 		Packages:            append([]string(nil), manifest.Guest.Packages...),
 		PackageInstallSpecs: installSpecs,
+		Provides:            manifest.Guest.Provides,
 		Variant:             manifest.Guest.EffectiveVariant(),
 		DockerActionBaseRef: manifest.Guest.DockerActionBaseRef,
 		Browser:             manifest.Guest.Browser,

@@ -796,6 +796,7 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
 		"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
 		"GHA_BROWSER":                plan.Browser,
+		"GHA_PROVIDES":               strings.Join(plan.Provides, " "),
 	}
 	if plan.Browser != "" {
 		smokeEnvironment["GHA_BROWSER_SMOKE_VERSION"] = plan.BrowserSmoke.Version

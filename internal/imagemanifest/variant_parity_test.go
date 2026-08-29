@@ -107,9 +107,13 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 	// the builder needs -- and in nothing else.
 	guest := reflect.TypeOf(Guest{})
 	allowed := map[string]bool{
-		"BuilderDiskGiB":      true,
-		"Packages":            true,
-		"PackageVersions":     true,
+		"BuilderDiskGiB":  true,
+		"Packages":        true,
+		"PackageVersions": true,
+		// The promised command surface follows the packages, and the packages
+		// differ: integration adds docker and busybox, and its container form
+		// adds Xvfb for browser work.
+		"Provides":            true,
 		"Variant":             true,
 		"DockerActionBaseRef": true,
 		"Browser":             true,
