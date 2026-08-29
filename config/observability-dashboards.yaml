@@ -235,7 +235,7 @@ dashboards:
       - id: inventory_gaps
         title: Provider and Incus inventory gaps
         kind: timeseries
-        query: max(gha_fleet_incus_orphan_instances) or max(gha_fleet_journal_missing_instances)
+        query: max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances)
         unit: count
         description: Authoritative disagreements that require identity-first recovery.
       - id: retry_records
