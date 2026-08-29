@@ -108,6 +108,7 @@ func newNDDevAdmission(cfg *providerconfig.Incus, controllerID string) (*nddevAd
 			Policy: admission.ReservePolicy{
 				MinimumCPUUnits:        platform.HostReserve.MinimumCPUUnits,
 				MaximumFleetCPUPercent: platform.HostReserve.MaximumFleetCPUPercent,
+				CPUAllowanceOvercommit: platform.HostReserve.CPUAllowanceOvercommit,
 				MinimumMemoryMiB:       platform.HostReserve.MinimumMemoryMiB,
 				MinimumPercent:         platform.HostReserve.MinimumPercent,
 				MinimumFreeDiskPercent: platform.HostReserve.MinimumFreeDiskPercent,

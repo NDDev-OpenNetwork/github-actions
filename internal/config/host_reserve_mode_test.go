@@ -66,6 +66,9 @@ func TestHostReserveFloorFollowsDeclaredMode(t *testing.T) {
 		{"fleet cpu ceiling wastes capacity", func(c *Config) {
 			c.HostReserve.MaximumFleetCPUPercent = 79
 		}, "maximum_fleet_cpu_percent"},
+		{"share overcommit past the measured p99", func(c *Config) {
+			c.HostReserve.CPUAllowanceOvercommit = 5
+		}, "cpu_allowance_overcommit"},
 	} {
 		mutated := base
 		testCase.mutate(&mutated)

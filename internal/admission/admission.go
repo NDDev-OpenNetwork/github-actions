@@ -42,6 +42,11 @@ type ReservePolicy struct {
 	// MaximumFleetCPUPercent bounds the sum of declared worker CPU allowances
 	// before delayed PSI feedback becomes the only admission guard.
 	MaximumFleetCPUPercent int
+	// CPUAllowanceOvercommit multiplies that bound. The quantity being summed
+	// is a work-conserving share, so bounding it at the physical unit count
+	// forbids the overcommit the scheduling mode is named after. Zero means
+	// one, which is the previous behaviour.
+	CPUAllowanceOvercommit int
 	MinimumMemoryMiB       int
 	MinimumPercent         int
 	MinimumFreeDiskPercent int
@@ -87,7 +92,7 @@ func Evaluate(snapshot HostSnapshot, policy ReservePolicy, request Request) (Dec
 	remainingCPU := snapshot.TotalCPUUnits - snapshot.AllocatedCPUUnits - request.VCPU
 	allowanceLimit := snapshot.TotalCPUUnits
 	if policy.MaximumFleetCPUPercent > 0 {
-		allowanceLimit = snapshot.TotalCPUUnits * policy.MaximumFleetCPUPercent / 100
+		allowanceLimit = snapshot.TotalCPUUnits * policy.MaximumFleetCPUPercent / 100 * effectiveOvercommit(policy.CPUAllowanceOvercommit)
 	}
 	allocatedAllowance := snapshot.AllocatedCPUAllowanceUnits
 	if allocatedAllowance == 0 {
@@ -164,6 +169,9 @@ func validate(snapshot HostSnapshot, policy ReservePolicy, request Request) erro
 	if policy.MaximumFleetCPUPercent < 0 || policy.MaximumFleetCPUPercent > 98 {
 		return fmt.Errorf("aggregate CPU policy is invalid")
 	}
+	if policy.CPUAllowanceOvercommit < 0 || policy.CPUAllowanceOvercommit > 4 {
+		return fmt.Errorf("CPU allowance overcommit is invalid")
+	}
 	if policy.MinimumFreeDiskPercent < 0 || policy.MinimumFreeDiskPercent > 100 {
 		return fmt.Errorf("disk reserve policy is invalid")
 	}
@@ -178,6 +186,15 @@ func validate(snapshot HostSnapshot, policy ReservePolicy, request Request) erro
 
 func percentCeiling(total, percent int) int {
 	return (total*percent + 99) / 100
+}
+
+// effectiveOvercommit reads an unset multiplier as one, so a policy written
+// before the field existed keeps bounding the share at the physical unit count.
+func effectiveOvercommit(declared int) int {
+	if declared <= 0 {
+		return 1
+	}
+	return declared
 }
 
 func max(left, right int) int {
