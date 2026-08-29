@@ -27,7 +27,7 @@ control_plane:
   manager_version: v0.2.1-nddev.85
   scheduling_mode: scale-set
   provider: incus
-  provider_version: v0.1.5-nddev.85
+  provider_version: v0.1.5-nddev.86
   provider_interface: v0.1.0
   worker_kind: incus-container
   runner: actions/runner
@@ -90,6 +90,20 @@ host_reserve:
   minimum_memory_mib: 1024
   minimum_percent: 10
   maximum_fleet_cpu_percent: 98
+  # The quantity that ceiling bounds is limits.cpu.allowance, which is written
+  # as a percentage and is therefore a work-conserving share, not a reservation:
+  # a worker declaring 400% takes four cores only while four are idle. Bounding
+  # the sum of shares at the physical unit count forbids exactly the overcommit
+  # guardrails.cpu_scheduling_mode is named after, and it was the tightest bound
+  # on the fleet -- refusing the four-unit integration class at nine workers
+  # while members carried load averages near one against eight cores.
+  #
+  # Three is measured, not chosen: per-instance CPU peak over 24 hours and 3036
+  # instances was p50 0.12, p90 0.72 and p99 1.30 cores against a declared 2 or
+  # 4, so the share overstates demand by three to five times. The reservation
+  # ledger, the memory ledger, the instance cap and PSI are unchanged and one of
+  # them binds instead.
+  cpu_allowance_overcommit: 3
   minimum_free_disk_percent: 20
 
 pressure_admission:
