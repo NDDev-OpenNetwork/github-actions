@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Report `shared_capacity_saturated` as the present-tense fact its help text
+  claims. It was set by the mere existence of the `capacity-domain:measured-fleet`
+  record, which outlives the refusal that wrote it, so it read 1 in 80.3% of
+  samples over seven days -- and on 2026-08-29 at 12:47 it read 1 with zero
+  queue intents, zero visible instances, zero waiters, no probe and a state
+  record already 900 seconds old. It now applies the same window test the
+  deferred count in the same function already used; every neighbouring field
+  was computed against `now` and this one alone ignored it. A terminal domain
+  stays saturated while it still blocks creates.
+
 - Let a rule state how often its own standing fact is repeated, instead of two
   constants for every alert. Measured over 103 hours of recorded transitions,
   the fleet sent 352 notifications from 116 episodes -- 82 a day -- and half of

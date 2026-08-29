@@ -102,7 +102,21 @@ func Inspect(path string, now time.Time) (Snapshot, error) {
 	}
 	for key, retry := range state.Records {
 		if key == "capacity-domain:measured-fleet" {
-			result.SharedCapacitySaturated = true
+			// Presence is not saturation. The record outlives the refusal that
+			// wrote it, so reporting its existence as a live fact made this
+			// read 1 in 80.3% of samples over seven days -- including, measured
+			// on 2026-08-29 at 12:47, with zero queue intents, zero visible
+			// instances, zero waiters, no probe, and a state record already 900
+			// seconds old. The metric's own help text claims the present tense:
+			// "whether a provider refusal has proven the shared
+			// measured-capacity domain saturated".
+			//
+			// The same window test the deferred count below already applies is
+			// what makes it present tense: the domain is saturated while it is
+			// still holding creates back, and not afterwards. Every neighbouring
+			// field in this block was already computed against now; this one
+			// alone ignored it.
+			result.SharedCapacitySaturated = retry.NextAllowedAt.After(now) || retry.TerminalUntil.After(now)
 			result.SharedCapacityProbeOwned = retry.ProbeOwner != ""
 			result.SharedCapacityProbeActive = retry.WakeReason == "probe-leased" && retry.NextAllowedAt.After(now)
 			result.SharedCapacityAgeSeconds = max(int64(0), int64(now.Sub(retry.UpdatedAt)/time.Second))
