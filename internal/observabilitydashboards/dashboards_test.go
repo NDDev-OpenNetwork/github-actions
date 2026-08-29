@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,30 @@ func TestDashboardValidationRejectsOrderingDrift(t *testing.T) {
 	bundle.Dashboards[0], bundle.Dashboards[1] = bundle.Dashboards[1], bundle.Dashboards[0]
 	if err := bundle.Validate(); err == nil {
 		t.Fatal("unsorted dashboards were accepted")
+	}
+}
+
+// A panel query carrying a set operator renders an empty series on this
+// backend, whatever its operands hold -- the same defect that left four alerts
+// unable to fire. A blank panel is quieter than a blind alert but reads the
+// same way: nothing wrong here.
+//
+// Measured live: max(A) -> 1, max(B) -> 0, and max(A) or max(B) -> empty.
+// Arithmetic works, so non-negative counters compared against zero say the
+// same thing with `+`.
+func TestNoPanelDependsOnASetOperatorTheBackendDiscards(t *testing.T) {
+	bundle, err := Load(configPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dashboard := range bundle.Dashboards {
+		for _, panel := range dashboard.Panels {
+			for _, operator := range []string{" or ", " and ", " unless "} {
+				if strings.Contains(panel.Query, operator) {
+					t.Errorf("panel %s/%s renders empty: its query uses%qwhich this backend evaluates to an empty result: %q",
+						dashboard.ID, panel.ID, operator, panel.Query)
+				}
+			}
+		}
 	}
 }

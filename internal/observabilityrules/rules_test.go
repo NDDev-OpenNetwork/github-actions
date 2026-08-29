@@ -279,15 +279,26 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 	}
 }
 
-// `or` returns an empty result on the backend these rules run against, whether
-// or not its left side has data. Measured against the live engine:
+// Every PromQL set operator returns an empty result on the backend these rules
+// run against, whether or not its operands have data. Measured against the
+// live engine with two series that plainly read 1 and 0:
 //
-//	max(gha_fleet_platform_healthy)                 -> 1
-//	max(gha_fleet_platform_healthy) or vector(0)    -> empty
-//	max(A) -> 0, max(B) -> 0, max(A) or max(B)      -> empty
+//	max(gha_fleet_platform_healthy)                     -> 1
+//	max(gha_fleet_incus_orphan_instances)               -> 0
+//	max(A) or  max(B)                                   -> empty
+//	max(A) and max(B)                                   -> empty
+//	max(A) unless max(B)                                -> empty
+//	max(A) and on() max(B)                              -> empty
+//	max(gha_fleet_platform_healthy) or vector(0)        -> empty
 //
-// An empty result satisfies no threshold, so an expression containing `or`
-// cannot fire. Four rules carried one -- audit_suppression_burst,
+// They do not fail to default an absence; they annihilate the expression. An
+// empty result satisfies no threshold, so an expression containing any of them
+// cannot fire -- and it looks exactly like an alert that is simply not
+// breaching, which is why this went unnoticed for two days.
+//
+// Arithmetic does work, including the bool modifier, so a conjunction is
+// expressible without a set operator: `(a > bool 300) + (b < bool 1)` returns
+// a correct vector on the same build. Four rules carried one -- audit_suppression_burst,
 // kernel_workqueue_hog, github_correlation_persistent and the
 // lifecycle_inventory_gap page -- and none of them had fired since the
 // 2026-08-27 22:09 rewrite that introduced the last two of them, while the
@@ -298,14 +309,16 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 // Non-negative counters compared against zero say the same thing with `+`, and
 // a window with no events says it with an empty result, which is honest and
 // does not fire.
-func TestNoRuleDependsOnAnOperatorTheBackendDiscards(t *testing.T) {
+func TestNoRuleDependsOnASetOperatorTheBackendDiscards(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, rule := range bundle.Rules {
-		if strings.Contains(rule.Expression, " or ") {
-			t.Errorf("rule %s cannot fire: its expression uses `or`, which this backend evaluates to an empty result: %q", rule.ID, rule.Expression)
+		for _, operator := range []string{" or ", " and ", " unless "} {
+			if strings.Contains(rule.Expression, operator) {
+				t.Errorf("rule %s cannot fire: its expression uses%qwhich this backend evaluates to an empty result: %q", rule.ID, operator, rule.Expression)
+			}
 		}
 	}
 }

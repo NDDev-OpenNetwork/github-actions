@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Forbid every PromQL set operator, not just `or`. Measured against the live
+  backend with two series that plainly read 1 and 0, `or`, `and`, `unless` and
+  `and on()` all return an empty result -- they do not fail to default an
+  absence, they annihilate the expression whatever the operands hold. An empty
+  result looks exactly like an alert that is not breaching, which is why four
+  blind alerts went unnoticed for two days. One dashboard panel carried the
+  same defect and rendered an empty series; non-negative counters compared
+  against zero say the same thing with `+`. Arithmetic and the bool modifier
+  work, so a conjunction is expressible without a set operator.
+
 - Let the CPU allowance envelope overcommit, because the quantity it bounds is
   a work-conserving share and not a reservation. `limits.cpu.allowance` is
   written as a percentage, so a worker declaring 400% takes four cores only
