@@ -164,6 +164,14 @@ func parseOOMKills(path string) (uint64, error) {
 	return 0, nil
 }
 
+// ReadPressure observes Linux pressure-stall information under root without
+// running the rest of the host preflight. The compute-member observer needs
+// exactly this and nothing else: it must not shell out, inspect services or
+// read anything that could carry a secret.
+func ReadPressure(root string) (Pressure, error) {
+	return parsePressure(filepath.Join(root, "proc", "pressure"))
+}
+
 func parsePressure(directory string) (Pressure, error) {
 	result := Pressure{}
 	for _, resource := range []struct {
