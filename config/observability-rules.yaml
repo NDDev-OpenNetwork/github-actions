@@ -2,6 +2,37 @@ schema_version: 2
 backend: openobserve
 organization: default
 rules:
+  - id: alert_evaluation_failed
+    severity: page
+    query_language: promql
+    stream_name: gha_fleet_observability_signal_events
+    # The one failure the alerting system cannot report about itself. A failed
+    # evaluation writes outcome 3 into alert_states and sends nothing, so the
+    # alert goes blind and the silence is indistinguishable from health. Ten
+    # such transitions are on record, eight of them in one two-hour stretch
+    # during which compute_pressure_observer_missing -- the alert that watches
+    # for missing pressure observers -- could not evaluate itself.
+    #
+    # The journal line is classified into a signal on the services host and
+    # counted, which is the same shape the host signals already use. Threshold
+    # two rather than zero because a single PromQL timeout under contention is
+    # not blindness; three in an hour is.
+    #
+    # No outer subquery: evaluation and hold are equal, so the renderer emits
+    # the windowed delta as written and an hour with no failures returns an
+    # empty result rather than error 20008.
+    expression: max_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h])
+    operator: ">"
+    threshold: 2
+    evaluation_seconds: 60
+    hold_seconds: 60
+    destination_ref: fleet_oncall
+    enabled: false
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Alert evaluations are failing, so some alert is blind and saying nothing.
+    action: Read the OpenObserve scheduler journal for the failing alert ids, and treat every alert as unproven until evaluation recovers.
+    recovery: No alert evaluation has failed for an hour.
   - id: audit_suppression_burst
     severity: ticket
     query_language: promql
