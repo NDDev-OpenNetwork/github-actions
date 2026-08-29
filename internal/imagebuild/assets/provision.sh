@@ -24,6 +24,7 @@ fi
 : "${GHA_GO_CACHE_SEED_SHA256:?}"
 : "${GHA_GO_CACHE_SEED_COMMIT:?}"
 : "${GHA_GO_CACHE_SEED_PACKAGES:?}"
+: "${GHA_PATH_BINARIES_B64:?}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -103,6 +104,31 @@ install -o root -g root -m 0755 "${sccache_scratch}/${GHA_SCCACHE_BINARY_PATH}" 
 find "${sccache_scratch}" -mindepth 1 -delete
 rmdir "${sccache_scratch}"
 [[ "$(sccache --version)" == "sccache ${GHA_SCCACHE_VERSION#v}" ]]
+
+# Single-binary tools the image puts on PATH, pinned and checked exactly as
+# sccache is above. The baked toolchains cannot serve this purpose: they land
+# in the runner tool cache, which only the setup-* actions add to PATH, so a
+# plain `run:` step cannot call them. Two repositories opened their command
+# with actionlint and their CI did not start for weeks.
+while IFS=$'\t' read -r pb_name pb_archive pb_archive_sha pb_binary_path pb_binary_sha; do
+  [[ -n "${pb_name}" ]] || continue
+  pb_archive_path="/var/tmp/${pb_archive}"
+  echo "${pb_archive_sha}  ${pb_archive_path}" | sha256sum --check --strict
+  if ! tar --list --gzip --file "${pb_archive_path}" | grep -Fxq -- "${pb_binary_path}"; then
+    printf '%s archive is missing entry %s\n' "${pb_name}" "${pb_binary_path}" >&2
+    exit 1
+  fi
+  pb_scratch="$(mktemp -d "/var/tmp/gha-${pb_name}.XXXXXXXXXX")"
+  tar --extract --gzip --file "${pb_archive_path}" \
+    --directory "${pb_scratch}" --no-same-owner --no-same-permissions -- "${pb_binary_path}"
+  test ! -L "${pb_scratch}/${pb_binary_path}"
+  test -f "${pb_scratch}/${pb_binary_path}"
+  echo "${pb_binary_sha}  ${pb_scratch}/${pb_binary_path}" | sha256sum --check --strict
+  install -o root -g root -m 0755 "${pb_scratch}/${pb_binary_path}" "/usr/local/bin/${pb_name}"
+  find "${pb_scratch}" -mindepth 1 -delete
+  rmdir "${pb_scratch}"
+  command -v -- "${pb_name}" >/dev/null
+done < <(printf '%s' "${GHA_PATH_BINARIES_B64}" | base64 -d)
 
 # Remove the server after every package/dependency installer has completed.
 # Purging removes the unit files while a loaded socket can remain active, and

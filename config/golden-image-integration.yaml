@@ -102,7 +102,17 @@ guest:
   builder_disk_gib: 24
   variant: integration
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
+  path_binaries:
+    - name: actionlint
+      version: v1.7.12
+      source_commit: 914e7df21a07ef503a81201c76d2b11c789d3fca
+      archive: actionlint_1.7.12_linux_amd64.tar.gz
+      download_url: https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+      archive_sha256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      binary_path: actionlint
+      binary_sha256: c872d6db8c6bf83a8eaa704fc93999f027d55dffbc63b8a6abdccb47df5f4cd4
   provides:
+    - actionlint
     - busybox
     - cmake
     - ctest

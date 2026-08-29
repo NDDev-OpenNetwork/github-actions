@@ -31,6 +31,7 @@ type Plan struct {
 	Packages            []string                    `json:"packages"`
 	PackageInstallSpecs []string                    `json:"package_install_specs"`
 	Provides            []string                    `json:"provides"`
+	PathBinaries        []imagemanifest.Tool        `json:"path_binaries,omitempty"`
 	Variant             string                      `json:"variant"`
 	DockerActionBaseRef string                      `json:"docker_action_base_ref,omitempty"`
 	Browser             string                      `json:"browser,omitempty"`
@@ -130,6 +131,7 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		Packages:            append([]string(nil), manifest.Guest.Packages...),
 		PackageInstallSpecs: installSpecs,
 		Provides:            manifest.Guest.Provides,
+		PathBinaries:        manifest.Guest.PathBinaries,
 		Variant:             manifest.Guest.EffectiveVariant(),
 		DockerActionBaseRef: manifest.Guest.DockerActionBaseRef,
 		Browser:             manifest.Guest.Browser,

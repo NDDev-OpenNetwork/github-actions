@@ -113,7 +113,12 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 		// The promised command surface follows the packages, and the packages
 		// differ: integration adds docker and busybox, and its container form
 		// adds Xvfb for browser work.
-		"Provides":            true,
+		"Provides": true,
+		// Listed only so a new field cannot slip past this enumeration. The
+		// variants must pin the SAME path binaries, which is a stronger claim
+		// than "may differ" and is asserted by
+		// TestVariantsPinTheSamePathBinaries.
+		"PathBinaries":        true,
 		"Variant":             true,
 		"DockerActionBaseRef": true,
 		"Browser":             true,

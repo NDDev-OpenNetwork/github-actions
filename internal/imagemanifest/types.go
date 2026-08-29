@@ -124,6 +124,13 @@ func OptionalToolchains() []string {
 type Guest struct {
 	BuilderDiskGiB int      `json:"builder_disk_gib" yaml:"builder_disk_gib"`
 	Packages       []string `json:"packages" yaml:"packages"`
+	// PathBinaries are single-binary tools the image puts on PATH, pinned by
+	// archive and binary digest exactly as the compiler cache is. The
+	// toolchains cannot serve this: they land in the runner tool cache, which
+	// only the setup-* actions add to PATH, so a plain run: step cannot call
+	// them. actionlint is the reason this exists -- two repositories opened
+	// their command with it and their CI did not start for weeks.
+	PathBinaries []Tool `json:"path_binaries,omitempty" yaml:"path_binaries,omitempty"`
 	// Provides is the command surface the image guarantees a job can invoke
 	// without installing anything. Nothing stated it before, so consumers
 	// guessed: two repositories opened their command with actionlint, which the
