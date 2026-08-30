@@ -2,7 +2,7 @@ schema_version: 1
 
 image:
   type: container
-  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b15
+  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b16
   current_alias: nddev-ubuntu-24.04-amd64-container-current
   previous_alias: nddev-ubuntu-24.04-amd64-container-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801

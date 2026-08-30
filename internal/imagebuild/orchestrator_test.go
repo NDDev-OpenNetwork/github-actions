@@ -120,11 +120,14 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
 	// Pinned so a recipe change has to be stated rather than noticed. It moved
-	// here because the immutable alias moved, which is the intended coupling:
+	// twice: once when the alias advanced to b15, and again here because
+	// restoring the warm agent changes what provision.sh writes. b15 is built
+	// and promoted, so the contents cannot change under it -- the alias goes to
+	// b16. That coupling is the point:
 	// the alias is part of the recipe, so a manifest whose contents changed
 	// under an unchanged alias would otherwise ask the builder to produce
 	// different bytes for a name that is already promoted.
-	if first != "sha256:6c03140af0788c71a5cb896907a6e1b6f88c36e49fb963ce24128c1862941774" {
+	if first != "sha256:29ed9e3830cbb664c2501ad2e2449ffaff8725c636d88b57bc93a5240b7abe63" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -265,13 +268,20 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 		}
 	}
 	provisionText := string(provision)
-	for _, retiredWarmBehavior := range []string{
-		"systemctl enable gha-warm", "ready-unregistered-v1",
-		"Runner.Listener warmup", "PathExistsGlob=/run/gha-warm",
+	for _, warmupInvariant := range []string{
+		"/home/runner/actions-runner/bin/Runner.Listener warmup",
+		"runuser --user runner",
+		"registration state appeared while preparing the warm filesystem",
+		"ready-unregistered-v1",
 	} {
-		if strings.Contains(provisionText, retiredWarmBehavior) {
-			t.Fatalf("cold-only provision script retained warm startup behavior %s", retiredWarmBehavior)
+		if !strings.Contains(provisionText, warmupInvariant) {
+			t.Fatalf("provision script misses official-runner warmup invariant %s", warmupInvariant)
 		}
+	}
+	warmupIndex := strings.Index(provisionText, "/home/runner/actions-runner/bin/Runner.Listener warmup")
+	readyIndex := strings.Index(provisionText, `printf "ready-unregistered-v1\n"`)
+	if warmupIndex < 0 || readyIndex <= warmupIndex || strings.Count(provisionText[warmupIndex:readyIndex], ".credentials_rsaparams") != 1 {
+		t.Fatal("warm readiness must be published only after official warmup and a second registration-state check")
 	}
 	installerIndex := strings.Index(provisionText, `"${version_root}/bin/installdependencies.sh"`)
 	finalStopIndex := strings.Index(provisionText, `systemctl stop "${unit}"`)

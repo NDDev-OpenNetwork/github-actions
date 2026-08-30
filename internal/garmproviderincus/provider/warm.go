@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incuspolicy"
 	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
@@ -94,9 +95,19 @@ func (l *Incus) DrainWarm(ctx context.Context, flavor, instanceName string, appl
 		{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 		{osTypeKeyName, string(commonParams.Linux)},
 		{osArchKeyNAme, string(commonParams.Amd64)},
-		{"security.secureboot", "true"},
-		{"security.nesting", "false"},
-		{"raw.qemu", incuspolicy.DisableNestedVirtualizationRawQEMU},
+	}
+	// Same reason as validateWarmReadyMetadata: the isolation contract belongs
+	// to the pool's image, not to a virtual-machine assumption this function
+	// used to hard-code. A container pool could not be drained at all.
+	wantedType, securityChecks := managedSecurityContract(imagePolicy)
+	for _, check := range securityChecks {
+		if check.key == imageAliasKey {
+			continue
+		}
+		checks = append(checks, struct {
+			key      string
+			expected string
+		}{check.key, check.expected})
 	}
 	for _, check := range checks {
 		if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
@@ -106,9 +117,9 @@ func (l *Incus) DrainWarm(ctx context.Context, flavor, instanceName string, appl
 	if lifecycle := instance.ExpandedConfig[lifecycleKey]; lifecycle != lifecycleWarmPreparing && lifecycle != lifecycleWarmUnregistered {
 		return result, fmt.Errorf("warm drain instance %q has lifecycle %q", instanceName, lifecycle)
 	}
-	if instance.Type != string(api.InstanceTypeVM) || instance.Architecture != "x86_64" ||
+	if instance.Type != wantedType || instance.Architecture != "x86_64" ||
 		len(instance.Profiles) != 1 || instance.Profiles[0] != flavor {
-		return result, fmt.Errorf("warm drain instance %q is not an exact-profile amd64 VM", instanceName)
+		return result, fmt.Errorf("warm drain instance %q is not an exact-profile amd64 %s", instanceName, wantedType)
 	}
 	if !apply {
 		return result, nil
@@ -336,40 +347,56 @@ func (l *Incus) getWarmCreateArgs(ctx context.Context, flavor, name string) (api
 		return api.InstancesPost{}, err
 	}
 	configMap := map[string]string{
-		"user.user-data":      "#cloud-config\npackage_update: false\npackage_upgrade: false\n",
-		osTypeKeyName:         string(commonParams.Linux),
-		osArchKeyNAme:         string(commonParams.Amd64),
-		controllerIDKeyName:   l.controllerID,
-		poolIDKey:             warmPoolIDPrefix + flavor,
-		imageAliasKey:         imagePolicy.Alias,
-		imageFingerprintKey:   imagePolicy.Fingerprint,
-		providerVersionKey:    Version,
-		providerCommitKey:     Commit,
-		flavorKey:             flavor,
-		lifecycleKey:          lifecycleWarmPreparing,
-		warmReadyKey:          "false",
-		trustKey:              pool.Trust,
-		scaleSetKey:           pool.ScaleSetName,
-		repositoryKey:         "",
-		garmJobNameKey:        "",
-		networkPolicyKey:      pool.Capabilities.NetworkPolicy,
-		cacheWriteScopeKey:    pool.Capabilities.CacheWriteScope,
-		"security.secureboot": l.secureBootEnabled(),
-		"boot.autostart":      "true",
+		"user.user-data":    "#cloud-config\npackage_update: false\npackage_upgrade: false\n",
+		osTypeKeyName:       string(commonParams.Linux),
+		osArchKeyNAme:       string(commonParams.Amd64),
+		controllerIDKeyName: l.controllerID,
+		poolIDKey:           warmPoolIDPrefix + flavor,
+		imageAliasKey:       imagePolicy.Alias,
+		imageFingerprintKey: imagePolicy.Fingerprint,
+		providerVersionKey:  Version,
+		providerCommitKey:   Commit,
+		flavorKey:           flavor,
+		lifecycleKey:        lifecycleWarmPreparing,
+		warmReadyKey:        "false",
+		trustKey:            pool.Trust,
+		scaleSetKey:         pool.ScaleSetName,
+		repositoryKey:       "",
+		garmJobNameKey:      "",
+		networkPolicyKey:    pool.Capabilities.NetworkPolicy,
+		cacheWriteScopeKey:  pool.Capabilities.CacheWriteScope,
+		"boot.autostart":    "true",
 	}
-	for key, value := range incuspolicy.VMInstanceConfig() {
-		configMap[key] = value
+	// The same split the one-job path makes in getCreateInstanceArgs. Warm was
+	// written when every pool was a virtual machine; every pool is a container
+	// now, and a VM-shaped create is refused by the backend before it reaches
+	// any of the checks below.
+	instanceType := imagePolicy.InstanceType
+	if instanceType == config.IncusImageVirtualMachine {
+		configMap["security.secureboot"] = l.secureBootEnabled()
+		for key, value := range incuspolicy.VMInstanceConfig() {
+			configMap[key] = value
+		}
+	} else {
+		configMap["security.privileged"] = "false"
+		configMap["security.nesting"] = "false"
+		if pool.Capabilities.Docker {
+			configMap["security.nesting"] = "true"
+		}
+		configMap["security.syscalls.intercept.mknod"] = "false"
+		configMap["security.syscalls.intercept.setxattr"] = "false"
 	}
+	description := "Unregistered warm GitHub runner"
 	return api.InstancesPost{
 		InstancePut: api.InstancePut{
 			Architecture: "x86_64",
 			Profiles:     profiles,
-			Description:  "Unregistered warm GitHub runner VM",
+			Description:  description,
 			Config:       configMap,
 		},
 		Source: api.InstanceSource{Type: "image", Fingerprint: image.Fingerprint},
 		Name:   name,
-		Type:   api.InstanceTypeVM,
+		Type:   api.InstanceType(instanceType),
 	}, nil
 }
 
@@ -420,8 +447,8 @@ func (l *Incus) promoteWarmReady(ctx context.Context, name, flavor string) (bool
 }
 
 func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor string) error {
-	if instance == nil || instance.Type != string(api.InstanceTypeVM) {
-		return fmt.Errorf("warm instance must be a virtual machine")
+	if instance == nil {
+		return fmt.Errorf("warm instance is not present")
 	}
 	pool, exists := l.platform.Pool(flavor)
 	if !exists {
@@ -452,19 +479,32 @@ func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor str
 		{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 		{osTypeKeyName, string(commonParams.Linux)},
 		{osArchKeyNAme, string(commonParams.Amd64)},
-		{"security.secureboot", "true"},
-		{"security.nesting", "false"},
-		{"raw.qemu", incuspolicy.DisableNestedVirtualizationRawQEMU},
 		{"boot.autostart", "true"},
+	}
+	// The isolation contract is whatever the pool's own image declares, read
+	// through the same helper the one-job path uses, rather than the
+	// virtual-machine set this function asserted unconditionally.
+	wantedType, securityChecks := managedSecurityContract(imagePolicy)
+	for _, check := range securityChecks {
+		if check.key == imageAliasKey {
+			continue
+		}
+		checks = append(checks, struct {
+			key      string
+			expected string
+		}{check.key, check.expected})
 	}
 	for _, check := range checks {
 		if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
 			return fmt.Errorf("warm instance %q has %s=%q, expected %q", instance.Name, check.key, actual, check.expected)
 		}
 	}
+	if instance.Type != wantedType {
+		return fmt.Errorf("warm instance %q is a %s, expected %s", instance.Name, instance.Type, wantedType)
+	}
 	if instance.Architecture != "x86_64" || len(instance.Profiles) != 1 || instance.Profiles[0] != flavor ||
 		instance.State == nil || instance.State.Status != "Running" {
-		return fmt.Errorf("warm instance %q is not a running exact-profile amd64 VM", instance.Name)
+		return fmt.Errorf("warm instance %q is not a running exact-profile amd64 worker", instance.Name)
 	}
 	return nil
 }
