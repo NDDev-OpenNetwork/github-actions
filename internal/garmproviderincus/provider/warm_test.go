@@ -18,18 +18,12 @@ import (
 
 type denyWarmAdmission struct {
 	allowAllAdmission
-	decision     admission.Decision
-	err          error
-	queueBlocked bool
-	queueErr     error
+	decision admission.Decision
+	err      error
 }
 
 func (d denyWarmAdmission) AdmitWarm(context.Context, InstanceServerInterface, string, string) (admission.Decision, error) {
 	return d.decision, d.err
-}
-
-func (d denyWarmAdmission) WarmBlockedByQueue(context.Context) (bool, error) {
-	return d.queueBlocked, d.queueErr
 }
 
 func setWarmTarget(provider *Incus, flavor string, target int) {
@@ -127,36 +121,38 @@ func TestReconcileWarmReportsAdmissionBackpressureAsStructuredNoOp(t *testing.T)
 	}
 }
 
-func TestReconcileWarmDefersBeforePromotingPreparingCapacityWhenQueueIntentExists(t *testing.T) {
+// A pending job must not stop the fleet from building the warm capacity that
+// would serve the next one. The gate this replaces refused warm creation while
+// any intent existed in any scale set, and the fleet is rarely idle: over six
+// hours it deferred 510 of 634 reconciles and warm depth was zero in 631 of
+// them, so every job cold-started, which lengthened the queue, which kept the
+// gate shut. Capacity is still protected -- AdmitWarm runs the pool, CPU,
+// memory and pressure checks, warm creation is bounded by max_ready, and a real
+// job claims a warm instance rather than waiting behind it.
+func TestReconcileWarmBuildsCapacityWhileJobsAreQueued(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
 	setWarmTarget(provider, "nddev-linux-standard", 1)
-	provider.admission = denyWarmAdmission{queueBlocked: true}
-	preparing := preparingWarmInstance("warm-standard-preparing")
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*preparing}, nil).Once()
+	provider.admission = &warmAdmission{}
+	instance := preparingWarmInstance("warm-standard-preparing")
+	op := new(MockOperation)
+	op.On("WaitContext", mock.Anything).Return(nil).Once()
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	cli.On("GetInstanceFull", instance.Name).Return(instance, "etag-warm", nil).Once()
+	cli.On("GetInstanceFile", instance.Name, warmReadyGuestPath).Return(
+		io.NopCloser(strings.NewReader(warmReadyEvidence)),
+		&incus.InstanceFileResponse{UID: 0, GID: 0, Mode: 0o644, Type: "file"},
+		nil,
+	).Once()
+	cli.On("UpdateInstance", instance.Name, mock.Anything, "etag-warm").Return(op, nil).Once()
 
 	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", true)
 	require.NoError(t, err)
-	require.True(t, result.Deferred)
-	require.Equal(t, admission.ReasonQueueIntent, result.DeferralReason)
-	require.Equal(t, 1, result.Preparing)
-	require.Zero(t, result.Promoted)
-	require.Zero(t, result.Created)
-	cli.AssertNotCalled(t, "GetInstanceFile", mock.Anything, mock.Anything)
-	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
-}
-
-func TestReconcileWarmFailsClosedWhenQueueIntentStateCannotBeRead(t *testing.T) {
-	cli := new(MockIncusServer)
-	provider := newTestProvider(cli)
-	setWarmTarget(provider, "nddev-linux-standard", 1)
-	provider.admission = denyWarmAdmission{queueErr: errors.New("journal unavailable")}
-	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil).Once()
-
-	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", true)
-	require.ErrorContains(t, err, "checking central queue intent")
 	require.False(t, result.Deferred)
-	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	require.Empty(t, result.DeferralReason)
+	require.Equal(t, []string{instance.Name}, result.Promoted)
+	require.Equal(t, 1, result.ReadyAfter)
+	cli.AssertExpectations(t)
 }
 
 func TestReconcileWarmStillFailsOnAdmissionEvaluationError(t *testing.T) {

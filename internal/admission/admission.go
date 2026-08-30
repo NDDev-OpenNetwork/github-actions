@@ -9,7 +9,6 @@ const (
 	ReasonHostUnhealthy       Reason = "host-unhealthy"
 	ReasonDiskPressure        Reason = "disk-pressure"
 	ReasonPoolSaturated       Reason = "pool-saturated"
-	ReasonQueueIntent         Reason = "queue-intent"
 	ReasonInsufficientCPU     Reason = "insufficient-cpu"
 	ReasonCPUAllowance        Reason = "insufficient-cpu: cpu-allowance-envelope"
 	ReasonInsufficientMemory  Reason = "insufficient-memory"
