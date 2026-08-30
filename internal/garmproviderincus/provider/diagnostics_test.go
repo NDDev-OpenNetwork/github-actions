@@ -35,6 +35,10 @@ func TestDiagnosticRepositoryUsesAuthenticatedBoundClaim(t *testing.T) {
 	if err != nil || repository != "example-org/example-repo" {
 		t.Fatalf("repository = %q, %v", repository, err)
 	}
+	repository, err = provider.repository(context.Background(), "runner-exact-repo", "example-org/wrong-capacity-trigger")
+	if err != nil || repository != "example-org/example-repo" {
+		t.Fatalf("refined exact repository = %q, %v", repository, err)
+	}
 	repository, err = provider.repository(context.Background(), "runner-exact-repo", "different-org")
 	if err == nil || repository != "different-org" {
 		t.Fatalf("mismatched repository = %q, %v", repository, err)

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Treat the authenticated job-start claim as the only repository identity for
+  cache delivery and teardown diagnostics. An organization scale-set runner can
+  be created for one queued repository and receive another job from GitHub;
+  pre-create narrowing therefore handed one trusted job another repository's
+  cache identity and filed its diagnostics under the wrong path. Cold and warm
+  workers now carry claims only, while the previous direct-assignment schema is
+  accepted read-only for N-1 rollout compatibility.
+
 - Preserve the authenticated runner-to-repository binding for 24 hours after
   the 15-minute cache delivery token expires, and use it to label teardown
   diagnostics. Organization scale sets create Incus workers with only an

@@ -30,7 +30,6 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incuspolicy"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/provideradmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
-	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/tenant"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 	"github.com/cloudbase/garm-provider-common/cloudconfig"
@@ -109,7 +108,6 @@ func newTestProvider(cli *MockIncusServer) *Incus {
 			},
 		}, ControlPlane: platformconfig.ControlPlane{RunnerVersion: "v2.336.0"}},
 	}
-	provider.cacheRepository = func() (string, error) { return "example-org/example-actions", nil }
 	return provider
 }
 
@@ -511,18 +509,10 @@ func TestGetCLIReturnsInjectedClient(t *testing.T) {
 	require.Same(t, cli, got)
 }
 
-func setTestCacheDelivery(t *testing.T, provider *Incus) {
-	t.Helper()
-	provider.cacheDelivery = func(role string) (rustfscache.Delivery, error) {
-		require.Equal(t, "trusted-writer", role)
-		return testCacheDelivery(), nil
-	}
-}
-
 func TestCompatibilityProbeValidatesProfileImageAndReadOnlyInventory(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	setTestCacheDelivery(t, provider)
+	configureTestCacheClaim(t, provider)
 	prepareCreateMocks(cli, testImageDigest)
 	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil)
 
@@ -544,7 +534,7 @@ func TestCompatibilityProbeValidatesProfileImageAndReadOnlyInventory(t *testing.
 func TestCompatibilityProbeSelectsIntegrationImageByProfile(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	setTestCacheDelivery(t, provider)
+	configureTestCacheClaim(t, provider)
 	prepareCreateMocksFor(
 		cli,
 		"nddev-linux-integration",
@@ -564,7 +554,7 @@ func TestCompatibilityProbeSelectsIntegrationImageByProfile(t *testing.T) {
 func TestCompatibilityProbeRejectsImageVariantDrift(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	setTestCacheDelivery(t, provider)
+	configureTestCacheClaim(t, provider)
 	prepareCreateMocksFor(cli, "nddev-linux-standard", testImageAlias, testImageDigest, "integration")
 
 	_, err := provider.Probe(context.Background(), "nddev-linux-standard")
@@ -574,7 +564,7 @@ func TestCompatibilityProbeRejectsImageVariantDrift(t *testing.T) {
 func TestCompatibilityProbeReturnsStableSortedInventory(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	setTestCacheDelivery(t, provider)
+	configureTestCacheClaim(t, provider)
 	prepareCreateMocks(cli, testImageDigest)
 	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{
 		{Instance: api.Instance{Name: "runner-z"}},
@@ -590,7 +580,7 @@ func TestCompatibilityProbeReturnsStableSortedInventory(t *testing.T) {
 func TestCompatibilityProbeFailsOnImageAliasDrift(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	setTestCacheDelivery(t, provider)
+	configureTestCacheClaim(t, provider)
 	prepareCreateMocks(cli, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 
 	_, err := provider.Probe(context.Background(), "nddev-linux-standard")

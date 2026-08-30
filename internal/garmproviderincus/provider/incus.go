@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	platformconfig "github.com/NDDev-OpenNetwork/github-actions/internal/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incuspolicy"
@@ -195,8 +196,6 @@ func NewIncusProvider(configFile, controllerID string) (*Incus, error) {
 	provider.admission = nddevAdmissionController
 	provider.platform = nddevAdmissionController.platform
 	provider.diagnostics = newProviderDiagnostics(cfg, provider.platform.ControlPlane.RunnerVersion)
-	provider.cacheDelivery = productionCacheDelivery
-	provider.cacheRepository = productionCacheRepository
 	provider.cacheClaim = productionCacheClaim
 	provider.cacheClaimRandom = rand.Reader
 
@@ -304,18 +303,20 @@ func (l *Incus) Probe(ctx context.Context, profile string) (CompatibilityProbe, 
 	}
 	cacheReady := !cacheEnabled
 	if cacheEnabled {
-		if l.cacheDelivery == nil {
-			return CompatibilityProbe{}, fmt.Errorf("cache delivery loader is not configured")
+		if l.cacheClaim == nil {
+			return CompatibilityProbe{}, fmt.Errorf("cache claim loader is not configured")
 		}
-		delivery, err := l.cacheDelivery(cacheRole)
+		store, endpoint, ca, err := l.cacheClaim()
 		if err != nil {
-			return CompatibilityProbe{}, errors.Wrap(err, "probing cache delivery")
+			return CompatibilityProbe{}, errors.Wrap(err, "probing cache claim")
 		}
-		if err := validateCacheDelivery(cacheRole, delivery); err != nil {
-			delivery.Clear()
+		defer clear(ca)
+		if err := cachebroker.ValidateClaimEndpoint(endpoint); err != nil {
 			return CompatibilityProbe{}, err
 		}
-		delivery.Clear()
+		if _, err := store.Read(ctx); err != nil {
+			return CompatibilityProbe{}, errors.Wrap(err, "reading cache claim journal")
+		}
 		cacheReady = true
 	}
 	cli, err := l.getCLI(ctx)
@@ -736,13 +737,7 @@ type Incus struct {
 	platform platformconfig.Config
 	// diagnostics captures bounded, redacted evidence outside a worker before
 	// the VM is stopped and destroyed.
-	diagnostics instanceDiagnosticCollector
-	// cacheDelivery reads one trust-scoped identity only after a disposable VM
-	// is bound to a job; unregistered warm capacity never receives it.
-	cacheDelivery cacheDeliveryLoader
-	// cacheRepository reads only the public shape/private identity configuration
-	// before any trust-scoped credential is opened.
-	cacheRepository  cacheRepositoryLoader
+	diagnostics      instanceDiagnosticCollector
 	cacheClaim       cacheClaimLoader
 	cacheClaimRandom io.Reader
 	// placementLockPath serializes only the Incus placement request across
@@ -880,7 +875,7 @@ func (l *Incus) getCreateInstanceArgs(ctx context.Context, bootstrapParams commo
 	if err != nil {
 		return api.InstancesPost{}, err
 	}
-	cacheEnabled = cacheEnabled && l.cacheDelivery != nil
+	cacheEnabled = cacheEnabled && l.cacheClaim != nil
 	bootstrapParams.ExtraSpecs, err = trustedBootstrapExtraSpecs(pool.Capabilities.Docker, cacheEnabled)
 	if err != nil {
 		return api.InstancesPost{}, err
@@ -1147,10 +1142,16 @@ func (l *Incus) activateWarmInstance(
 	}
 
 	if claim.State != providerjournal.ClaimInjected {
-		cacheAssignment, cacheEnabled, err := l.renderCacheAssignment(bootstrapParams)
+		cacheAssignment, claimStore, cacheEnabled, err := l.renderCacheClaim(ctx, instance.Name, bootstrapParams)
 		if err != nil {
 			return commonParams.ProviderInstance{}, err
 		}
+		claimCommitted := claimStore != nil
+		defer func() {
+			if claimCommitted {
+				_ = claimStore.Remove(context.Background(), instance.Name)
+			}
+		}()
 		defer clear(cacheAssignment)
 		assignment := renderWarmAssignment(l.expectedMetadataURL(), bootstrapParams.InstanceToken, bootstrapParams.CACertBundle, encodedJIT)
 		if cacheEnabled {
@@ -1173,6 +1174,7 @@ func (l *Incus) activateWarmInstance(
 		if err := l.admission.MarkWarmInjected(ctx, bootstrapParams.Name, instance.Name); err != nil {
 			return commonParams.ProviderInstance{}, errors.Wrap(err, "recording warm assignment injection")
 		}
+		claimCommitted = false
 	}
 	if encodedJIT != "" {
 		if err := l.waitDirectJITAssignmentStarted(ctx, cli, instance.Name, bootstrapParams.Flavor); err != nil {

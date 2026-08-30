@@ -37,6 +37,17 @@ func testCacheDelivery() rustfscache.Delivery {
 	}
 }
 
+func configureTestCacheClaim(t *testing.T, provider *Incus) cachebroker.Store {
+	t.Helper()
+	directory := t.TempDir()
+	store := cachebroker.Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	provider.cacheClaim = func() (cachebroker.Store, string, []byte, error) {
+		return store, "https://198.51.100.1:9443/api/v1/cache/claim", []byte("fixture-ca"), nil
+	}
+	provider.cacheClaimRandom = strings.NewReader(strings.Repeat("r", cachebroker.ClaimTokenBytes))
+	return store
+}
+
 func TestCacheRoleMappingIsExactAndPromoterIsNeverDelivered(t *testing.T) {
 	tests := []struct {
 		pool    platformconfig.Pool
@@ -59,47 +70,10 @@ func TestCacheRoleMappingIsExactAndPromoterIsNeverDelivered(t *testing.T) {
 	}
 }
 
-func TestCacheDeliveryFailsOpenWithoutCacheForAnotherRepository(t *testing.T) {
-	provider := newTestProvider(new(MockIncusServer))
-	loads := 0
-	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
-		loads++
-		return testCacheDelivery(), nil
-	}
-	bootstrap := validBootstrap()
-	bootstrap.RepoURL = "https://github.com/example-org/github-device-sync"
-	raw, enabled, err := provider.renderCacheAssignment(bootstrap)
-	require.NoError(t, err)
-	require.False(t, enabled)
-	require.Nil(t, raw)
-	require.Zero(t, loads, "a foreign repository must not load the github-actions credential")
-}
-
-func TestOrganizationBootstrapCreatesWithoutAmbiguousCacheCredential(t *testing.T) {
-	provider := newTestProvider(new(MockIncusServer))
-	loads := 0
-	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
-		loads++
-		return testCacheDelivery(), nil
-	}
-	bootstrap := validBootstrap()
-	bootstrap.RepoURL = "https://github.com/example-org"
-	raw, enabled, err := provider.renderCacheAssignment(bootstrap)
-	require.NoError(t, err)
-	require.False(t, enabled)
-	require.Nil(t, raw)
-	require.Zero(t, loads, "account-only organization create must not open a repository credential")
-}
-
 func TestOrganizationBootstrapInjectsOneTimeClaimWithoutCacheSecret(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)
-	directory := t.TempDir()
-	store := cachebroker.Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
-	provider.cacheClaim = func() (cachebroker.Store, string, []byte, error) {
-		return store, "https://198.51.100.1:9443/api/v1/cache/claim", []byte("fixture-ca"), nil
-	}
-	provider.cacheClaimRandom = strings.NewReader(strings.Repeat("r", cachebroker.ClaimTokenBytes))
+	store := configureTestCacheClaim(t, provider)
 	bootstrap := validBootstrap()
 	bootstrap.RepoURL = "https://github.com/example-org"
 	var assignment []byte
@@ -120,29 +94,11 @@ func TestOrganizationBootstrapInjectsOneTimeClaimWithoutCacheSecret(t *testing.T
 	require.Equal(t, "trusted-writer", journal.Claims[bootstrap.Name].Role)
 }
 
-func TestRenderedAssignmentBindsOneJobAndContainsNoSecretInCloudConfig(t *testing.T) {
+func TestCloudConfigContainsNoCacheSecret(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
-	delivery := testCacheDelivery()
-	provider.cacheDelivery = func(role string) (rustfscache.Delivery, error) {
-		require.Equal(t, "trusted-writer", role)
-		copy := delivery
-		copy.SecretKey = append([]byte(nil), delivery.SecretKey...)
-		copy.CAPEM = append([]byte(nil), delivery.CAPEM...)
-		return copy, nil
-	}
+	configureTestCacheClaim(t, provider)
 	bootstrap := validBootstrap()
-	raw, enabled, err := provider.renderCacheAssignment(bootstrap)
-	require.NoError(t, err)
-	require.True(t, enabled)
-	defer clear(raw)
-	var assignment workerCacheAssignment
-	require.NoError(t, json.Unmarshal(raw, &assignment))
-	require.Equal(t, cacheDeliveryID(bootstrap.Name), assignment.DeliveryID)
-	require.Equal(t, delivery.AccessKey, assignment.AccessKey)
-	decoded, err := base64.StdEncoding.DecodeString(assignment.SecretKeyB64)
-	require.NoError(t, err)
-	require.Equal(t, delivery.SecretKey, decoded)
-	clear(decoded)
+	delivery := testCacheDelivery()
 
 	cli := new(MockIncusServer)
 	provider.cli = cli
@@ -180,15 +136,9 @@ func TestRenderedAssignmentBindsOneJobAndContainsNoSecretInCloudConfig(t *testin
 	require.NotContains(t, cacheSetup, string(delivery.SecretKey))
 }
 
-func TestColdDeliveryWritesSecretBeforeZeroByteReadinessMarker(t *testing.T) {
+func TestExactBootstrapUsesAuthenticatedClaimBeforeZeroByteReadinessMarker(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
-	delivery := testCacheDelivery()
-	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
-		copy := delivery
-		copy.SecretKey = append([]byte(nil), delivery.SecretKey...)
-		copy.CAPEM = append([]byte(nil), delivery.CAPEM...)
-		return copy, nil
-	}
+	store := configureTestCacheClaim(t, provider)
 	bootstrap := validBootstrap()
 	var order []string
 	provider.cli.(*MockIncusServer).On("CreateInstanceFile", bootstrap.Name, cacheAssignmentPath, mock.Anything).
@@ -199,8 +149,11 @@ func TestColdDeliveryWritesSecretBeforeZeroByteReadinessMarker(t *testing.T) {
 			require.Equal(t, int64(0), args.UID)
 			require.Equal(t, int64(0), args.GID)
 			require.Equal(t, 0o400, args.Mode)
-			require.Contains(t, string(raw), delivery.AccessKey)
-			require.NotContains(t, raw, delivery.SecretKey)
+			var claim workerCacheClaim
+			require.NoError(t, json.Unmarshal(raw, &claim))
+			require.Equal(t, 2, claim.SchemaVersion)
+			require.NotContains(t, string(raw), "AKIA")
+			require.NotContains(t, string(raw), strings.Repeat("s", 64))
 			order = append(order, "assignment")
 		}).Return(nil).Once()
 	provider.cli.(*MockIncusServer).On("CreateInstanceFile", bootstrap.Name, cacheReadyPath, mock.Anything).
@@ -217,17 +170,14 @@ func TestColdDeliveryWritesSecretBeforeZeroByteReadinessMarker(t *testing.T) {
 
 	require.NoError(t, provider.injectColdCacheAssignment(context.Background(), bootstrap.Name, bootstrap))
 	require.Equal(t, []string{"assignment", "ready"}, order)
+	journal, err := store.Read(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, journal.Claims[bootstrap.Name].ClaimedRepository)
 }
 
 func TestColdDeliveryStopsRetryingWhenCanceledInstanceStops(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
-	delivery := testCacheDelivery()
-	provider.cacheDelivery = func(string) (rustfscache.Delivery, error) {
-		copy := delivery
-		copy.SecretKey = append([]byte(nil), delivery.SecretKey...)
-		copy.CAPEM = append([]byte(nil), delivery.CAPEM...)
-		return copy, nil
-	}
+	configureTestCacheClaim(t, provider)
 	bootstrap := validBootstrap()
 	provider.cli.(*MockIncusServer).On("CreateInstanceFile", bootstrap.Name, cacheAssignmentPath, mock.Anything).
 		Return(errors.New("Instance is not running")).Once()
