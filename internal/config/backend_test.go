@@ -35,7 +35,16 @@ func TestExecutionBackendRejectsUnsupportedPlatformTuple(t *testing.T) {
 	}
 }
 
-func TestContainerBackendAllowsProvenDockerButNoWarmCapacity(t *testing.T) {
+// Warm capacity is gated by the backend declaring it, the same shape as Docker,
+// and not by the instance type.
+//
+// It used to be refused on `incus-container` unconditionally, with no flag any
+// evidence could set. That was a prohibition wearing a precondition's words, and
+// it stood in front of a feature that could not have run anyway: the provider
+// created virtual machines and refused anything else, and the image asserted the
+// readiness agent was absent. Both are fixed, so the question the validator asks
+// is now the one a backend can answer about itself.
+func TestWarmCapacityRequiresABackendThatDeclaresIt(t *testing.T) {
 	cfg, err := Load("../../config/example-runner-1.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -45,10 +54,21 @@ func TestContainerBackendAllowsProvenDockerButNoWarmCapacity(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("cold non-Docker container backend was refused: %v", err)
 	}
+
 	canary.Warm.MaxReady = 1
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "container backend warm capacity") {
-		t.Fatalf("container warm capacity was accepted before soak: %v", err)
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "warm capacity requires a backend that declares it") {
+		t.Fatalf("warm capacity was accepted from a backend that does not declare it: %v", err)
 	}
+
+	// The half the old guard could never reach: declaring the capability makes
+	// the same configuration valid. Without this the test would pass for a
+	// validator that refuses warm capacity always, which is what it did before.
+	container.Capabilities.Warm = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("warm capacity was refused from a backend that declares it: %v", err)
+	}
+
+	container.Capabilities.Warm = false
 	canary.Warm.MaxReady = 0
 	container.Capabilities.Docker = true
 	if err := cfg.Validate(); err != nil {

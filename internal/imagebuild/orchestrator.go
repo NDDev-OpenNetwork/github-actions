@@ -144,6 +144,11 @@ func RecipeFingerprint(plan imageplan.Plan) (string, error) {
 		_, _ = hash.Write([]byte{0})
 	}
 	parts := [][]byte{[]byte(plan.ManifestFingerprint), provision}
+	warmAgent, err := scripts.ReadFile("assets/warm-agent.sh")
+	if err != nil {
+		return "", err
+	}
+	parts = append(parts, warmAgent)
 	if imageType(plan) == "container" {
 		containerProvision, err := scripts.ReadFile("assets/container-provision.sh")
 		if err != nil {
@@ -590,6 +595,7 @@ exit 1`); err != nil {
 	}
 	encodedPathBinaries := base64.StdEncoding.EncodeToString([]byte(pathBinaryLines.String()))
 	provision, _ := scripts.ReadFile("assets/provision.sh")
+	warmAgent, _ := scripts.ReadFile("assets/warm-agent.sh")
 	recipeSHA := strings.TrimPrefix(recipe, "sha256:")
 	guestArchive := "/var/tmp/" + plan.Runner.Archive
 	guestCompilerCacheArchive := "/var/tmp/" + plan.CompilerCache.Archive
@@ -603,6 +609,7 @@ exit 1`); err != nil {
 		"GHA_RECIPE_FINGERPRINT":     recipe,
 		"GHA_SOURCE_RELEASE_ID":      plan.Source.ReleaseID,
 		"GHA_SOURCE_ARTIFACT_SHA256": sourceArtifactSHA256(plan),
+		"GHA_WARM_AGENT_B64":         base64.StdEncoding.EncodeToString(warmAgent),
 		"GHA_SCCACHE_VERSION":        plan.CompilerCache.Version,
 		"GHA_SCCACHE_ARCHIVE":        guestCompilerCacheArchive,
 		"GHA_SCCACHE_ARCHIVE_SHA256": plan.CompilerCache.ArchiveSHA256,

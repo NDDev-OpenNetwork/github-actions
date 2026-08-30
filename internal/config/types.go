@@ -34,6 +34,12 @@ type Backend struct {
 
 type BackendCapabilities struct {
 	Docker bool `json:"docker" yaml:"docker"`
+	// Warm says this backend can hold unregistered ready workers. It is a
+	// capability rather than a soak result because what makes warm capacity
+	// possible is mechanical: the provider must create this backend's instance
+	// shape, and its image must carry the agent that publishes readiness. A
+	// backend that cannot do both cannot be made able to by waiting.
+	Warm bool `json:"warm" yaml:"warm"`
 }
 
 // Cluster is this host's place in the fleet's Incus cluster.

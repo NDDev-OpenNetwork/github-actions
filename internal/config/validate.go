@@ -197,8 +197,22 @@ func (c Config) Validate() error {
 		} else if pool.Capabilities.Docker && !backend.Capabilities.Docker {
 			add(prefix+".capabilities.docker", "requires Docker support from the selected execution backend")
 		}
-		if exists && backend.Implementation == "incus-container" && pool.Warm.MaxReady != 0 {
-			add(prefix+".warm.max_ready", "container backend warm capacity requires a separate completed soak")
+		// This refused warm capacity on every container pool, unconditionally
+		// and with no flag a finished soak could set -- so it was not a
+		// precondition, it was a permanent prohibition. It arrived in the
+		// initial public squash with no reasoning attached, and the evidence it
+		// named is evidence fixed decision 14 does not admit: acceptance comes
+		// from real jobs, not from a day-long soak.
+		//
+		// It was also standing in front of a feature that could not have run.
+		// The warm path created virtual machines and refused anything else, and
+		// the guest agent that publishes readiness had been removed from the
+		// image, with its absence asserted by the build. Lifting the guard
+		// alone would have converted a refusal into a per-reconcile timeout.
+		// Both halves are fixed in this change, so what remains is the ordinary
+		// question a backend answers about itself.
+		if exists && pool.Warm.MaxReady != 0 && !backend.Capabilities.Warm {
+			add(prefix+".warm.max_ready", "warm capacity requires a backend that declares it")
 		}
 		if _, exists := seenNames[pool.Name]; exists {
 			add(prefix+".name", "must be unique")

@@ -53,6 +53,7 @@ cat >/etc/systemd/system/gha-incus-cloud-init.service <<'EOF'
 Description=Apply one-job Incus metadata through cloud-init
 After=systemd-networkd.service systemd-resolved.service
 Wants=systemd-networkd.service systemd-resolved.service
+Before=gha-warm-ready.service
 StartLimitIntervalSec=0
 
 [Service]
