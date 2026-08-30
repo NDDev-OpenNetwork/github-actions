@@ -110,14 +110,18 @@ func (d providerDiagnostics) Capture(
 }
 
 func (d providerDiagnostics) repository(ctx context.Context, instanceName, configured string) (string, error) {
-	if configured == "" || strings.Contains(configured, "/") {
+	if configured == "" {
 		return configured, nil
 	}
 	exact, err := d.claims.ClaimedRepository(ctx, instanceName)
 	if err != nil {
 		return configured, err
 	}
-	if !strings.HasPrefix(exact, configured+"/") {
+	owner := configured
+	if candidate, _, separated := strings.Cut(configured, "/"); separated {
+		owner = candidate
+	}
+	if !strings.HasPrefix(exact, owner+"/") {
 		return configured, errors.New("authenticated owner does not match instance owner")
 	}
 	return exact, nil

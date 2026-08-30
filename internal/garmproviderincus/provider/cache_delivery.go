@@ -12,9 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/user"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,8 +39,6 @@ const (
 	cacheInjectionTimeout = 150 * time.Second
 )
 
-type cacheDeliveryLoader func(string) (rustfscache.Delivery, error)
-type cacheRepositoryLoader func() (string, error)
 type cacheClaimLoader func() (cachebroker.Store, string, []byte, error)
 
 type workerCacheClaim struct {
@@ -65,14 +61,6 @@ func productionCacheClaim() (cachebroker.Store, string, []byte, error) {
 	return cachebroker.Store{Path: config.ClaimJournalFile, LockPath: config.ClaimJournalLockFile}, config.ClaimEndpoint, ca, nil
 }
 
-func productionCacheRepository() (string, error) {
-	config, err := rustfscache.Load(rustfscache.DefaultConfigPath)
-	if err != nil {
-		return "", err
-	}
-	return config.Repository()
-}
-
 type workerCacheAssignment struct {
 	SchemaVersion int    `json:"schema_version"`
 	DeliveryID    string `json:"delivery_id"`
@@ -93,33 +81,6 @@ var (
 	cacheDeliveryIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	cacheBucketPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]-cache$`)
 )
-
-func productionCacheDelivery(role string) (rustfscache.Delivery, error) {
-	config, err := rustfscache.Load(rustfscache.DefaultConfigPath)
-	if err != nil {
-		return rustfscache.Delivery{}, err
-	}
-	if err := config.ValidateProductionPaths(); err != nil {
-		return rustfscache.Delivery{}, err
-	}
-	group, err := user.LookupGroup(cacheCredentialGroup)
-	if err != nil {
-		return rustfscache.Delivery{}, fmt.Errorf("resolve %q group the deployment grants on the credential directory: %w", cacheCredentialGroup, err)
-	}
-	gid, err := strconv.Atoi(group.Gid)
-	if err != nil {
-		return rustfscache.Delivery{}, fmt.Errorf("group %q has a non-numeric gid %q", cacheCredentialGroup, group.Gid)
-	}
-	return rustfscache.LoadDelivery(config, role, 0, gid, 0, 0)
-}
-
-// cacheCredentialGroup is the group deploy/fleet-host/gha-fleet.tmpfiles grants
-// on /etc/garm/cache. It used to be os.Getegid() -- the caller's own effective
-// group -- so the probe asked "is this owned by root and by whatever group I am
-// in", which is a different question and one that happened to be true only for
-// the service account. Run as root, which is how the runbook runs it, it
-// demanded 0:0 and failed on a correctly deployed directory (#230).
-const cacheCredentialGroup = "garm"
 
 func cacheRoleForPool(pool platformconfig.Pool) (string, bool, error) {
 	switch {
@@ -146,77 +107,13 @@ func cacheDeliveryID(jobName string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func (l *Incus) cacheDeliveryConfigured(bootstrap commonParams.BootstrapInstance) (string, bool, error) {
+func (l *Incus) cacheClaimConfigured(bootstrap commonParams.BootstrapInstance) (string, bool, error) {
 	pool, exists := l.platform.Pool(bootstrap.Flavor)
 	if !exists {
 		return "", false, fmt.Errorf("pool policy %q does not exist", bootstrap.Flavor)
 	}
 	role, enabled, err := cacheRoleForPool(pool)
-	if err != nil || !enabled || l.cacheDelivery == nil {
-		return role, enabled && l.cacheDelivery != nil, err
-	}
-	if role == "correlation-only" {
-		return role, false, nil
-	}
-	if l.cacheRepository == nil {
-		return role, false, nil
-	}
-	repository, err := canonicalRepositoryIdentity(bootstrap.RepoURL)
-	if err != nil {
-		if l.isRegisteredRepositoryURL(bootstrap.RepoURL) {
-			// Organization JobAssigned is account-only until a runner exists.
-			// Creating a credential-free worker is safe inside the reviewed account
-			// boundary; guessing which repository cache to grant is not.
-			return role, false, nil
-		}
-		return role, false, fmt.Errorf("derive cache repository identity: %w", err)
-	}
-	// The current RustFS credentials are scoped to one exact repository. Do not
-	// hand that namespace to another repository and hope its workflow notices:
-	// a cache mismatch is an optional optimization miss, not authorization to
-	// cross the repository boundary. Estate-generated per-repository identities
-	// can widen this safely without changing the one-job delivery protocol.
-	cacheRepository, err := l.cacheRepository()
-	if err != nil {
-		return role, false, fmt.Errorf("load configured cache repository identity: %w", err)
-	}
-	if repository != cacheRepository {
-		return role, false, nil
-	}
-	return role, true, nil
-}
-
-func (l *Incus) renderCacheAssignment(bootstrap commonParams.BootstrapInstance) ([]byte, bool, error) {
-	role, enabled, err := l.cacheDeliveryConfigured(bootstrap)
-	if err != nil || !enabled {
-		return nil, enabled, err
-	}
-	delivery, err := l.cacheDelivery(role)
-	if err != nil {
-		return nil, true, fmt.Errorf("load %s cache delivery: %w", role, err)
-	}
-	defer delivery.Clear()
-	if err := validateCacheDelivery(role, delivery); err != nil {
-		return nil, true, err
-	}
-	assignment := workerCacheAssignment{
-		SchemaVersion: 1,
-		DeliveryID:    cacheDeliveryID(bootstrap.Name),
-		Role:          delivery.Role,
-		Mode:          delivery.Mode,
-		Endpoint:      delivery.Endpoint,
-		Region:        delivery.Region,
-		Bucket:        delivery.Bucket,
-		PrefixRoot:    delivery.Prefix,
-		AccessKey:     delivery.AccessKey,
-		SecretKeyB64:  base64.StdEncoding.EncodeToString(delivery.SecretKey),
-		CAPEMB64:      base64.StdEncoding.EncodeToString(delivery.CAPEM),
-	}
-	raw, err := json.Marshal(assignment)
-	if err != nil {
-		return nil, true, fmt.Errorf("encode cache delivery: %w", err)
-	}
-	return raw, true, nil
+	return role, enabled && l.cacheClaim != nil, err
 }
 
 // workerCacheRole is one delivery a worker may receive: which role, in which
@@ -504,16 +401,15 @@ unset secret_key
 `
 
 func (l *Incus) injectColdCacheAssignment(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) error {
-	raw, enabled, err := l.renderCacheAssignment(bootstrap)
-	if err != nil {
+	// A scale-set worker is capacity, not a job. GitHub may assign it a
+	// different repository from the queue intent that caused its creation, so
+	// pre-create repository inference can never authorize cache credentials.
+	// Every cold worker receives only a one-job claim; the job-start hook binds
+	// server-provided GITHUB_REPOSITORY before the broker returns any optional
+	// delivery.
+	raw, claimStore, enabled, err := l.renderCacheClaim(ctx, instanceName, bootstrap)
+	if err != nil || !enabled {
 		return err
-	}
-	var claimStore *cachebroker.Store
-	if !enabled {
-		raw, claimStore, enabled, err = l.renderCacheClaim(ctx, instanceName, bootstrap)
-		if err != nil || !enabled {
-			return err
-		}
 	}
 	defer clear(raw)
 	claimCommitted := claimStore != nil
@@ -561,12 +457,8 @@ func (l *Incus) injectColdCacheAssignment(ctx context.Context, instanceName stri
 }
 
 func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) ([]byte, *cachebroker.Store, bool, error) {
-	pool, exists := l.platform.Pool(bootstrap.Flavor)
-	if !exists {
-		return nil, nil, false, fmt.Errorf("pool policy %q does not exist", bootstrap.Flavor)
-	}
-	role, enabled, err := cacheRoleForPool(pool)
-	if err != nil || !enabled || l.cacheClaim == nil {
+	role, enabled, err := l.cacheClaimConfigured(bootstrap)
+	if err != nil || !enabled {
 		return nil, nil, false, err
 	}
 	store, endpoint, ca, err := l.cacheClaim()
@@ -586,7 +478,7 @@ func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, boots
 		return nil, nil, true, fmt.Errorf("generate cache claim: %w", err)
 	}
 	defer clear(token)
-	if err := store.Add(ctx, instanceName, pool.Name, role, token); err != nil {
+	if err := store.Add(ctx, instanceName, bootstrap.Flavor, role, token); err != nil {
 		return nil, nil, true, fmt.Errorf("persist cache claim: %w", err)
 	}
 	claim := workerCacheClaim{SchemaVersion: 2, InstanceName: instanceName, ClaimEndpoint: endpoint, ClaimToken: base64.RawURLEncoding.EncodeToString(token), CAPEMB64: base64.StdEncoding.EncodeToString(ca)}
@@ -599,7 +491,7 @@ func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, boots
 }
 
 func (l *Incus) coldCacheDeliveryPresent(ctx context.Context, instanceName string, bootstrap commonParams.BootstrapInstance) (bool, error) {
-	role, enabled, err := l.cacheDeliveryConfigured(bootstrap)
+	role, enabled, err := l.cacheClaimConfigured(bootstrap)
 	if err != nil || !enabled {
 		return !enabled, err
 	}
@@ -657,10 +549,45 @@ func (l *Incus) coldCacheDeliveryPresent(ctx context.Context, instanceName strin
 		!cacheDeliveryOwnerMatches(response, runnerUID, runnerGID, true) {
 		return false, fmt.Errorf("ready cache assignment evidence is invalid")
 	}
-	assignment, err := parseWorkerCacheAssignment(assignmentRaw)
-	if err != nil || assignment.SchemaVersion != 1 ||
-		assignment.DeliveryID != cacheDeliveryID(bootstrap.Name) || assignment.Role != role {
-		return false, fmt.Errorf("ready cache assignment is not bound to the requested job")
+	var envelope struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(assignmentRaw, &envelope); err != nil {
+		return false, fmt.Errorf("ready cache assignment has no valid schema")
+	}
+	switch envelope.SchemaVersion {
+	case 1:
+		// N-1 workers may still carry the direct-delivery schema during a
+		// reader-before-writer rollout. Accept it only under the old exact
+		// content checks; new writers emit claims exclusively.
+		assignment, err := parseWorkerCacheAssignment(assignmentRaw)
+		if err != nil || assignment.DeliveryID != cacheDeliveryID(bootstrap.Name) || assignment.Role != role {
+			return false, fmt.Errorf("ready cache assignment is not bound to the requested job")
+		}
+	case 2:
+		claim, err := parseWorkerCacheClaim(assignmentRaw)
+		if err != nil || claim.InstanceName != instanceName {
+			return false, fmt.Errorf("ready cache claim is not bound to the requested runner")
+		}
+		token, err := base64.RawURLEncoding.DecodeString(claim.ClaimToken)
+		if err != nil || len(token) != cachebroker.ClaimTokenBytes {
+			return false, fmt.Errorf("ready cache claim token is invalid")
+		}
+		defer clear(token)
+		store, endpoint, ca, err := l.cacheClaim()
+		if err != nil {
+			return false, fmt.Errorf("load cache claim contract: %w", err)
+		}
+		defer clear(ca)
+		if claim.ClaimEndpoint != endpoint || claim.CAPEMB64 != base64.StdEncoding.EncodeToString(ca) {
+			return false, fmt.Errorf("ready cache claim endpoint or trust root drifted")
+		}
+		stored, err := store.Verify(ctx, instanceName, token)
+		if err != nil || stored.Role != role {
+			return false, fmt.Errorf("ready cache claim journal identity is invalid")
+		}
+	default:
+		return false, fmt.Errorf("ready cache assignment schema is unsupported")
 	}
 	return true, nil
 }
@@ -708,6 +635,22 @@ func parseWorkerCacheAssignment(raw []byte) (workerCacheAssignment, error) {
 		return workerCacheAssignment{}, err
 	}
 	return assignment, nil
+}
+
+func parseWorkerCacheClaim(raw []byte) (workerCacheClaim, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var claim workerCacheClaim
+	if err := decoder.Decode(&claim); err != nil {
+		return workerCacheClaim{}, fmt.Errorf("decode worker cache claim: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return workerCacheClaim{}, fmt.Errorf("worker cache claim contains trailing data")
+	}
+	if claim.SchemaVersion != 2 || claim.InstanceName == "" || claim.ClaimEndpoint == "" || claim.ClaimToken == "" || claim.CAPEMB64 == "" {
+		return workerCacheClaim{}, fmt.Errorf("worker cache claim is incomplete")
+	}
+	return claim, nil
 }
 
 func cacheSetupPreInstallScript() []byte {

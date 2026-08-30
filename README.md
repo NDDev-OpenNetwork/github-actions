@@ -21,8 +21,9 @@ whole-pipeline performance standard implemented by this engine.
 - Each worker executes one job and is destroyed.
 - Diagnostic data is retained locally until remote size, digest and schema are
   confirmed.
-- Organization-scale-set workers receive no repository credential at create
-  time. A one-time, 15-minute claim lets the synchronous job-start hook bind
+- Scale-set workers receive no repository credential at create time, because
+  GitHub may assign a ready runner a different repository from the queue intent
+  that caused its creation. A one-time, 15-minute claim lets the synchronous job-start hook bind
   the server-provided `GITHUB_REPOSITORY` to an estate allowlist and receive
   only that repository/pool trust role. Claim retries are idempotent; another
   repository, runner, role, expired token or replay after cleanup fails closed.
