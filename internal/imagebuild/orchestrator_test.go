@@ -105,6 +105,42 @@ func TestContainerBuilderUsesRootfsAndNeverRequestsVM(t *testing.T) {
 	}
 }
 
+// startup_mode must be read off the image, not written into the report.
+//
+// It was the literal "cold-only" in both smoke scripts. That was true while the
+// image had no warm agent and stayed true after the agent came back, so a
+// promoted image carrying warm units still reported itself cold-only. A field
+// that can only say one thing says nothing, and this one said it while the
+// image contradicted it.
+func TestSmokeReportsObservedStartupMode(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"assets/smoke.sh", "assets/smoke-integration.sh"} {
+		raw, err := scripts.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		if strings.Contains(text, `startup_mode:"cold-only"`) {
+			t.Fatalf("%s still emits a hard-coded startup mode", name)
+		}
+		if !strings.Contains(text, "startup_mode:$startup_mode") {
+			t.Fatalf("%s does not emit the observed startup mode", name)
+		}
+		// Derived from both halves: the agent binary and the path unit that
+		// starts it. Either alone would report warm-capable on an image that
+		// cannot actually consume an assignment.
+		for _, evidence := range []string{
+			"-x /usr/local/libexec/gha-warm-agent",
+			"systemctl is-enabled gha-warm-agent.path",
+			"startup_mode=warm-capable",
+		} {
+			if !strings.Contains(text, evidence) {
+				t.Fatalf("%s derives startup mode without %s", name, evidence)
+			}
+		}
+	}
+}
+
 func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	t.Parallel()
 	plan := testImagePlan(t)

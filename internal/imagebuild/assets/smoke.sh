@@ -182,6 +182,14 @@ fi
 id runner >/dev/null
 [[ "$(id --groups --name runner | tr ' ' '\n' | grep -vx runner | LC_ALL=C sort | paste -sd' ' -)" == "sudo" ]]
 test -x /home/runner/actions-runner/bin/Runner.Listener
+# Observed, not declared. This field read "cold-only" as a literal for as long
+# as the image had no warm agent, and went on reading it after the agent came
+# back -- a report that can only say one thing says nothing. It is derived from
+# the units the image actually carries.
+startup_mode=cold-only
+if [ -x /usr/local/libexec/gha-warm-agent ] && [ "$(systemctl is-enabled gha-warm-agent.path 2>/dev/null)" = enabled ]; then
+  startup_mode=warm-capable
+fi
 test -x /usr/local/libexec/gha-warm-agent
 test "$(stat --format='%U:%G:%a:%F' /home/runner/.gha-cache)" = 'runner:runner:700:directory'
 test "$(command -v openssl)" = /usr/bin/openssl
@@ -258,4 +266,5 @@ jq -n \
   --argjson root_disk_bytes "${root_disk_bytes}" \
   --argjson root_filesystem_bytes "${root_bytes}" \
   --argjson provided_commands "${provided_count}" \
-  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,provided_commands:$provided_commands,registration_state:"absent",startup_mode:"cold-only",ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
+  --arg startup_mode "${startup_mode}" \
+  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,provided_commands:$provided_commands,registration_state:"absent",startup_mode:$startup_mode,ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
