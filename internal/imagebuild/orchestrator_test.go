@@ -119,7 +119,12 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	if first != "sha256:64de25c167e1de747994e7ed7c3b2be0ec6fb8a93f952ec4610d8c3823eb16a9" {
+	// Pinned so a recipe change has to be stated rather than noticed. It moved
+	// here because the immutable alias moved, which is the intended coupling:
+	// the alias is part of the recipe, so a manifest whose contents changed
+	// under an unchanged alias would otherwise ask the builder to produce
+	// different bytes for a name that is already promoted.
+	if first != "sha256:6c03140af0788c71a5cb896907a6e1b6f88c36e49fb963ce24128c1862941774" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
