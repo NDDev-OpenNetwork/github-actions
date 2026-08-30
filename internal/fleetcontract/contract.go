@@ -86,8 +86,14 @@ func ValidateConfig(contract Contract, platform platformconfig.Config) error {
 			pool.Capabilities.NetworkPolicy != class.NetworkPolicy || pool.Capabilities.CacheWriteScope != class.CacheWriteScope ||
 			pool.Capabilities.Docker != class.Docker || pool.Capabilities.Browser != class.Browser || pool.Resources.VCPU < class.Resources.VCPUMin ||
 			pool.Resources.VCPU > class.Resources.VCPUMax ||
-			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB ||
-			pool.Warm.TargetReady != class.Warm.TargetReady || pool.Warm.MaxReady != class.Warm.MaxReady {
+			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB {
+			// Warm depth is deliberately not compared. The contract's own
+			// not_contractual list says "Warm-pool depth, and whether a given
+			// job starts warm or cold", so a consumer may not build on it and
+			// this verifier must not enforce it. It did, against a rendered
+			// value hardcoded to zero, which made warm capacity impossible to
+			// deploy without failing the contract check -- a promise the
+			// document explicitly declines to make.
 			return fmt.Errorf("pool %q capability or resource shape differs from fleet contract v%d", class.Label, contract.ContractVersion)
 		}
 	}
@@ -269,7 +275,14 @@ func Build(sources Sources, commit string) (Contract, error) {
 				VCPU: class.VCPU, VCPUMin: tunableVCPUMin(class.VCPU), VCPUMax: class.VCPU,
 				MemoryMiB: class.MemoryMiB, DiskGiB: class.DiskGiB,
 			},
-			Warm: Warm{Supported: false, TargetReady: 0, MaxReady: 0},
+			// Supported says the engine can hold unregistered ready workers for
+			// this worker kind; it is not a promise that any deployment does.
+			// Depth is left at zero and is not compared, because the contract's
+			// own not_contractual list declines to promise it. It used to be a
+			// hardcoded false with zeroes that the verifier then enforced,
+			// which made warm capacity impossible to deploy without failing the
+			// contract check.
+			Warm: Warm{Supported: declaration.Execution.WorkerKind == "incus-container"},
 		})
 	}
 
