@@ -10,11 +10,20 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/admission"
+	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWarmCreateRecognizesConcurrentRetirement(t *testing.T) {
+	require.True(t, warmInstanceRetiredDuringCreate(errors.Join(
+		errors.New("waiting for warm instance network"),
+		runnerErrors.ErrNotFound,
+	)))
+	require.False(t, warmInstanceRetiredDuringCreate(errors.New("Incus control plane unavailable")))
+}
 
 type denyWarmAdmission struct {
 	allowAllAdmission
