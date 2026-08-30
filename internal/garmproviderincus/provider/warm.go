@@ -178,24 +178,6 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 	result.ReadyBefore = len(ready)
 	result.Preparing = len(preparing)
 	if apply {
-		blocked, err := l.admission.WarmBlockedByQueue(ctx)
-		if err != nil {
-			return result, errors.Wrap(err, "checking central queue intent")
-		}
-		if blocked {
-			result.Deferred = true
-			result.DeferralReason = admission.ReasonQueueIntent
-			result.AdmissionDecision = &admission.Decision{
-				Admitted: false,
-				Reason:   admission.ReasonQueueIntent,
-				Pool:     flavor,
-			}
-			result.ReadyAfter = len(ready)
-			return result, nil
-		}
-	}
-
-	if apply {
 		for _, name := range preparing {
 			promoted, err := l.promoteWarmReady(ctx, name, flavor)
 			if err != nil {

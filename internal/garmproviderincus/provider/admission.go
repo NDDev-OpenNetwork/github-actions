@@ -33,7 +33,6 @@ type admissionController interface {
 	Resolve(context.Context, string) (string, error)
 	AdmitWarm(context.Context, InstanceServerInterface, string, string) (admission.Decision, error)
 	AuthorizeWarmDrain(context.Context, string) error
-	WarmBlockedByQueue(context.Context) (bool, error)
 }
 
 type repositoryResolver interface {
@@ -227,13 +226,6 @@ func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterf
 	} else if blocked {
 		return admission.Decision{Admitted: false, Reason: admission.ReasonDiagnosticWAL, Pool: flavor}, nil
 	}
-	blocked, err := n.WarmBlockedByQueue(ctx)
-	if err != nil {
-		return admission.Decision{}, err
-	}
-	if blocked {
-		return admission.Decision{Admitted: false, Reason: admission.ReasonQueueIntent, Pool: flavor}, nil
-	}
 	pool, exists := n.platform.Pool(flavor)
 	if !exists {
 		return admission.Decision{}, fmt.Errorf("pool policy %q does not exist", flavor)
@@ -270,14 +262,6 @@ func (n *nddevAdmission) diagnosticsBlocked() (bool, error) {
 		return false, fmt.Errorf("inspect diagnostic durable WAL: %w", err)
 	}
 	return workerdiagnostics.AtDurableWALHighWatermark(stats, n.diagnosticsMaxBytes), nil
-}
-
-func (n *nddevAdmission) WarmBlockedByQueue(ctx context.Context) (bool, error) {
-	blocked, err := n.queueIntents.HasActive(ctx)
-	if err != nil {
-		return false, fmt.Errorf("read pre-AcquireJobs queue intents: %w", err)
-	}
-	return blocked, nil
 }
 
 func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
