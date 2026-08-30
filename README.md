@@ -29,6 +29,10 @@ whole-pipeline performance standard implemented by this engine.
   The same authenticated job-start claim binds the exact workflow run to the
   runner's authoritative running queue intent, so short jobs remain visible in
   run-scoped latency telemetry even when their lifecycle webhook is sparse.
+  After token expiry, only the already-bound repository name remains available
+  for 24 hours so provider teardown can file runner diagnostics under the exact
+  repository instead of an organization-wide account bucket; it cannot deliver
+  cache credentials or bind a second repository.
 - `reconcile-diagnostic-storage` plans, applies and reads back the remote hard
   quota and prefix lifecycle as one source-controlled durability contract. A
   consuming estate sizes the quota from measured retention, burst and outage

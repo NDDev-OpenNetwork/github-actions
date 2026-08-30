@@ -176,6 +176,12 @@ type Incus struct {
 	// QueueIntentFile is the GARM-owned, fsync-published pre-AcquireJobs
 	// scheduler journal. The provider is strictly a read-only consumer.
 	QueueIntentFile string `toml:"queue_intent_file" json:"queue-intent-file"`
+	// CacheClaimFile and CacheClaimLockFile hold the authenticated one-job
+	// runner-to-repository binding. Provider teardown reads only the bounded,
+	// non-secret claimed repository so organization-pool diagnostics retain an
+	// exact repository identity after the delivery token expires.
+	CacheClaimFile     string `toml:"cache_claim_file" json:"cache-claim-file"`
+	CacheClaimLockFile string `toml:"cache_claim_lock_file" json:"cache-claim-lock-file"`
 	// AdmissionLeaseSeconds bounds recovery of a crash before instance creation.
 	AdmissionLeaseSeconds int `toml:"admission_lease_seconds" json:"admission-lease-seconds"`
 	// PreviousProviderIdentities is deliberately bounded to N-1. Carrying an
@@ -390,6 +396,21 @@ func (l *Incus) Validate() error {
 	if filepath.Clean(l.QueueIntentFile) == filepath.Clean(l.JournalFile) ||
 		filepath.Clean(l.QueueIntentFile) == filepath.Clean(l.JournalLockFile) {
 		return fmt.Errorf("queue_intent_file must differ from provider journal paths")
+	}
+	if err := validateStatePath(l.CacheClaimFile); err != nil {
+		return fmt.Errorf("invalid cache_claim_file %s: %w", l.CacheClaimFile, err)
+	}
+	if err := validateStatePath(l.CacheClaimLockFile); err != nil {
+		return fmt.Errorf("invalid cache_claim_lock_file %s: %w", l.CacheClaimLockFile, err)
+	}
+	statePaths := []string{l.JournalFile, l.JournalLockFile, l.QueueIntentFile, l.CacheClaimFile, l.CacheClaimLockFile}
+	seenStatePaths := make(map[string]struct{}, len(statePaths))
+	for _, statePath := range statePaths {
+		clean := filepath.Clean(statePath)
+		if _, exists := seenStatePaths[clean]; exists {
+			return fmt.Errorf("provider journal, queue intent and cache claim paths must be distinct")
+		}
+		seenStatePaths[clean] = struct{}{}
 	}
 	if len(l.PreviousProviderIdentities) > 1 {
 		return fmt.Errorf("previous_provider_identities may contain only N-1")

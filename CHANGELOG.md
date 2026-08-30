@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Preserve the authenticated runner-to-repository binding for 24 hours after
+  the 15-minute cache delivery token expires, and use it to label teardown
+  diagnostics. Organization scale sets create Incus workers with only an
+  account identity, so diagnostics previously collapsed every ordinary
+  repository into `owner` and could not be found for the failed job that
+  needed them. Token verification and delivery still expire after 15 minutes;
+  the retained value is only the already-bound, non-secret repository name.
+
 - Add `alert_evaluation_failed`, so the one failure the alerting system cannot
   report about itself becomes visible. A failed evaluation writes outcome 3 into
   `alert_states` and sends nothing, so the alert goes blind and its silence is
