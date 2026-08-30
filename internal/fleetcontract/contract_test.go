@@ -38,10 +38,18 @@ func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 		t.Fatalf("contract v2 semantics = %#v", contract)
 	}
 	for _, class := range contract.RunnerClasses {
-		if class.WorkerKind != "incus-container" || !class.Ephemeral || class.JobsPerWorker != 1 || class.Warm.Supported ||
+		if class.WorkerKind != "incus-container" || !class.Ephemeral || class.JobsPerWorker != 1 ||
 			class.Resources.VCPU < 1 || class.Resources.VCPUMin < 1 || class.Resources.VCPUMax != class.Resources.VCPU ||
 			class.Resources.VCPUMin > class.Resources.VCPUMax || class.Resources.MemoryMiB < 1024 || class.Resources.DiskGiB < 10 {
-			t.Fatalf("runner class is not a complete cold container contract: %#v", class)
+			t.Fatalf("runner class is not a complete container contract: %#v", class)
+		}
+		// Supported may be true now that the engine can hold unregistered ready
+		// containers; it says what the engine can do, not what any deployment
+		// does. Depth stays unpublished because the contract's not_contractual
+		// list declines to promise it, and asserting a published zero here is
+		// what made the verifier enforce one.
+		if class.Warm.TargetReady != 0 || class.Warm.MaxReady != 0 {
+			t.Fatalf("published contract must not carry a warm depth: %#v", class.Warm)
 		}
 	}
 }
