@@ -77,6 +77,39 @@ func TestConcurrentClaimBindsExactlyOneRepository(t *testing.T) {
 	}
 }
 
+func TestBoundClaimRetainsOnlyRepositoryCorrelationAfterTokenExpiry(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	store := Store{
+		Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock"),
+		Now: func() time.Time { return now },
+	}
+	token := bytes.Repeat([]byte{7}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "runner-correlation", "example-standard", "correlation-only", token); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := store.Consume(context.Background(), "runner-correlation", token, "example-org/example-repo"); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+
+	now = now.Add(ClaimTTL + time.Second)
+	if _, err := store.Verify(context.Background(), "runner-correlation", token); err == nil {
+		t.Fatal("expired credential token remained valid")
+	}
+	if _, err := store.Consume(context.Background(), "runner-correlation", token, "example-org/example-repo"); err == nil {
+		t.Fatal("expired credential token was consumed")
+	}
+	repository, err := store.ClaimedRepository(context.Background(), "runner-correlation")
+	if err != nil || repository != "example-org/example-repo" {
+		t.Fatalf("ClaimedRepository = %q, %v", repository, err)
+	}
+
+	now = now.Add(CorrelationTTL)
+	if _, err := store.ClaimedRepository(context.Background(), "runner-correlation"); err == nil {
+		t.Fatal("expired diagnostic correlation remained readable")
+	}
+}
+
 func TestClaimIsAtomicOneTimeAndExpires(t *testing.T) {
 	now := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
 	directory := t.TempDir()

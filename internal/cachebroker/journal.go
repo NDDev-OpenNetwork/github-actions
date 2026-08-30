@@ -23,6 +23,11 @@ const (
 	maximumJournalBytes  = 4 * 1024 * 1024
 	ClaimTokenBytes      = 32
 	ClaimTTL             = 15 * time.Minute
+	// Bound claims retain only the authenticated runner-to-repository
+	// correlation after the credential token expires. Provider teardown can
+	// then file diagnostics under the exact repository even for organization
+	// scale sets, whose Incus metadata contains only the account name.
+	CorrelationTTL = 24 * time.Hour
 )
 
 var (
@@ -85,7 +90,9 @@ func (s Store) Consume(ctx context.Context, instance string, token []byte, repos
 			return errors.New("cache claim is absent")
 		}
 		if !claim.ExpiresAt.After(now) {
-			delete(journal.Claims, instance)
+			if claim.ClaimedRepository == "" {
+				delete(journal.Claims, instance)
+			}
 			return errors.New("cache claim expired")
 		}
 		actual, err := hex.DecodeString(claim.TokenSHA256)
@@ -140,6 +147,29 @@ func (s Store) Verify(ctx context.Context, instance string, token []byte) (Claim
 	return claim, nil
 }
 
+// ClaimedRepository returns the exact repository previously bound by an
+// authenticated one-job claim. It never accepts or returns credential
+// material, and remains readable only for the bounded diagnostic-correlation
+// window after the 15-minute delivery token expires.
+func (s Store) ClaimedRepository(ctx context.Context, instance string) (string, error) {
+	journal, err := s.Read(ctx)
+	if err != nil {
+		return "", err
+	}
+	claim, exists := journal.Claims[instance]
+	if !exists || claim.ClaimedRepository == "" {
+		return "", errors.New("bound cache claim is absent")
+	}
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+	if !claim.ClaimedAt.Add(CorrelationTTL).After(now) {
+		return "", errors.New("bound cache claim correlation expired")
+	}
+	return claim.ClaimedRepository, nil
+}
+
 func (s Store) Remove(ctx context.Context, instance string) error {
 	return s.update(ctx, func(journal *Journal, _ time.Time) error { delete(journal.Claims, instance); return nil })
 }
@@ -161,7 +191,7 @@ func (s Store) update(ctx context.Context, mutate func(*Journal, time.Time) erro
 			now = s.Now().UTC()
 		}
 		for key, claim := range journal.Claims {
-			if !claim.ExpiresAt.After(now) {
+			if !claimRetained(claim, now) {
 				delete(journal.Claims, key)
 			}
 		}
@@ -180,6 +210,13 @@ func (s Store) update(ctx context.Context, mutate func(*Journal, time.Time) erro
 		journal.UpdatedAt = now
 		return s.writeUnlocked(journal)
 	})
+}
+
+func claimRetained(claim Claim, now time.Time) bool {
+	if claim.ClaimedRepository == "" {
+		return claim.ExpiresAt.After(now)
+	}
+	return claim.ClaimedAt.Add(CorrelationTTL).After(now)
 }
 
 func (s Store) withLock(ctx context.Context, exclusive bool, action func() error) error {

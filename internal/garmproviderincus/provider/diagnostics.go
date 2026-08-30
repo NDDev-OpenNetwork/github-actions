@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/workerdiagnostics"
 	incus "github.com/lxc/incus/v7/client"
@@ -51,6 +53,7 @@ type diagnosticClient interface {
 
 type providerDiagnostics struct {
 	store         workerdiagnostics.Store
+	claims        cachebroker.Store
 	runnerVersion string
 }
 
@@ -63,6 +66,7 @@ func newProviderDiagnostics(cfg *providerconfig.Incus, runnerVersion string) pro
 			MaxTotalBytes:  cfg.DiagnosticsMaxTotalBytes,
 			MaxArtifacts:   workerdiagnostics.DefaultMaxArtifacts,
 		},
+		claims:        cachebroker.Store{Path: cfg.CacheClaimFile, LockPath: cfg.CacheClaimLockFile},
 		runnerVersion: runnerVersion,
 	}
 }
@@ -84,6 +88,10 @@ func (d providerDiagnostics) Capture(
 	if instance.State != nil && strings.TrimSpace(instance.State.Status) != "" {
 		state = instance.State.Status
 	}
+	repository, resolveErr := d.repository(ctx, instance.Name, instance.ExpandedConfig[repositoryKey])
+	if resolveErr != nil {
+		collectionErrors = append(collectionErrors, "resolve exact diagnostic repository: "+resolveErr.Error())
+	}
 	metadata := workerdiagnostics.Instance{
 		Name:             instance.Name,
 		Trust:            instance.ExpandedConfig[trustKey],
@@ -91,7 +99,7 @@ func (d providerDiagnostics) Capture(
 		PoolID:           instance.ExpandedConfig[poolIDKey],
 		PoolName:         instance.ExpandedConfig[flavorKey],
 		ScaleSet:         instance.ExpandedConfig[scaleSetKey],
-		Repository:       instance.ExpandedConfig[repositoryKey],
+		Repository:       repository,
 		ImageFingerprint: instance.ExpandedConfig[imageFingerprintKey],
 		RunnerVersion:    d.runnerVersion,
 		ProviderVersion:  instance.ExpandedConfig[providerVersionKey],
@@ -99,6 +107,20 @@ func (d providerDiagnostics) Capture(
 		State:            state,
 	}
 	return d.store.Write(ctx, metadata, artifacts, collectionErrors)
+}
+
+func (d providerDiagnostics) repository(ctx context.Context, instanceName, configured string) (string, error) {
+	if configured == "" || strings.Contains(configured, "/") {
+		return configured, nil
+	}
+	exact, err := d.claims.ClaimedRepository(ctx, instanceName)
+	if err != nil {
+		return configured, err
+	}
+	if !strings.HasPrefix(exact, configured+"/") {
+		return configured, errors.New("authenticated owner does not match instance owner")
+	}
+	return exact, nil
 }
 
 func collectDiagnosticArtifacts(

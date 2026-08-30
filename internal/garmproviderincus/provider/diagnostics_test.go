@@ -5,12 +5,41 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 )
+
+func TestDiagnosticRepositoryUsesAuthenticatedBoundClaim(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	claims := cachebroker.Store{
+		Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock"),
+		Now: func() time.Time { return now },
+	}
+	token := bytes.Repeat([]byte{9}, cachebroker.ClaimTokenBytes)
+	if err := claims.Add(context.Background(), "runner-exact-repo", "example-standard", "correlation-only", token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claims.Consume(context.Background(), "runner-exact-repo", token, "example-org/example-repo"); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := providerDiagnostics{claims: claims}
+	repository, err := provider.repository(context.Background(), "runner-exact-repo", "example-org")
+	if err != nil || repository != "example-org/example-repo" {
+		t.Fatalf("repository = %q, %v", repository, err)
+	}
+	repository, err = provider.repository(context.Background(), "runner-exact-repo", "different-org")
+	if err == nil || repository != "different-org" {
+		t.Fatalf("mismatched repository = %q, %v", repository, err)
+	}
+}
 
 type diagnosticSourceStub struct {
 	files             map[string][]byte
