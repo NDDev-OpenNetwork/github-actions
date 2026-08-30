@@ -396,8 +396,13 @@ fi
 tar --extract --gzip --file "${GHA_GO_CACHE_SEED_ARCHIVE}" \
   --directory "${seed_root}" --strip-components=1 --no-same-owner --no-same-permissions
 chown -R runner:runner "${seed_root}"
+# Every component, not just the leaf. `install -d` applies -o/-g/-m to the
+# final path element only; the parents it has to create along the way get the
+# effective uid, which is root. That shipped /home/runner/.cache as root:root
+# in the image while /home/runner/.cache/go-build underneath it was correct.
 install -d -o runner -g runner -m 0755 \
-  /home/runner/.cache/go-build /home/runner/go /home/runner/go/bin /home/runner/go/pkg /home/runner/go/pkg/mod
+  /home/runner/.cache /home/runner/.cache/go-build \
+  /home/runner/go /home/runner/go/bin /home/runner/go/pkg /home/runner/go/pkg/mod
 runuser -u runner -- env HOME=/home/runner GOCACHE=/home/runner/.cache/go-build \
   GOMODCACHE=/home/runner/go/pkg/mod GOPROXY=https://proxy.golang.org,direct \
   sh -c 'cd "$1" && exec go build -trimpath -o /var/tmp/gha-fleet-prewarm "$2"' \
@@ -407,7 +412,12 @@ find "${seed_root}" -mindepth 1 -delete
 rmdir "${seed_root}"
 go_cache_bytes="$(du -sb /home/runner/.cache/go-build /home/runner/go/pkg/mod | awk '{sum += $1} END {print sum}')"
 test "${go_cache_bytes}" -gt 0
-if find /home/runner/.cache/go-build /home/runner/go ! -user runner -print -quit | grep -q .; then
+# The parent is checked too. This guard read the seeded trees and not the
+# directories they hang from, so it passed for months over a root-owned
+# /home/runner/.cache -- a check that verified the children and missed the
+# parent. Anything under $HOME that the runner cannot write is a job failure
+# that looks like a code failure: uv, pip, npm and go all default into here.
+if find /home/runner/.cache /home/runner/.cache/go-build /home/runner/go ! -user runner -print -quit | grep -q .; then
   echo "Go cache seed contains an entry the runner does not own" >&2
   exit 1
 fi

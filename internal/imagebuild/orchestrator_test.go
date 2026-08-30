@@ -155,15 +155,16 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	// Pinned so a recipe change has to be stated rather than noticed. It moved
-	// twice: once when the alias advanced to b15, and again here because
-	// restoring the warm agent changes what provision.sh writes. b15 is built
-	// and promoted, so the contents cannot change under it -- the alias goes to
-	// b16. That coupling is the point:
-	// the alias is part of the recipe, so a manifest whose contents changed
-	// under an unchanged alias would otherwise ask the builder to produce
-	// different bytes for a name that is already promoted.
-	if first != "sha256:b3170089179727579bc635e59bdd9c54799cfeeb837d8ea09b8a9852e97cba78" {
+	// Pinned so a recipe change has to be stated rather than noticed. It has
+	// moved three times: when the alias advanced to b15, when restoring the warm
+	// agent changed what provision.sh writes, and here, because provision.sh now
+	// creates /home/runner/.cache explicitly instead of letting `install -d`
+	// leave it root-owned. b17 is built and promoted, so its contents cannot
+	// change under it -- the alias goes to b18. That coupling is the point: the
+	// alias is part of the recipe, so a manifest whose contents changed under an
+	// unchanged alias would otherwise ask the builder to produce different bytes
+	// for a name that is already promoted.
+	if first != "sha256:94237e9c38f839f5062c37f4a5a32b0d0a4aa0714c15c36a87a4f19ac3c3fc0e" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
