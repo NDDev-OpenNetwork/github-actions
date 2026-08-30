@@ -68,6 +68,16 @@ test "$(jq -er .go_cache_seed.bytes /etc/nddev/image-build.json)" -gt 0
 test -d /home/runner/.cache/go-build
 test -d /home/runner/go/pkg/mod
 test "$(stat --format='%U:%G' /home/runner/go /home/runner/go/bin /home/runner/go/pkg)" = $'runner:runner\nrunner:runner\nrunner:runner'
+# The runner's cache root, proved by writing to it rather than by reading its
+# mode. The image shipped /home/runner/.cache as root:root for months while
+# .cache/go-build under it was correct, because both the build guard and this
+# smoke checked the seeded trees and never the directory they hang from. uv,
+# pip, npm and go all default under here, so a root-owned .cache is a job
+# failure that reads as a code failure: "Failed to initialize cache at
+# /home/runner/.cache/uv: Permission denied".
+test "$(stat --format='%U:%G' /home/runner/.cache)" = "runner:runner"
+runuser -u runner -- test -w /home/runner/.cache
+runuser -u runner -- sh -c 'set -e; d=$(mktemp -d /home/runner/.cache/gha-smoke-XXXXXX); rmdir "$d"'
 test -n "$(find /home/runner/.cache/go-build -type f -print -quit)"
 [[ "$(sccache --version)" == "sccache ${GHA_SCCACHE_VERSION#v}" ]]
 echo "${GHA_SCCACHE_BINARY_SHA256}  /usr/local/bin/sccache" | sha256sum --check --strict --status
