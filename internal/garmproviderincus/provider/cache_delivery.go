@@ -244,8 +244,9 @@ jq -e '
 @@NDDEV_CACHE_ROLE_CLAUSE@@
     )
   elif .schema_version == 2 then
-    (keys | sort) == (["ca_pem_b64","claim_endpoint","claim_token","instance_name","schema_version"] | sort) and
+    (keys | sort) == (["ca_pem_b64","claim_endpoint","claim_token","instance_name","runner_name","schema_version"] | sort) and
     (.instance_name | test("^[a-z][a-z0-9-]{5,63}$")) and
+    (.runner_name | test("^[a-z][a-z0-9-]{5,63}$")) and
     (.claim_endpoint | startswith("https://") and endswith("/api/v1/cache/claim")) and
     (.claim_token | test("^[A-Za-z0-9_-]{43}$")) and
     (.ca_pem_b64 | test("^[A-Za-z0-9+/=]+$"))

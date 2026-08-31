@@ -136,6 +136,12 @@ func TestCloudConfigContainsNoCacheSecret(t *testing.T) {
 	require.NotContains(t, cacheSetup, string(delivery.SecretKey))
 }
 
+func TestCacheSetupAcceptsDistinctWarmProviderAndRunnerIdentity(t *testing.T) {
+	script := string(renderCacheSetupScript())
+	require.Contains(t, script, `"instance_name","runner_name","schema_version"`)
+	require.Contains(t, script, `(.runner_name | test("^[a-z][a-z0-9-]{5,63}$"))`)
+}
+
 func TestExactBootstrapUsesAuthenticatedClaimBeforeZeroByteReadinessMarker(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
 	store := configureTestCacheClaim(t, provider)
