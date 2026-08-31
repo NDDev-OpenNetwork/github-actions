@@ -19,7 +19,7 @@ schema_version: 2
 # a runner class withdrawn, a tenancy boundary narrowed, an admission rule
 # changed. Adding a class or a tenant does not bump it -- that only widens what
 # is on offer.
-contract_version: 4
+contract_version: 5
 
 execution:
   worker_kind: incus-container
@@ -77,8 +77,8 @@ observability:
 guarantees:
   - subject: runner-classes
     promise: >-
-      A published runner class keeps its label and its capability shape,
-      including its bounded CPU tuning envelope. A class
+      A published runner class keeps its label, capability shape and minimum
+      memory/disk resources, including its bounded CPU tuning envelope. A class
       is withdrawn only by a contract_version bump, and never silently: a label
       that stops being served would leave a consumer's jobs queued forever
       rather than failing.
@@ -114,6 +114,7 @@ guarantees:
 not_contractual:
   - Warm-pool depth, and whether a given job starts warm or cold.
   - Per-host capacity and which host serves a given job.
+  - Per-deployment memory and disk ceilings above the published class minima.
   - Image contents beyond the baked toolchains the class declares.
   - Cache hit rate, and cache availability -- a cache outage degrades a build to
     uncached rather than failing it.
