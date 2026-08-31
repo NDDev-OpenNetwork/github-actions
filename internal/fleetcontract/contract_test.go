@@ -32,7 +32,7 @@ func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 		len(contract.Tenants) == 0 || len(contract.Merge.RequiredContexts) != 1 || contract.Merge.RequiredContexts[0] != "Gate" {
 		t.Fatalf("public contract = %#v", contract)
 	}
-	if contract.SchemaVersion != 2 || contract.ContractVersion != 4 || contract.Execution.WorkerKind != "incus-container" ||
+	if contract.SchemaVersion != 2 || contract.ContractVersion != 5 || contract.Execution.WorkerKind != "incus-container" ||
 		!contract.Execution.Ephemeral || contract.Execution.JobsPerWorker != 1 || !contract.ResourceSemantics.HardMemoryExcludesEmergencySwap ||
 		contract.ResourceSemantics.EmergencySwapSchedulable || contract.ResourceSemantics.CPUMode != "weighted-overcommit" {
 		t.Fatalf("contract v2 semantics = %#v", contract)
@@ -99,7 +99,7 @@ func TestDeploymentOverlayCannotWeakenContract(t *testing.T) {
 		"vm worker":              func(candidate *config.Config) { candidate.ControlPlane.WorkerKind = "incus-vm" },
 		"schedulable swap":       func(candidate *config.Config) { candidate.Guardrails.EmergencySwapSchedulable = true },
 		"pressure disabled":      func(candidate *config.Config) { candidate.Pressure.Required = false },
-		"resource drift":         func(candidate *config.Config) { candidate.Pools[0].Resources.MemoryMiB++ },
+		"memory below minimum":   func(candidate *config.Config) { candidate.Pools[0].Resources.MemoryMiB-- },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := platform
@@ -109,6 +109,22 @@ func TestDeploymentOverlayCannotWeakenContract(t *testing.T) {
 				t.Fatal("weakened overlay was accepted")
 			}
 		})
+	}
+}
+
+func TestDeploymentOverlayMayRaiseResourceCeilings(t *testing.T) {
+	contract, err := Build(Sources{Root: "../.."}, "0123456789abcdef0123456789abcdef01234567")
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform, err := config.Load(filepath.Join("..", "..", "config", "example-services.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform.Pools[0].Resources.MemoryMiB += 2048
+	platform.Pools[0].Resources.DiskGiB += 10
+	if err := ValidateConfig(contract, platform); err != nil {
+		t.Fatalf("resource expansion above the published minimum was rejected: %v", err)
 	}
 }
 

@@ -86,7 +86,7 @@ func ValidateConfig(contract Contract, platform platformconfig.Config) error {
 			pool.Capabilities.NetworkPolicy != class.NetworkPolicy || pool.Capabilities.CacheWriteScope != class.CacheWriteScope ||
 			pool.Capabilities.Docker != class.Docker || pool.Capabilities.Browser != class.Browser || pool.Resources.VCPU < class.Resources.VCPUMin ||
 			pool.Resources.VCPU > class.Resources.VCPUMax ||
-			pool.Resources.MemoryMiB != class.Resources.MemoryMiB || pool.Resources.DiskGiB != class.Resources.DiskGiB {
+			pool.Resources.MemoryMiB < class.Resources.MemoryMiB || pool.Resources.DiskGiB < class.Resources.DiskGiB {
 			// Warm depth is deliberately not compared. The contract's own
 			// not_contractual list says "Warm-pool depth, and whether a given
 			// job starts warm or cold", so a consumer may not build on it and
