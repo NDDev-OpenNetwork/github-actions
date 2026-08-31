@@ -44,6 +44,7 @@ type WarmPoolResult struct {
 	DeferralReason    admission.Reason    `json:"deferral_reason,omitempty"`
 	AdmissionDecision *admission.Decision `json:"admission_decision,omitempty"`
 	Created           []string            `json:"created"`
+	Consumed          []string            `json:"consumed_during_create"`
 	Promoted          []string            `json:"promoted"`
 	DeletedExcess     []string            `json:"deleted_excess"`
 }
@@ -211,9 +212,18 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 	deficit := pool.Warm.TargetReady - len(ready) - (len(preparing) - len(result.Promoted))
 	if deficit > 0 && apply {
 		for range deficit {
-			name, decision, err := l.createWarm(ctx, flavor)
+			name, consumed, decision, err := l.createWarm(ctx, flavor)
 			if err != nil {
 				return result, err
+			}
+			if consumed {
+				// A job claim or pressure preemption may retire a newly created
+				// warm instance while this reconciler is still waiting for its
+				// network. That is useful concurrent fleet work, not a failed
+				// systemd reconcile. The next timer pass observes the resulting
+				// inventory and refills any remaining deficit.
+				result.Consumed = append(result.Consumed, name)
+				continue
 			}
 			if decision != nil {
 				result.Deferred = true
@@ -234,18 +244,18 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 	return result, nil
 }
 
-func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, deferred *admission.Decision, err error) {
+func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, consumed bool, deferred *admission.Decision, err error) {
 	suffix, err := newWarmSuffix()
 	if err != nil {
-		return "", nil, fmt.Errorf("generate warm instance identity: %w", err)
+		return "", false, nil, fmt.Errorf("generate warm instance identity: %w", err)
 	}
 	name = "warm-" + strings.TrimPrefix(flavor, "nddev-linux-") + "-" + suffix
 	decision, err := l.admission.AdmitWarm(ctx, l.cli, flavor, name)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "evaluating warm capacity")
+		return "", false, nil, errors.Wrap(err, "evaluating warm capacity")
 	}
 	if !decision.Admitted {
-		return "", &decision, nil
+		return "", false, &decision, nil
 	}
 	created := false
 	defer func() {
@@ -266,22 +276,34 @@ func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, def
 	}()
 	args, err := l.getWarmCreateArgs(ctx, flavor, name)
 	if err != nil {
-		return "", nil, err
+		return "", false, nil, err
 	}
 	if err = l.launchInstance(ctx, args); err != nil {
-		return "", nil, errors.Wrap(err, "launching warm instance")
+		return "", false, nil, errors.Wrap(err, "launching warm instance")
 	}
 	created = true
 	if err = l.admission.MarkCreated(ctx, name); err != nil {
-		return "", nil, errors.Wrap(err, "recording warm instance creation")
+		return "", false, nil, errors.Wrap(err, "recording warm instance creation")
 	}
 	if _, err = l.waitInstanceHasIP(ctx, name); err != nil {
-		return "", nil, errors.Wrap(err, "waiting for warm instance network")
+		if warmInstanceRetiredDuringCreate(err) {
+			err = nil
+			return name, true, nil, nil
+		}
+		return "", false, nil, errors.Wrap(err, "waiting for warm instance network")
 	}
 	if err = l.waitWarmReady(ctx, name, flavor, 2*time.Second); err != nil {
-		return "", nil, err
+		if warmInstanceRetiredDuringCreate(err) {
+			err = nil
+			return name, true, nil, nil
+		}
+		return "", false, nil, err
 	}
-	return name, nil, nil
+	return name, false, nil, nil
+}
+
+func warmInstanceRetiredDuringCreate(err error) bool {
+	return isNotFoundError(err)
 }
 
 func (l *Incus) waitWarmReady(ctx context.Context, name, flavor string, pollInterval time.Duration) error {

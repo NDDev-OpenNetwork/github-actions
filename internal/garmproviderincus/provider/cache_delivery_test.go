@@ -258,7 +258,7 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	caPath := filepath.Join(directory, "ca.pem")
 	githubEnv := filepath.Join(directory, "github-env")
 	delivery := testCacheDelivery()
-	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "warm-standard-example", RunnerName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
 	raw, _ := json.Marshal(assignment)
 	require.NoError(t, os.WriteFile(assignmentPath, raw, 0o400))
 	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))
@@ -292,6 +292,8 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	require.Equal(t, float64(2), claimRequest["run_attempt"])
 	require.Equal(t, "test", claimRequest["job_name"])
 	require.Equal(t, strings.Repeat("a", 40), claimRequest["commit_sha"])
+	require.Equal(t, "warm-standard-example", claimRequest["instance_name"])
+	require.Equal(t, "runner-example", claimRequest["runner_name"])
 	consumed, _ := os.ReadFile(consumedPath)
 	require.Equal(t, response.DeliveryID+"\n", string(consumed))
 }
@@ -304,7 +306,7 @@ func TestJobStartedHookDegradesToUncachedWhenRepositoryClaimFails(t *testing.T) 
 	caPath := filepath.Join(directory, "ca.pem")
 	githubEnv := filepath.Join(directory, "github-env")
 	delivery := testCacheDelivery()
-	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "warm-standard-example", RunnerName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("a", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
 	raw, _ := json.Marshal(assignment)
 	require.NoError(t, os.WriteFile(assignmentPath, raw, 0o400))
 	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))

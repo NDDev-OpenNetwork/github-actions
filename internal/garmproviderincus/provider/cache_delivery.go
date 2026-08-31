@@ -44,6 +44,7 @@ type cacheClaimLoader func() (cachebroker.Store, string, []byte, error)
 type workerCacheClaim struct {
 	SchemaVersion int    `json:"schema_version"`
 	InstanceName  string `json:"instance_name"`
+	RunnerName    string `json:"runner_name"`
 	ClaimEndpoint string `json:"claim_endpoint"`
 	ClaimToken    string `json:"claim_token"`
 	CAPEMB64      string `json:"ca_pem_b64"`
@@ -312,7 +313,8 @@ if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
   test -n "${GITHUB_REPOSITORY:-}"
   test -n "${RUNNER_NAME:-}"
   instance_name="$(jq -r '.instance_name' "${assignment}")"
-  test "${RUNNER_NAME}" = "${instance_name}"
+  runner_name="$(jq -r '.runner_name' "${assignment}")"
+  test "${RUNNER_NAME}" = "${runner_name}"
   claim_endpoint="$(jq -r '.claim_endpoint' "${assignment}")"
   claim_token="$(jq -r '.claim_token' "${assignment}")"
   response="$(mktemp /tmp/nddev-cache-claim.XXXXXXXXXX)"
@@ -481,7 +483,7 @@ func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, boots
 	if err := store.Add(ctx, instanceName, bootstrap.Flavor, role, token); err != nil {
 		return nil, nil, true, fmt.Errorf("persist cache claim: %w", err)
 	}
-	claim := workerCacheClaim{SchemaVersion: 2, InstanceName: instanceName, ClaimEndpoint: endpoint, ClaimToken: base64.RawURLEncoding.EncodeToString(token), CAPEMB64: base64.StdEncoding.EncodeToString(ca)}
+	claim := workerCacheClaim{SchemaVersion: 2, InstanceName: instanceName, RunnerName: bootstrap.Name, ClaimEndpoint: endpoint, ClaimToken: base64.RawURLEncoding.EncodeToString(token), CAPEMB64: base64.StdEncoding.EncodeToString(ca)}
 	raw, err := json.Marshal(claim)
 	if err != nil {
 		_ = store.Remove(context.Background(), instanceName)
@@ -566,7 +568,7 @@ func (l *Incus) coldCacheDeliveryPresent(ctx context.Context, instanceName strin
 		}
 	case 2:
 		claim, err := parseWorkerCacheClaim(assignmentRaw)
-		if err != nil || claim.InstanceName != instanceName {
+		if err != nil || claim.InstanceName != instanceName || claim.RunnerName != bootstrap.Name {
 			return false, fmt.Errorf("ready cache claim is not bound to the requested runner")
 		}
 		token, err := base64.RawURLEncoding.DecodeString(claim.ClaimToken)
@@ -647,7 +649,7 @@ func parseWorkerCacheClaim(raw []byte) (workerCacheClaim, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return workerCacheClaim{}, fmt.Errorf("worker cache claim contains trailing data")
 	}
-	if claim.SchemaVersion != 2 || claim.InstanceName == "" || claim.ClaimEndpoint == "" || claim.ClaimToken == "" || claim.CAPEMB64 == "" {
+	if claim.SchemaVersion != 2 || claim.InstanceName == "" || claim.RunnerName == "" || claim.ClaimEndpoint == "" || claim.ClaimToken == "" || claim.CAPEMB64 == "" {
 		return workerCacheClaim{}, fmt.Errorf("worker cache claim is incomplete")
 	}
 	return claim, nil
