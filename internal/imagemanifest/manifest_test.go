@@ -3,6 +3,7 @@ package imagemanifest
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:70dcea850907bcd82c4b5f662586e72c46e271176bf7954b45ce802b166a2ce9" {
+	if fingerprint != "sha256:5642f1d18e9c8d0b8dc2d1a6e768fe5e5d834636946af61e39cc4666d1385329" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -77,6 +78,7 @@ func assertBakedToolchains(t *testing.T, manifest Manifest) {
 		"node25": {"25.9.0", "1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e"},
 		"pnpm":   {"11.22.0", "57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc"},
 		"rust":   {"1.97.1", "88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f"},
+		"rustup": {"1.29.0", "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10"},
 		"uv":     {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
 		"yarn":   {"4.18.0", "606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497"},
 	}
@@ -239,5 +241,41 @@ func TestIntegrationValidationRejectsUnpinnedOrRemoteDockerInputs(t *testing.T) 
 				t.Fatalf("expected %q validation failure, got %v", test.want, err)
 			}
 		})
+	}
+}
+
+// TestRustupPinsEveryChannelTheEstateRequests is the guard the feature needs.
+// Baking rustup is only worth anything if the channels the estate actually pins
+// are installed beside it: all seven public setup-systems name 1.98.0 in
+// rust-toolchain.toml, and their MSRV job asks for 1.89. Dropping either one
+// puts those runs back to downloading a toolchain, and nothing else in the tree
+// would notice.
+func TestRustupPinsEveryChannelTheEstateRequests(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"../../config/golden-image.yaml",
+		"../../config/golden-image-container.yaml",
+		"../../config/golden-image-integration.yaml",
+		"../../config/golden-image-container-integration.yaml",
+	} {
+		manifest, err := Load(path)
+		if err != nil {
+			t.Fatalf("load %s: %v", path, err)
+		}
+		var rustup *Toolchain
+		for index := range manifest.Toolchains {
+			if manifest.Toolchains[index].Name == "rustup" {
+				rustup = &manifest.Toolchains[index]
+			}
+		}
+		if rustup == nil {
+			t.Fatalf("%s pins no rustup", path)
+		}
+		if !slices.Contains(rustup.Channels, "1.98.0") || !slices.Contains(rustup.Channels, "1.89") {
+			t.Fatalf("%s rustup channels = %v, want both 1.98.0 and the 1.89 MSRV", path, rustup.Channels)
+		}
+		if rustup.DefaultChannel != "1.98.0" {
+			t.Fatalf("%s rustup default channel = %q, want 1.98.0", path, rustup.DefaultChannel)
+		}
 	}
 }

@@ -82,7 +82,7 @@ func TestBuildProducesDeterministicBoundedPlan(t *testing.T) {
 	}
 	// The baked set plus the optional Flutter SDK this manifest pins, still
 	// sorted: the plan's ordering is what makes the recipe fingerprint stable.
-	if !slices.Equal(names, []string{"bun", "flutter", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}) {
+	if !slices.Equal(names, []string{"bun", "flutter", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "rustup", "uv", "yarn"}) {
 		t.Fatalf("plan toolchains are not the canonical sorted set: %v", names)
 	}
 	if first.CompilerCache.Name != "sccache" || first.CompilerCache.Version != "v0.17.0" ||

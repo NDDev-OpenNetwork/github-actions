@@ -102,6 +102,16 @@ var toolchainAssets = map[string]struct {
 			return "/dist/rust-" + version + "-x86_64-unknown-linux-gnu.tar.xz"
 		},
 	},
+	// rustup ships a bare executable rather than an archive, and the versioned
+	// archive path is used rather than /rustup/dist so the pin names one exact
+	// release instead of whatever is current.
+	"rustup": {
+		Host:    "static.rust-lang.org",
+		Archive: func(string) string { return "rustup-init" },
+		Path: func(version string) string {
+			return "/rustup/archive/" + version + "/x86_64-unknown-linux-gnu/rustup-init"
+		},
+	},
 	"uv": {
 		Host:    "github.com",
 		Archive: func(string) string { return "uv-x86_64-unknown-linux-gnu.tar.gz" },
