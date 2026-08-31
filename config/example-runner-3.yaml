@@ -127,7 +127,7 @@ pools:
     resources:
       vcpu: 2
       memory_mib: 4096
-      disk_gib: 30
+      disk_gib: 40
     max_running: 1
     warm:
       target_ready: 0
@@ -145,7 +145,7 @@ pools:
     resources:
       vcpu: 2
       memory_mib: 2048
-      disk_gib: 20
+      disk_gib: 30
     max_running: 12
     warm:
       target_ready: 0

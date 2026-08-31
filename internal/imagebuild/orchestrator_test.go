@@ -164,7 +164,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// alias is part of the recipe, so a manifest whose contents changed under an
 	// unchanged alias would otherwise ask the builder to produce different bytes
 	// for a name that is already promoted.
-	if first != "sha256:ba41e9cfcebc856bfa3ee0b75f12d4e3f7a9b85598308491ea70f72b2fe2baff" {
+	if first != "sha256:f3067c98c8598549a1f81bd1c082aec5fb302fa31c52a986d17725fda57f9ac7" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -536,7 +536,7 @@ func TestInstanceInitArgsPinContainerIsolation(t *testing.T) {
 			t.Fatalf("instance init args %q do not contain %q", args, want)
 		}
 	}
-	if !strings.Contains(strings.Join(args, " "), "--device root,size=16GiB") {
+	if !strings.Contains(strings.Join(args, " "), "--device root,size=22GiB") {
 		t.Fatalf("builder init args do not contain bounded root disk: %q", args)
 	}
 	smokeArgs := (&Orchestrator{}).instanceInitArgs(plan, strings.Repeat("b", 64), "smoke", 0)

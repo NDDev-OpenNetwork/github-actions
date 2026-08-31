@@ -170,7 +170,7 @@ func TestContainerCanaryProfileIsUnprivilegedAndNonNested(t *testing.T) {
 		profile.Config["security.privileged"] != "false" || profile.Config["security.nesting"] != "false" ||
 		profile.Config["security.syscalls.intercept.mknod"] != "false" ||
 		profile.Config["security.syscalls.intercept.setxattr"] != "false" ||
-		profile.Config["security.secureboot"] != "" || profile.Devices["root"]["size"] != "20GiB" {
+		profile.Config["security.secureboot"] != "" || profile.Devices["root"]["size"] != "30GiB" {
 		t.Fatalf("container profile is not fail-closed: %#v", profile)
 	}
 }

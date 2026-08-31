@@ -73,7 +73,7 @@ func TestBuildProducesDeterministicBoundedPlan(t *testing.T) {
 	if first.InstanceConfig["security.privileged"] != "false" || first.InstanceConfig["security.idmap.isolated"] != "true" || first.InstanceConfig["security.nesting"] != "false" {
 		t.Fatalf("container isolation is not explicit: %#v", first.InstanceConfig)
 	}
-	if first.BuilderDiskGiB != 16 || first.SmokeRootDiskGiB != 30 {
+	if first.BuilderDiskGiB != 22 || first.SmokeRootDiskGiB != 30 {
 		t.Fatalf("unexpected image/runtime disk policy: %#v", first)
 	}
 	names := make([]string, 0, len(first.Toolchains))
@@ -131,7 +131,7 @@ func TestBuildProducesPinnedDockerIntegrationPlan(t *testing.T) {
 	}
 	if plan.Image.EffectiveType() != "container" || plan.Variant != "integration" ||
 		plan.InstanceConfig["security.nesting"] != "true" || plan.InstanceConfig["security.idmap.isolated"] != "true" ||
-		plan.SmokeRootDiskGiB != 50 || plan.BuilderDiskGiB != 24 {
+		plan.SmokeRootDiskGiB != 50 || plan.BuilderDiskGiB != 30 {
 		t.Fatalf("unexpected integration plan: %#v", plan)
 	}
 	if plan.DockerActionBaseRef != "nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1" {
