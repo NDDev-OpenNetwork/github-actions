@@ -34,6 +34,9 @@ const (
 	// An uncovered intent inside that window is a worker that has finished and
 	// not yet been swept, which is ordinary churn on a fleet of one-job
 	// containers. Past it, nothing is coming: that is the gap worth paging on.
+	// The provider names every pre-provisioned instance this way; see
+	// internal/garmproviderincus/provider/warm.go.
+	warmInstancePrefix              = "warm-"
 	uncoveredRunningGracePeriod     = 10 * time.Minute
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
@@ -611,6 +614,13 @@ func summarizeExecutionCorrelation(journal providerjournal.Journal, queue queuei
 		// provider reconciliation while the fleet is idle. Keep that gap
 		// observable without reporting a job with a missing run identity.
 		if strings.HasPrefix(lease.PoolID, "image-maintenance/") {
+			continue
+		}
+		// A warm instance is created deliberately with no job; that is what
+		// warm means. Counting it here reports the fleet's own pre-provisioning
+		// as an unbound worker, and the count can never reach zero while any
+		// pool keeps warm capacity.
+		if strings.HasPrefix(name, warmInstancePrefix) {
 			continue
 		}
 		if _, covered := runningNames[name]; covered {

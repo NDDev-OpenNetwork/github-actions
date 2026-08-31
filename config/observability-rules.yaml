@@ -410,7 +410,16 @@ rules:
     stream_name: gha_fleet_provider_created_without_running_identity_oldest_age_seconds
     expression: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds)
     operator: ">"
-    threshold: 300
+    # Fifteen minutes, above the routine tail rather than inside it. Sampled on
+    # the live fleet under load, six samples fifty seconds apart: 13 to 21
+    # created leases at a time, of which 0 to 3 were past 300 seconds, and the
+    # oldest ranged 229 to 392. A threshold of 300 therefore sat inside ordinary
+    # pre-start latency and the rule crossed and cleared on a ten-minute cadence
+    # while nothing was wrong.
+    #
+    # A genuinely stuck instance looks different and was observed the same day
+    # at 942 seconds. 900 separates the two rather than splitting the tail.
+    threshold: 900
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
