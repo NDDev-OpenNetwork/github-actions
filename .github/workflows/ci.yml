@@ -27,9 +27,23 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve the provider's compiled package set
+        id: packages
+        run: |
+          set -euo pipefail
+          {
+            printf 'directories<<PACKAGES\n'
+            ./scripts/provider-package-directories.sh
+            printf 'PACKAGES\n'
+          } >>"${GITHUB_OUTPUT}"
       - name: Classify derivative inputs
         id: paths
         env:
+          PROVIDER_PACKAGE_DIRECTORIES: ${{ steps.packages.outputs.directories }}
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -56,8 +70,22 @@ jobs:
                 ;;
             esac
             case "${changed}" in
-              config/provider-derivative.yaml|cmd/garm-provider-incus-nddev/*|internal/cachenamespace/*|internal/config/*|internal/garmproviderincus/*|internal/provideradmission/*|internal/providerjournal/*|internal/providerrelease/*|internal/rustfscache/*|go.mod|go.sum)
+              config/provider-derivative.yaml|go.mod|go.sum)
                 provider=true
+                ;;
+              *)
+                # Every directory the provider binary actually compiles, read
+                # from the build graph rather than from a list maintained by
+                # hand. The hand-written list named eight of the eighteen
+                # internal packages `go list -deps` reports, so a change to
+                # internal/cachebroker or internal/queueintent -- both real
+                # provider dependencies -- skipped this job entirely and shipped
+                # under a manifest digest that no longer described main.
+                for directory in ${PROVIDER_PACKAGE_DIRECTORIES}; do
+                  case "${changed}" in
+                    "${directory}"/*.go) provider=true ;;
+                  esac
+                done
                 ;;
             esac
           done < <(git diff --name-only --diff-filter=ACMRT "${base}" "${HEAD_SHA}")
@@ -146,22 +174,41 @@ jobs:
             printf 'source_commit=%s\n' "$(go run ./cmd/gha-fleet provider-release --field source_commit)"
             printf 'binary_sha256=%s\n' "$(go run ./cmd/gha-fleet provider-release --field binary_sha256)"
           } >>"${GITHUB_OUTPUT}"
+      - name: Resolve the provider's compiled package set
+        id: packages
+        run: |
+          set -euo pipefail
+          {
+            printf 'directories<<PACKAGES\n'
+            ./scripts/provider-package-directories.sh
+            printf 'PACKAGES\n'
+          } >>"${GITHUB_OUTPUT}"
       - name: Refuse provider source drift after the release commit
         env:
           SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
           HEAD_COMMIT: ${{ github.sha }}
+          PROVIDER_PACKAGE_DIRECTORIES: ${{ steps.packages.outputs.directories }}
         run: |
           set -euo pipefail
           git merge-base --is-ancestor "${SOURCE_COMMIT}" "${HEAD_COMMIT}"
           drift=false
           while IFS= read -r changed; do
             case "${changed}" in
-              *_test.go) ;;
-              go.mod|go.sum|cmd/garm-provider-incus-nddev/*.go|internal/cachenamespace/*.go|internal/config/*.go|internal/garmproviderincus/*.go|internal/garmproviderincus/*/*.go|internal/provideradmission/*.go|internal/providerjournal/*.go|internal/providerrelease/*.go|internal/rustfscache/*.go)
+              *_test.go) continue ;;
+              go.mod|go.sum)
                 printf 'provider release source drift: %s\n' "${changed}" >&2
                 drift=true
+                continue
                 ;;
             esac
+            for directory in ${PROVIDER_PACKAGE_DIRECTORIES}; do
+              case "${changed}" in
+                "${directory}"/*.go)
+                  printf 'provider release source drift: %s\n' "${changed}" >&2
+                  drift=true
+                  ;;
+              esac
+            done
           done < <(git diff --name-only --diff-filter=ACMRT "${SOURCE_COMMIT}" "${HEAD_COMMIT}")
           [[ "${drift}" == false ]]
       - name: Checkout exact provider source
