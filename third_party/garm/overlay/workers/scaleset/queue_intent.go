@@ -22,8 +22,8 @@ import (
 const (
 	queueAdmissionSchemaVersion      = 5
 	queueIntentLegacySchemaVersion   = 1
-	queueIntentPreviousSchemaVersion = 4
-	queueIntentSchemaVersion         = 5
+	queueIntentPreviousSchemaVersion = 5
+	queueIntentSchemaVersion         = 6
 	queueIntentMaxBytes              = 4 * 1024 * 1024
 	queueSchedulerStride             = uint64(1_000_000)
 	queueAcquireRetryDelay           = 5 * time.Second
@@ -118,10 +118,19 @@ type queueIntent struct {
 	Owner string `json:"owner,omitempty"`
 	// Repository is the account until JobAvailable names the repository. See
 	// queueIntentRepositoryCompatible for the one transition that is allowed.
-	Repository     string           `json:"repository"`
-	WorkflowRef    string           `json:"workflow_ref"`
-	EventName      string           `json:"event_name"`
-	QueueTime      time.Time        `json:"queue_time"`
+	Repository  string    `json:"repository"`
+	WorkflowRef string    `json:"workflow_ref"`
+	EventName   string    `json:"event_name"`
+	QueueTime   time.Time `json:"queue_time"`
+	// FirstQueuedAt is when this intent was first written, and is never
+	// rewritten afterwards. QueueTime cannot answer "how long has this waited":
+	// authoritative reconciliation reassigns it from job.CreatedAt, and where
+	// that is absent it falls back to the current time, so a waiting intent's
+	// QueueTime moves forward while it waits -- measured moving 15 minutes on
+	// two still-queued intents in one three-minute sample. An intent written
+	// before this field existed reads it as zero; callers fall back to
+	// QueueTime for those, which under-reports rather than inventing a wait.
+	FirstQueuedAt  time.Time        `json:"first_queued_at,omitempty"`
 	State          queueIntentState `json:"state"`
 	Priority       int              `json:"priority"`
 	StateEnteredAt time.Time        `json:"state_entered_at"`
@@ -250,6 +259,13 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			existing.Repository = repository
 			existing.WorkflowRef = "authoritative-reconciliation"
 			existing.EventName = job.Action
+			// Backfill from the value this reconciliation is about to replace,
+			// not from its replacement: an intent written before FirstQueuedAt
+			// existed carries its original queue time here, and taking the new
+			// one would erase exactly the wait this field exists to keep.
+			if existing.FirstQueuedAt.IsZero() {
+				existing.FirstQueuedAt = existing.QueueTime
+			}
 			existing.QueueTime = queueTime
 			existing.Priority = baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action})
 			existing.UpdatedAt = now
@@ -262,7 +278,7 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			Key: key, ScaleSetID: int64(scaleSet.ScaleSetID), JobID: job.ScaleSetJobID,
 			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
 			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
-			QueueTime: queueTime, State: queueStateQueued,
+			QueueTime: queueTime, FirstQueuedAt: now, State: queueStateQueued,
 			Priority:       baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{EventName: job.Action}),
 			StateEnteredAt: now, UpdatedAt: now, ExpiresAt: expiryForState(config, queueStateQueued, now),
 		}
@@ -331,6 +347,12 @@ func (c *queueIntentCoordinator) ObserveAvailable(scaleSet params.ScaleSet, jobs
 					existing.JobDisplayName = intent.JobDisplayName
 					existing.WorkflowRef = intent.WorkflowRef
 					existing.EventName = intent.EventName
+					// The account-scoped intent has been waiting since before
+					// this binding; keep its own first-seen stamp rather than
+					// the newcomer's.
+					if existing.FirstQueuedAt.IsZero() {
+						existing.FirstQueuedAt = existing.QueueTime
+					}
 					existing.QueueTime = intent.QueueTime
 					existing.Priority = intent.Priority
 					journal.Intents[intent.Key] = existing
@@ -791,6 +813,7 @@ func transferTerminalWaiterLineage(
 	lineage := candidates[0]
 	delete(journal.Intents, lineage.Key)
 	replacement.QueueTime = lineage.QueueTime
+	replacement.FirstQueuedAt = lineage.FirstQueuedAt
 	replacement.Priority = lineage.Priority
 	replacement.Repository = lineage.Repository
 	replacement.State = queueStateQueued
@@ -833,6 +856,7 @@ func transferAssignedReservation(
 	reservation := candidates[0]
 	delete(journal.Intents, reservation.Key)
 	replacement.QueueTime = reservation.QueueTime
+	replacement.FirstQueuedAt = reservation.FirstQueuedAt
 	replacement.Priority = reservation.Priority
 	replacement.State = queueStateRunning
 	replacement.StateEnteredAt = now
@@ -1133,6 +1157,7 @@ func queueIntentFromJob(config queueAdmissionConfig, scaleSet params.ScaleSet, j
 		WorkflowRef:     job.JobWorkflowRef,
 		EventName:       job.EventName,
 		QueueTime:       job.QueueTime.UTC(),
+		FirstQueuedAt:   now,
 		State:           queueStateQueued,
 		Priority:        baseQueuePriority(config, scaleSet.Name, job),
 		StateEnteredAt:  now,
@@ -1186,6 +1211,7 @@ func queueIntentFromLifecycle(config queueAdmissionConfig, scaleSet params.Scale
 		WorkflowRef:     "unavailable-before-job-available",
 		EventName:       "unavailable-before-job-available",
 		QueueTime:       now,
+		FirstQueuedAt:   now,
 		State:           queueStateQueued,
 		Priority:        baseQueuePriority(config, scaleSet.Name, params.ScaleSetJobMessage{}),
 		StateEnteredAt:  now,
@@ -1494,11 +1520,18 @@ func readQueueIntentJournal(path string) (queueIntentJournal, error) {
 		// incomplete until a later JobAvailable or JobStarted binds them.
 		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = queueIntentSchemaVersion
-	case queueIntentPreviousSchemaVersion:
+	case 4:
 		// v5 adds bounded terminal tombstones. No prior tombstone can be
 		// reconstructed, so the map starts empty and only new authoritative
 		// completion or absence evidence populates it.
 		journal.TerminalJobs = make(map[string]time.Time)
+		journal.SchemaVersion = queueIntentSchemaVersion
+	case queueIntentPreviousSchemaVersion:
+		// v6 adds the immutable first-seen stamp. It cannot be reconstructed for
+		// an intent already waiting -- QueueTime has been rewritten an unknown
+		// number of times by then -- so it stays zero and readers fall back to
+		// QueueTime, which under-reports that intent's wait rather than
+		// inventing one. New intents carry it from their first write.
 		journal.SchemaVersion = queueIntentSchemaVersion
 	case queueIntentSchemaVersion:
 	default:

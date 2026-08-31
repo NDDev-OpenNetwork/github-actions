@@ -881,3 +881,104 @@ func TestOrphanGraceForgetsAResolvedName(t *testing.T) {
 		t.Fatal("a reappearing name inherited an expired grace")
 	}
 }
+
+// TestQueuedWaitSurvivesAQueueTimeRewrite is the whole point of the field. An
+// intent that has waited an hour but had its QueueTime reassigned a minute ago
+// -- which authoritative reconciliation does, and which was measured moving two
+// still-queued intents forward by 15 minutes in a three-minute sample -- must
+// report the hour. Measuring from QueueTime gives a wait with a ceiling, and a
+// threshold built on a ceiling can never fire.
+func TestQueuedWaitSurvivesAQueueTimeRewrite(t *testing.T) {
+	rewritten := queueintent.Intent{
+		Key: "rewritten", ScaleSetID: 11, JobID: "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+		ScaleSetName: "nddev-linux-integration", Repository: "owner",
+		WorkflowRef: "authoritative-rehydration", EventName: "push",
+		QueueTime:      observationTime.Add(-time.Minute),
+		FirstQueuedAt:  observationTime.Add(-time.Hour),
+		State:          queueintent.StateQueued,
+		Priority:       1,
+		StateEnteredAt: observationTime.Add(-30 * time.Second),
+		UpdatedAt:      observationTime.Add(-time.Second),
+		ExpiresAt:      observationTime.Add(time.Minute),
+	}
+	summary, err := summarizeQueue(
+		queueintent.Snapshot{Active: []queueintent.Intent{rewritten}}, testPlatform(t), observationTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.OldestQueuedWaitSeconds != int64(time.Hour/time.Second) {
+		t.Fatalf("OldestQueuedWaitSeconds = %d, want %d (the wait, not the rewritten queue time)",
+			summary.OldestQueuedWaitSeconds, int64(time.Hour/time.Second))
+	}
+	if summary.OldestQueuedWaitSecondsByScaleSet["nddev-linux-integration"] != int64(time.Hour/time.Second) {
+		t.Fatalf("per-scale-set wait = %#v", summary.OldestQueuedWaitSecondsByScaleSet)
+	}
+	// The state clock is what the old threshold used; it must stay short here,
+	// or this test would pass for the wrong reason.
+	if summary.OldestStateAgeSeconds[string(queueintent.StateQueued)] != 30 {
+		t.Fatalf("state age = %d, want 30", summary.OldestStateAgeSeconds[string(queueintent.StateQueued)])
+	}
+}
+
+// TestQueuedWaitFallsBackForIntentsWrittenBeforeTheField keeps the migration
+// honest: an intent with no first-seen stamp reports its queue time rather than
+// zero, which under-reports instead of inventing a wait.
+func TestQueuedWaitFallsBackForIntentsWrittenBeforeTheField(t *testing.T) {
+	legacy := queueintent.Intent{
+		Key: "legacy", ScaleSetID: 11, JobID: "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+		ScaleSetName: "nddev-linux-integration", Repository: "owner",
+		WorkflowRef: "authoritative-rehydration", EventName: "push",
+		QueueTime:      observationTime.Add(-20 * time.Minute),
+		State:          queueintent.StateQueued,
+		Priority:       1,
+		StateEnteredAt: observationTime.Add(-time.Minute),
+		UpdatedAt:      observationTime.Add(-time.Second),
+		ExpiresAt:      observationTime.Add(time.Minute),
+	}
+	summary, err := summarizeQueue(
+		queueintent.Snapshot{Active: []queueintent.Intent{legacy}}, testPlatform(t), observationTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.OldestQueuedWaitSeconds != int64(20*time.Minute/time.Second) {
+		t.Fatalf("OldestQueuedWaitSeconds = %d, want %d",
+			summary.OldestQueuedWaitSeconds, int64(20*time.Minute/time.Second))
+	}
+	// The fallback is a lower bound, and a lower bound that does not say so is
+	// how the previous metric misled. During a rollout every waiting intent is
+	// in this state, so "under the threshold" must not be reportable without
+	// "and this many have nothing to measure by".
+	if summary.QueuedWithoutFirstStamp != 1 {
+		t.Fatalf("QueuedWithoutFirstStamp = %d, want 1", summary.QueuedWithoutFirstStamp)
+	}
+}
+
+// TestStampedIntentsAreNotCountedAsUnmeasurable is the other half: the counter
+// must fall to zero as stamped intents replace unstamped ones, or it becomes a
+// permanent warning that everyone learns to ignore.
+func TestStampedIntentsAreNotCountedAsUnmeasurable(t *testing.T) {
+	stamped := queueintent.Intent{
+		Key: "stamped", ScaleSetID: 11, JobID: "5c3077ba-3664-5824-b2cf-e22a31b25f43",
+		ScaleSetName: "nddev-linux-integration", Repository: "owner",
+		WorkflowRef: "authoritative-rehydration", EventName: "push",
+		QueueTime:      observationTime.Add(-time.Minute),
+		FirstQueuedAt:  observationTime.Add(-time.Hour),
+		State:          queueintent.StateQueued,
+		Priority:       1,
+		StateEnteredAt: observationTime.Add(-30 * time.Second),
+		UpdatedAt:      observationTime.Add(-time.Second),
+		ExpiresAt:      observationTime.Add(time.Minute),
+	}
+	summary, err := summarizeQueue(
+		queueintent.Snapshot{Active: []queueintent.Intent{stamped}}, testPlatform(t), observationTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.QueuedWithoutFirstStamp != 0 {
+		t.Fatalf("QueuedWithoutFirstStamp = %d, want 0 for a stamped intent",
+			summary.QueuedWithoutFirstStamp)
+	}
+}

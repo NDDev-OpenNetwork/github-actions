@@ -38,7 +38,7 @@ rules:
     evaluation_seconds: 60
     hold_seconds: 60
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Alert evaluations are failing, so some alert is blind and saying nothing.
@@ -75,7 +75,7 @@ rules:
     evaluation_seconds: 600
     hold_seconds: 600
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Kernel audit delivery is repeatedly suppressing callbacks across the fleet.
@@ -91,7 +91,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A persistent Collector queue is above ninety percent of capacity.
@@ -107,7 +107,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: One or more compute pressure observers are not being scraped.
@@ -123,7 +123,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A compute host pressure publication is invalid or stale.
@@ -139,7 +139,7 @@ rules:
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet host root filesystem has less than twenty percent free.
@@ -155,7 +155,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 180
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Durable diagnostic export is failing.
@@ -171,7 +171,7 @@ rules:
     evaluation_seconds: 300
     hold_seconds: 3600
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Diagnostic objects remain after their S3 lifecycle eligibility boundary.
@@ -187,7 +187,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: The authoritative fleet observer reports an unhealthy platform.
@@ -208,7 +208,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: GitHub run or repository identity has not converged within two minutes.
@@ -224,7 +224,7 @@ rules:
     evaluation_seconds: 60
     hold_seconds: 180
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Kernel or package compliance telemetry is incomplete on a fleet host.
@@ -240,7 +240,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 30
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet host recorded a new OOM kill.
@@ -260,7 +260,7 @@ rules:
     # nothing new.
     repeat_seconds: 21600
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet host package inventory has not refreshed for more than thirty-six hours.
@@ -280,7 +280,7 @@ rules:
     # it every fifteen minutes cannot make the reboot happen sooner.
     repeat_seconds: 43200
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet host still requires a reboot after package maintenance.
@@ -300,7 +300,7 @@ rules:
     # times. Twice a day is the cadence of the work it asks for.
     repeat_seconds: 43200
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Standard Ubuntu package updates remain available on a fleet host.
@@ -316,7 +316,7 @@ rules:
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet host has consumed more than seventy-five percent of emergency swap.
@@ -332,7 +332,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Sustained major paging exceeds sixty-four MiB per second on a fleet host.
@@ -355,7 +355,7 @@ rules:
     # state whose recovery is a reboot you performed on purpose.
     repeat_seconds: 14400
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Unreclaimable kernel slab exceeds two GiB on a fleet host.
@@ -382,7 +382,7 @@ rules:
     evaluation_seconds: 600
     hold_seconds: 600
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A fleet member repeatedly reports kernel workqueue CPU-hog events.
@@ -398,7 +398,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: An admitted job has not reached execution within five minutes.
@@ -414,7 +414,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A created worker has no running job identity beyond transition grace.
@@ -441,7 +441,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Queue, provider journal and Incus inventory disagree.
@@ -457,7 +457,7 @@ rules:
     evaluation_seconds: 60
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: An eligible queued job has not produced runner delivery progress within five minutes.
@@ -473,7 +473,7 @@ rules:
     evaluation_seconds: 300
     hold_seconds: 1800
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Sustained memory pressure is consuming useful throughput.
@@ -489,7 +489,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 300
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A non-capacity provider-create error remains actively deferred for five minutes.
@@ -505,7 +505,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 60
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A durable provider-create circuit is blocking an entire scale set.
@@ -536,7 +536,7 @@ rules:
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Queue latency is persistently between the two-minute objective and the five-minute page.
@@ -552,7 +552,7 @@ rules:
     evaluation_seconds: 30
     hold_seconds: 120
     destination_ref: fleet_oncall
-    enabled: false
+    enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: The authoritative observer snapshot is stale.
