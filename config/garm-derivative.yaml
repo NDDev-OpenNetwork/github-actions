@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.86
+derivative_version: v0.2.1-nddev.87
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -93,8 +93,8 @@ patches:
     purpose: Treat a completed workflow run as authoritative over a queued child job so cancelled runs release their exact queue intent and cannot be resurrected during scale-set reconciliation.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 0679bbdaefe13166314654d2396d8bd97a7c9fe37850b9dce66a10d2671453ba
-    purpose: Fsync-backed central queue admission where a GitHub-replaced, never-started waiter inherits its exact workflow-job lineage and original queue time instead of starving behind every five-minute UUID replacement, while terminal execution suppression, repository binding, running rehydration and stable phase-entry semantics remain intact.
+    sha256: c8c595c3a9dc0c4557676dd6719b346fcd8e21b6b8734eeddb9f506d10f8e015
+    purpose: Fsync-backed central queue admission where a GitHub-replaced, never-started waiter inherits its exact workflow-job lineage and original queue time instead of starving behind every five-minute UUID replacement, while terminal execution suppression, repository binding, running rehydration and stable phase-entry semantics remain intact, and every intent carries an immutable first-queued stamp that reconciliation cannot move so a wait can be measured at all.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
     sha256: d2501295729475fa70c2bc5265c67b4aaae45c07d3f4f2ff2296644dfc5061e7
     purpose: Deterministic terminal waiter lineage transfer and delayed-redelivery suppression, disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement and concurrent-selection tests.
