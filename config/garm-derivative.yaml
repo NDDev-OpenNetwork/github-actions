@@ -118,7 +118,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 0d2f394309cff22491b9133d1d13761a5efa7431c0fb7eaf686293a948d4599b
+  binary_sha256: cf25d81d767593a35d6ec03d6a2222b7af14efaeda5ef094c33f096ec77a198c
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true

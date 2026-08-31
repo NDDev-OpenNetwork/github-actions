@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="0d2f394309cff22491b9133d1d13761a5efa7431c0fb7eaf686293a948d4599b"
+readonly expected_binary_sha256="cf25d81d767593a35d6ec03d6a2222b7af14efaeda5ef094c33f096ec77a198c"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
