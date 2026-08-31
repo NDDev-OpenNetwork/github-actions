@@ -116,10 +116,11 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		deny(logger, writer, request, http.StatusBadRequest, "trailing request data")
 		return
 	}
-	if claimRequest.InstanceName != claimRequest.RunnerName || !instancePattern.MatchString(claimRequest.InstanceName) {
+	if !instancePattern.MatchString(claimRequest.InstanceName) || !instancePattern.MatchString(claimRequest.RunnerName) {
 		deny(logger, writer, request, http.StatusForbidden, "runner identity mismatch")
 		return
 	}
+	warmRuntimeIdentity := claimRequest.InstanceName != claimRequest.RunnerName
 	if _, _, err := splitRepository(claimRequest.Repository); err != nil {
 		deny(logger, writer, request, http.StatusBadRequest, "invalid repository")
 		return
@@ -141,14 +142,43 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		deny(logger, writer, request, http.StatusForbidden, "claim refused")
 		return
 	}
+	correlationBound := false
+	var correlation queueintent.RunningCorrelation
+	if claimRequest.WorkflowRunID > 0 {
+		correlation = queueintent.RunningCorrelation{
+			RunnerName: claimRequest.RunnerName, PoolName: claim.PoolName, Repository: claimRequest.Repository,
+			WorkflowRunID: claimRequest.WorkflowRunID, JobDisplayName: claimRequest.JobName,
+			WorkflowRef: claimRequest.WorkflowRef,
+		}
+	}
+	// A promoted warm container intentionally keeps its provider instance name
+	// while the one-job JIT runner receives GitHub's runner name. The claim token
+	// proves the former; an exact active queue correlation proves that the latter
+	// is the runner executing this repository job. Never weaken this to accepting
+	// two arbitrary names or to a timing/job-name heuristic.
+	if warmRuntimeIdentity {
+		if claimRequest.WorkflowRunID <= 0 || h.QueueCorrelator == nil {
+			deny(logger, writer, request, http.StatusForbidden, "warm runner correlation required")
+			return
+		}
+		result, bindErr := h.QueueCorrelator.BindRunning(ctx, correlation)
+		if bindErr != nil {
+			logger.WarnContext(ctx, "warm runner correlation refused")
+			deny(logger, writer, request, http.StatusForbidden, "warm runner correlation refused")
+			return
+		}
+		correlationBound = true
+		logger.InfoContext(ctx, "warm runner correlation bound",
+			"journal_generation", result.Generation,
+			"changed", result.Changed)
+	}
 	if claimRequest.WorkflowRunID > 0 {
 		if h.QueueCorrelator != nil {
-			correlation := queueintent.RunningCorrelation{
-				RunnerName: claimRequest.RunnerName, PoolName: claim.PoolName, Repository: claimRequest.Repository,
-				WorkflowRunID: claimRequest.WorkflowRunID, JobDisplayName: claimRequest.JobName,
-				WorkflowRef: claimRequest.WorkflowRef,
+			var result queueintent.CorrelationResult
+			var bindErr error
+			if !correlationBound {
+				result, bindErr = h.QueueCorrelator.BindRunning(ctx, correlation)
 			}
-			result, bindErr := h.QueueCorrelator.BindRunning(ctx, correlation)
 			if bindErr != nil {
 				logger.WarnContext(ctx, "queue running correlation deferred",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
@@ -158,7 +188,7 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				if errors.Is(bindErr, queueintent.ErrRunningCorrelationNotReady) {
 					h.retryQueueCorrelation(correlation, logger)
 				}
-			} else {
+			} else if !correlationBound {
 				logger.InfoContext(ctx, "queue running correlation bound",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
 					telemetryattrs.GitHubRepository, claimRequest.Repository,
