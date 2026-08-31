@@ -147,6 +147,11 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   esac
 done
 
+# bubblewrap must be able to actually create its sandbox as the job user; the
+# binary being present has already lied about this once.
+test -f /etc/apparmor.d/bwrap-userns
+runuser -u runner -- env HOME=/home/runner bwrap --ro-bind / / true
+
 python --version >/dev/null
 python3 --version >/dev/null
 python3 -m pip --version >/dev/null

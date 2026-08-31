@@ -160,6 +160,11 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   esac
 done
 
+# bubblewrap must be able to actually create its sandbox as the job user; the
+# binary being present has already lied about this once.
+test -f /etc/apparmor.d/bwrap-userns
+runuser -u runner -- env HOME=/home/runner bwrap --ro-bind / / true
+
 # Browser bytes are qualification input, not image content. Launch the pinned
 # Chrome-for-Testing archive against the baked OS libraries as the unprivileged
 # runner, then let cleanup delete the entire extracted tree and profile.

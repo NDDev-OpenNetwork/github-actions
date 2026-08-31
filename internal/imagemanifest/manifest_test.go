@@ -42,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:d7fdc01a61f2afc9991ef658511ea3cf73f73c251d0043c04c392f06b6397d1a" {
+	if fingerprint != "sha256:4c76a6c764a529923aa4dcd0327863aa43a4700b3a5e5d99aa30426a7db96217" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
