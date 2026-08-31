@@ -101,14 +101,18 @@ func validateOCI(add func(string, string), component OCIRegistry) {
 	if component.StorageDriver != "filesystem" {
 		add("oci_registry.storage_driver", "must be filesystem")
 	}
-	if component.ExtensionsEnabled {
-		add("oci_registry.extensions_enabled", "must be false")
+	// The registry was pinned to the minimal build while it only served the
+	// authenticated cache buckets. The dockerd registry mirror needs the sync
+	// extension, which ships in the full asset, so extensions are now part of
+	// the contract rather than forbidden by it.
+	if !component.ExtensionsEnabled {
+		add("oci_registry.extensions_enabled", "must be true: the docker mirror needs the sync extension")
 	}
 	validateReleaseAsset(add, "oci_registry.binary", repository, component.Version, component.Binary)
 	validateReleaseAsset(add, "oci_registry.checksums", repository, component.Version, component.Checksums)
 	validateReleaseAsset(add, "oci_registry.schema", repository, component.Version, component.Schema)
-	if component.Binary.Name != "zot-linux-amd64-minimal" {
-		add("oci_registry.binary.name", "must be the minimal linux/amd64 asset")
+	if component.Binary.Name != "zot-linux-amd64" {
+		add("oci_registry.binary.name", "must be the full linux/amd64 asset that carries the sync extension")
 	}
 	if component.Checksums.Name != "checksums.sha256.txt" {
 		add("oci_registry.checksums.name", "must be checksums.sha256.txt")
