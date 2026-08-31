@@ -791,3 +791,58 @@ func TestSummarizeExecutionCorrelationIsSymmetric(t *testing.T) {
 		t.Fatalf("oldest unbound created age = %d, want %d", got.OldestCreatedWithoutRunningIdentityAgeSeconds, 17*60)
 	}
 }
+
+// Ordinary churn is not a page. A one-job container that has finished leaves
+// its running intent uncovered until the broker's reclaim sweeps it, and the
+// reclaim waits five minutes then runs once a minute. Measured over five
+// minutes of normal traffic the raw counter was non-zero in two samples of
+// twenty-four; paging on that buries the case worth waking for.
+func TestUncoveredRunningInsideTheReclaimWindowIsNotAGap(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	queue := queueintent.Snapshot{Active: []queueintent.Intent{{
+		Key: "k", State: queueintent.StateRunning, RunnerName: "nddev-recent",
+		Repository: "example-org/example-repo", StateEnteredAt: now.Add(-2 * time.Minute),
+	}}}
+	correlation := summarizeExecutionCorrelation(providerjournal.Journal{}, queue, now)
+	if correlation.UncoveredRunning != 1 {
+		t.Fatalf("raw gap must stay visible: %+v", correlation)
+	}
+	if correlation.UncoveredRunningBeyondGrace != 0 {
+		t.Fatalf("churn inside the reclaim window paged: %+v", correlation)
+	}
+}
+
+// Past the window nothing is coming for it, and that is the gap worth waking
+// for.
+func TestUncoveredRunningBeyondTheReclaimWindowIsAGap(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	queue := queueintent.Snapshot{Active: []queueintent.Intent{{
+		Key: "k", State: queueintent.StateRunning, RunnerName: "nddev-stranded",
+		Repository: "example-org/example-repo", StateEnteredAt: now.Add(-30 * time.Minute),
+	}}}
+	correlation := summarizeExecutionCorrelation(providerjournal.Journal{}, queue, now)
+	if correlation.UncoveredRunningBeyondGrace != 1 || correlation.OldestUncoveredRunningAgeSeconds != 1800 {
+		t.Fatalf("stranded intent was not reported: %+v", correlation)
+	}
+}
+
+// A warm-promoted worker keeps its provider instance name while the runner
+// takes GitHub's. The claim carries both; either covers the intent, and the
+// count must not be a subtraction that happens to balance.
+func TestWarmClaimCoversARunningIntentByRunnerName(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	queue := queueintent.Snapshot{Active: []queueintent.Intent{{
+		Key: "k", State: queueintent.StateRunning, RunnerName: "nddev-runtime",
+		Repository: "example-org/example-repo", StateEnteredAt: now.Add(-30 * time.Minute),
+	}}}
+	journal := providerjournal.Journal{
+		Leases: map[string]providerjournal.Lease{"warm-standard-abc": {InstanceName: "warm-standard-abc"}},
+		Claims: map[string]providerjournal.Claim{
+			"nddev-runtime": {JobName: "nddev-runtime", InstanceName: "warm-standard-abc"},
+		},
+	}
+	correlation := summarizeExecutionCorrelation(journal, queue, now)
+	if correlation.UncoveredRunning != 0 || correlation.UncoveredRunningBeyondGrace != 0 {
+		t.Fatalf("warm-claimed runner reported as uncovered: %+v", correlation)
+	}
+}
