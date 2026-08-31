@@ -23,9 +23,9 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 	}
 	wanted := map[string]string{
 		"github_correlation_persistent":     "gha_fleet_queue_missing_workflow_run_id_beyond_grace",
-		"lifecycle_queued_delivery_stall":   `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
+		"lifecycle_queued_delivery_stall":   "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
 		"memory_psi_slow_burn":              `window_seconds="10"`,
-		"queue_wait_slow_burn":              `gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}`,
+		"queue_wait_slow_burn":              "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
 		"provider_retry_error_persistent":   `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
 		"compute_pressure_observer_missing": `count(up{service_name="pressure-state"} == 1)`,
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",

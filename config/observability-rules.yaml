@@ -450,10 +450,25 @@ rules:
   - id: lifecycle_queued_delivery_stall
     severity: page
     query_language: promql
-    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
-    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"})
+    # The wait, per scale set, not the state clock. The old expression read
+    # gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}, which
+    # measures time in the current state; an assigned intent returning to queued
+    # restarts it, so it has a ceiling near the assignment timeout. Measured on
+    # the live journal: oldest state age 9 minutes against a real oldest wait of
+    # 52. This rule could not distinguish a nine-minute queue from an hour-long
+    # one and fired on a ten-minute cadence forever.
+    #
+    # Per scale set because the aggregate hides the case worth paging for. In one
+    # sample nddev-linux-integration was at 43 minutes with a p50 of 16 while
+    # nddev-linux-standard was at 14; a max over everything reports one number
+    # and names no pool.
+    stream_name: gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set
+    expression: max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set)
     operator: ">"
-    threshold: 300
+    # Thirty minutes, not five. Five was the old ceiling's neighbourhood and is
+    # ordinary under load: measured p50 waits ran 7 to 16 minutes across pools
+    # while the fleet was delivering normally.
+    threshold: 1800
     evaluation_seconds: 60
     hold_seconds: 300
     destination_ref: fleet_oncall
@@ -514,7 +529,7 @@ rules:
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql
-    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
+    stream_name: gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set
     # Bounded above by the page's threshold so one fact produces one message.
     # This rule and lifecycle_queued_delivery_stall read the identical series;
     # any age past 300s satisfied both, so a single stall opened a ticket and
@@ -530,9 +545,9 @@ rules:
     # empty left side. `X * (X < bool 300)` returns 200 for 200 and 0 for 400,
     # which is the intent, and it is never empty, so the sustained subquery
     # always receives a matrix.
-    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) * (max(gha_fleet_queue_intent_oldest_state_age_seconds{state="queued"}) < bool 300)
+    expression: max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
     operator: ">"
-    threshold: 120
+    threshold: 600
     evaluation_seconds: 300
     hold_seconds: 900
     destination_ref: fleet_oncall
