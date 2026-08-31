@@ -117,9 +117,17 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 				"runbook": rule.Runbook, "severity": rule.Severity,
 			},
 			Description: rule.Summary,
-			Enabled:     enable,
-			Priority:    priority,
-			Tags:        []string{"managed-by:gds", "severity:" + rule.Severity},
+			// Both, not either. The flag is the operator's kill switch for a
+			// whole reconcile; the field is this rule's own intent, reviewed in
+			// the file with the expression it belongs to.
+			//
+			// Taking only the flag made the field decorative: every rule in the
+			// bundle read `enabled: false` while all 28 were live and ten of them
+			// were paging. A reader checking whether an alert was armed got the
+			// wrong answer from the only document that looked like the authority.
+			Enabled:  enable && rule.Enabled,
+			Priority: priority,
+			Tags:     []string{"managed-by:gds", "severity:" + rule.Severity},
 		})
 	}
 	sort.Slice(result.Alerts, func(i, j int) bool { return result.Alerts[i].Name < result.Alerts[j].Name })

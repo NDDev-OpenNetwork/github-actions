@@ -420,3 +420,57 @@ func repeatOrDefault(rule Rule) int {
 	}
 	return 900
 }
+
+// TestDisabledRuleStaysDisabledWhateverTheFlag pins the half that was missing.
+// The reconcile flag used to decide Enabled alone, which made the per-rule field
+// decorative: every rule in the bundle read `enabled: false` while all 28 were
+// live in OpenObserve and ten of them were paging. A reader checking whether an
+// alert was armed got the wrong answer from the document that looked like the
+// authority.
+func TestDisabledRuleStaysDisabledWhateverTheFlag(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.Rules) == 0 {
+		t.Fatal("bundle has no rules; this test would be vacuous")
+	}
+	bundle.Rules[0].Enabled = false
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := bundle.Rules[0].ID
+	found := false
+	for _, alert := range rendered.Alerts {
+		if alert.Name != target {
+			continue
+		}
+		found = true
+		if alert.Enabled {
+			t.Fatalf("rule %q declares enabled: false and rendered enabled anyway", target)
+		}
+	}
+	if !found {
+		t.Fatalf("rule %q was not rendered at all", target)
+	}
+}
+
+// TestFlagDisablesEveryRule keeps the flag a kill switch rather than a no-op:
+// an operator reconciling without --enable must be able to arm nothing, however
+// the file reads.
+func TestFlagDisablesEveryRule(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, alert := range rendered.Alerts {
+		if alert.Enabled {
+			t.Fatalf("alert %q is enabled with the flag off", alert.Name)
+		}
+	}
+}
