@@ -88,7 +88,7 @@ runner_tool_cache="$(jq -er .runner_tool_cache /etc/nddev/image-build.json)"
 [[ "${runner_tool_cache}" == /home/runner/actions-runner/_work/_tool ]]
 smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
-[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]
+[[ "$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)" == bun,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -128,9 +128,26 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       fi
       ;;
 	pnpm) [[ "$(pnpm --version)" == "${expected_version}" ]] ;;
-    rust)
-      [[ "$(rustc --version)" == "rustc ${expected_version} "* ]]
-      [[ "$(cargo --version)" == "cargo ${expected_version} "* ]]
+    rustup)
+      # rustup owns the whole Rust surface: the estate pins channels in
+      # rust-toolchain.toml, actions-rust-lang/setup-rust-toolchain resolves
+      # them through rustup, and the shims on PATH serve jobs that never call
+      # the action. Every pinned channel must already hold clippy and rustfmt,
+      # or the per-job download this image exists to remove comes back.
+      [[ "$(rustup --version 2>/dev/null)" == "rustup ${expected_version} "* ]]
+      [[ "$(stat --format='%U' -- /usr/local/rustup)" == root ]]
+      [[ "$(stat --format='%U' -- /usr/local/cargo)" == root ]]
+      grep -q '^RUSTUP_HOME=/usr/local/rustup$' /etc/environment
+      mapfile -t smoke_rust_channels < <(jq -r '.channels[]?' <<<"${entry}")
+      smoke_rust_default="$(jq -er '.default_channel' <<<"${entry}")"
+      [[ ${#smoke_rust_channels[@]} -gt 0 ]]
+      for smoke_rust_channel in "${smoke_rust_channels[@]}"; do
+        [[ "$(rustup run "${smoke_rust_channel}" rustc --version)" == "rustc ${smoke_rust_channel}"* ]]
+        [[ "$(rustup run "${smoke_rust_channel}" cargo clippy --version)" == clippy* ]]
+        [[ "$(rustup run "${smoke_rust_channel}" rustfmt --version)" == rustfmt* ]]
+      done
+      [[ "$(rustc --version)" == "rustc ${smoke_rust_default}"* ]]
+      [[ "$(cargo --version)" == "cargo "* ]]
       ;;
     uv)
       [[ "$(uv --version)" == "uv ${expected_version}"* ]]

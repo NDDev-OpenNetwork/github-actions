@@ -164,7 +164,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// alias is part of the recipe, so a manifest whose contents changed under an
 	// unchanged alias would otherwise ask the builder to produce different bytes
 	// for a name that is already promoted.
-	if first != "sha256:3d89d31c7c5a423238a6888b2b4c4d894f22fcb91e0d6ea76fd689d0c5a09b9b" {
+	if first != "sha256:6b92afb396a9d31a6772e489343006f2ce05c93a59a641701e2bf49ff8fe23fc" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -686,6 +686,45 @@ func TestFailedBuildPreservesTheBuilderOnlyWhenAsked(t *testing.T) {
 	for _, expected := range []string{plan.BuilderName, "preserved", "incus delete"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("preserved-builder message does not say %q: %v", expected, err)
+		}
+	}
+}
+
+// TestGuestToolchainContractCarriesChannels guards the projection between the
+// manifest and the guest scripts. The channels were once present in the
+// manifest, validated by imagemanifest tests, and still absent inside the
+// builder, because this projection dropped them; provision then failed with no
+// toolchain installed. Both the provisioning and the smoke contract must carry
+// them.
+func TestGuestToolchainContractCarriesChannels(t *testing.T) {
+	t.Parallel()
+
+	pinned := imagemanifest.Toolchain{
+		Name:           "rustup",
+		Version:        "1.29.0",
+		Archive:        "rustup-init",
+		ArchiveSHA256:  strings.Repeat("a", 64),
+		Channels:       []string{"1.98.0", "1.89"},
+		DefaultChannel: "1.98.0",
+	}
+
+	for name, projected := range map[string]guestToolchain{
+		"provision": guestToolchainFromPlan(pinned, "/var/tmp/"+pinned.Archive),
+		"smoke":     guestToolchainFromPlan(pinned, ""),
+	} {
+		encoded, err := encodeToolchains([]guestToolchain{projected})
+		if err != nil {
+			t.Fatalf("%s: encode: %v", name, err)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatalf("%s: decode: %v", name, err)
+		}
+		contract := string(decoded)
+		for _, needle := range []string{`"channels":["1.98.0","1.89"]`, `"default_channel":"1.98.0"`} {
+			if !strings.Contains(contract, needle) {
+				t.Fatalf("%s contract %s lost %s", name, contract, needle)
+			}
 		}
 	}
 }

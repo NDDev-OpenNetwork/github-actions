@@ -116,12 +116,13 @@ type BrowserSmoke struct {
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
 // so a complete set turns per-job toolchain installation into a no-op.
 func BakedToolchains() []string {
-	// rustup is baked beside rust, not instead of it. A system-wide rustc
-	// satisfies a job that calls cargo directly; it is invisible to
-	// actions-rust-lang/setup-rust-toolchain, which resolves the channel in
-	// rust-toolchain.toml through rustup. Both are needed because the estate
-	// does both.
-	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "rustup", "uv", "yarn"}
+	// rustup owns the whole Rust surface. A standalone rust tarball was baked
+	// beside it once, and the rustup shims overwrote its /usr/local/bin
+	// binaries during provisioning, so the "system" rust the recipe promised
+	// was unreachable in the shipped image. The default channel serves jobs
+	// that call cargo directly, and actions-rust-lang/setup-rust-toolchain
+	// resolves rust-toolchain.toml channels through rustup either way.
+	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rustup", "uv", "yarn"}
 }
 
 // OptionalToolchains may be pinned by an image that needs them and omitted by

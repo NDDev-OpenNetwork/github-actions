@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/imagemanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 )
 
@@ -296,6 +297,26 @@ type guestToolchain struct {
 	Version       string `json:"version"`
 	Archive       string `json:"archive"`
 	ArchiveSHA256 string `json:"archive_sha256"`
+	// Channels and DefaultChannel ride along for version managers. Dropping
+	// them here once produced a rustup with no toolchains: the manifest named
+	// the channels, every manifest gate passed, and the builder still died
+	// because this projection was the one place they were not carried.
+	Channels       []string `json:"channels,omitempty"`
+	DefaultChannel string   `json:"default_channel,omitempty"`
+}
+
+// guestToolchainFromPlan is the single projection from a manifest toolchain to
+// the guest contract. Provision receives the pushed archive path; smoke
+// receives none, because it verifies installed state rather than archives.
+func guestToolchainFromPlan(toolchain imagemanifest.Toolchain, archivePath string) guestToolchain {
+	return guestToolchain{
+		Name:           toolchain.Name,
+		Version:        toolchain.Version,
+		Archive:        archivePath,
+		ArchiveSHA256:  toolchain.ArchiveSHA256,
+		Channels:       toolchain.Channels,
+		DefaultChannel: toolchain.DefaultChannel,
+	}
 }
 
 func encodeToolchains(toolchains []guestToolchain) (string, error) {
@@ -573,12 +594,8 @@ exit 1`); err != nil {
 		if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.Toolchains[toolchain.Name], destination, "--mode", "0600")...); err != nil {
 			return "", "", fmt.Errorf("push verified %s toolchain archive: %w", toolchain.Name, err)
 		}
-		toolchainRequests = append(toolchainRequests, guestToolchain{
-			Name:          toolchain.Name,
-			Version:       toolchain.Version,
-			Archive:       "/var/tmp/" + toolchain.Archive,
-			ArchiveSHA256: toolchain.ArchiveSHA256,
-		})
+		toolchainRequests = append(toolchainRequests,
+			guestToolchainFromPlan(toolchain, "/var/tmp/"+toolchain.Archive))
 	}
 	encodedToolchains, err := encodeToolchains(toolchainRequests)
 	if err != nil {
@@ -800,11 +817,7 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 	smoke, _ := scripts.ReadFile(smokeName)
 	smokeToolchains := make([]guestToolchain, 0, len(plan.Toolchains))
 	for _, toolchain := range plan.Toolchains {
-		smokeToolchains = append(smokeToolchains, guestToolchain{
-			Name:          toolchain.Name,
-			Version:       toolchain.Version,
-			ArchiveSHA256: toolchain.ArchiveSHA256,
-		})
+		smokeToolchains = append(smokeToolchains, guestToolchainFromPlan(toolchain, ""))
 	}
 	encodedToolchains, err := encodeToolchains(smokeToolchains)
 	if err != nil {
