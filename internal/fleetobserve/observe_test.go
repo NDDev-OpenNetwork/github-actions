@@ -846,3 +846,38 @@ func TestWarmClaimCoversARunningIntentByRunnerName(t *testing.T) {
 		t.Fatalf("warm-claimed runner reported as uncovered: %+v", correlation)
 	}
 }
+
+// An instance is visible in Incus a moment before the provider journals its
+// lease. Counting that instant as an orphan turned an ordinary create into a
+// page, which is the same mistake the created side already avoids on the
+// mirror-image disagreement.
+func TestOrphanWithinTheCreateGraceIsNotAnOrphan(t *testing.T) {
+	tracker := NewOrphanVisibilityTracker()
+	start := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
+	within, _ := tracker.observe([]string{"nddev-fresh"}, start)
+	if !within["nddev-fresh"] {
+		t.Fatal("a just-seen instance was reported as an orphan immediately")
+	}
+	within, _ = tracker.observe([]string{"nddev-fresh"}, start.Add(30*time.Second))
+	if !within["nddev-fresh"] {
+		t.Fatal("an instance inside the grace was reported as an orphan")
+	}
+	within, _ = tracker.observe([]string{"nddev-fresh"}, start.Add(2*time.Minute))
+	if within["nddev-fresh"] {
+		t.Fatal("an instance past the grace was still excused: nothing is coming for it")
+	}
+}
+
+// The grace must not leak: a name that stops being uncovered is forgotten, so
+// the same name reappearing later starts its own grace rather than inheriting
+// an expired one.
+func TestOrphanGraceForgetsAResolvedName(t *testing.T) {
+	tracker := NewOrphanVisibilityTracker()
+	start := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
+	tracker.observe([]string{"nddev-recycled"}, start)
+	tracker.observe(nil, start.Add(5*time.Minute))
+	within, _ := tracker.observe([]string{"nddev-recycled"}, start.Add(10*time.Minute))
+	if !within["nddev-recycled"] {
+		t.Fatal("a reappearing name inherited an expired grace")
+	}
+}
