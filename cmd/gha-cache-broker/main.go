@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/cachebroker"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
@@ -37,9 +38,15 @@ func main() {
 		correlator = &queueintent.Correlator{Path: config.QueueJournalFile, LockPath: config.QueueJournalLock}
 	}
 	handler := cachebroker.Handler{Config: config, Store: cachebroker.Store{Path: config.JournalFile, LockPath: config.JournalLock}, QueueCorrelator: correlator, Logger: logger}
+	reclaimer := cachebroker.Reclaimer{
+		Correlator:      correlator,
+		ProviderJournal: providerjournal.Store{Path: config.ProviderJournalFile},
+		Logger:          logger,
+	}
 	server := &http.Server{Addr: config.ListenAddress, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go reclaimer.Run(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)

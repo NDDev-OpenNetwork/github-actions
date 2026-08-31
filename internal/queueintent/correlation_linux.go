@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -74,6 +75,40 @@ func (c Correlator) AuthorizeRunning(ctx context.Context, correlation RunningCor
 	if err := validateRunningCorrelation(correlation); err != nil {
 		return err
 	}
+	// A warm container can reach this endpoint before GARM has written any
+	// intent for the job at all -- there is no create latency to hide the gap.
+	// Measured after the display-name mismatch was fixed, every remaining
+	// refusal was that race and nothing else. Retry on the same budget
+	// BindRunning uses; the answer is a bounded read of one file.
+	attempts := c.Attempts
+	if attempts <= 0 {
+		attempts = 20
+	}
+	interval := c.RetryInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	var last error
+	for attempt := 0; attempt < attempts; attempt++ {
+		last = c.authorizeOnce(ctx, correlation)
+		if last == nil || !errors.Is(last, ErrRunningCorrelationNotReady) {
+			return last
+		}
+		if attempt+1 == attempts {
+			break
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("authorize running correlation: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return last
+}
+
+func (c Correlator) authorizeOnce(ctx context.Context, correlation RunningCorrelation) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -143,6 +178,94 @@ func (c Correlator) BindRunning(ctx context.Context, correlation RunningCorrelat
 		}
 	}
 	return CorrelationResult{}, last
+}
+
+// ReleaseUncoveredRunning removes running intents whose runner holds no
+// execution lease, which is the only state in this journal that nothing else
+// reclaims.
+//
+// A running intent leaves the journal when GARM observes a completed lifecycle
+// message for its exact job UUID. When that message never arrives -- the runner
+// vanished, the completion was missed across a manager restart -- the intent
+// stays, and expiryForState gives running the execution horizon of a whole day.
+// That is not free: validateQueueBudget excludes running intents from the
+// reservation budget, but queueInFlight counts every non-queued intent and
+// eligibleQueueCandidates compares that count against max_in_flight and the
+// cross-repository share. Measured on the live fleet, 28 running intents stood
+// against 12 worker instances and held 16 of 32 slots for jobs that had
+// finished hours earlier.
+//
+// `covered` is the set of runner names that currently hold a provider execution
+// lease. It is the same correlation the observer already publishes as
+// gha_fleet_queue_uncovered_running, computed there as a count; this needs the
+// identities, so the caller passes them.
+//
+// The grace exists because a lease appears slightly after the broker writes the
+// running intent. Nothing is released inside it, so a job that is merely
+// starting is never mistaken for one that has finished.
+func (c Correlator) ReleaseUncoveredRunning(ctx context.Context, covered map[string]struct{}, grace time.Duration) ([]string, error) {
+	if grace <= 0 {
+		return nil, errors.New("release grace must be positive")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(c.Path) || !filepath.IsAbs(c.LockPath) || filepath.Dir(c.Path) != filepath.Dir(c.LockPath) || c.Path == c.LockPath {
+		return nil, errors.New("queue journal and lock must be distinct absolute siblings")
+	}
+	parent := filepath.Dir(c.Path)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil || filepath.Clean(resolved) != filepath.Clean(parent) {
+		return nil, errors.New("queue state parent must be a real directory")
+	}
+	lockFD, err := syscall.Open(c.LockPath, syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open queue lock: %w", err)
+	}
+	lock := os.NewFile(uintptr(lockFD), c.LockPath)
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, fmt.Errorf("lock queue journal: %w", err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	if err := requirePrivateOwnedRegular(lock, "queue lock"); err != nil {
+		return nil, err
+	}
+	journal, err := readJournal(c.Path)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if c.Now != nil {
+		now = c.Now().UTC()
+	}
+	released := make([]string, 0)
+	for key, intent := range journal.Intents {
+		if intent.State != StateRunning || intent.RunnerName == "" {
+			continue
+		}
+		if _, held := covered[intent.RunnerName]; held {
+			continue
+		}
+		if now.Sub(intent.StateEnteredAt) < grace {
+			continue
+		}
+		delete(journal.Intents, key)
+		released = append(released, intent.RunnerName)
+	}
+	if len(released) == 0 {
+		return nil, nil
+	}
+	sort.Strings(released)
+	journal.Generation++
+	journal.UpdatedAt = now
+	if err := journal.Validate(); err != nil {
+		return nil, err
+	}
+	if err := writeCorrelatedJournal(parent, c.Path, journal); err != nil {
+		return nil, err
+	}
+	return released, nil
 }
 
 func (c Correlator) bindOnce(ctx context.Context, correlation RunningCorrelation) (CorrelationResult, error) {
