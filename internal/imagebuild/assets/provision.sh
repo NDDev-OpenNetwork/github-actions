@@ -44,6 +44,24 @@ ln -sfn /usr/bin/pip3 /usr/local/bin/pip3
 python --version >/dev/null
 pip --version >/dev/null
 
+# bubblewrap is on the image for consumers that need a network isolator, but
+# a binary on disk is not a capability: Ubuntu 24.04 ships
+# kernel.apparmor_restrict_unprivileged_userns=1, and without an AppArmor
+# profile granting userns, bwrap dies at "setting up uid map" for every
+# unprivileged caller -- measured on a live worker while the conformance
+# consumer read it as "no isolator". This is Ubuntu's own mechanism for
+# exactly this case; the restriction stays in force for everything else.
+cat > /etc/apparmor.d/bwrap-userns <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+APPARMOR
+chmod 0644 /etc/apparmor.d/bwrap-userns
+apparmor_parser --replace /etc/apparmor.d/bwrap-userns
+runuser -u runner -- env HOME=/home/runner bwrap --ro-bind / / true
+
 systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
 git lfs install --system
 groupadd --force docker
