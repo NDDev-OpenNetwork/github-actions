@@ -113,7 +113,7 @@ toolchains:
     archive_sha256: 606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497
 
 guest:
-  builder_disk_gib: 24
+  builder_disk_gib: 30
   variant: integration
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
   path_binaries:

@@ -113,7 +113,7 @@ toolchains:
     archive_sha256: 606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497
 
 guest:
-  builder_disk_gib: 20
+  builder_disk_gib: 22
   path_binaries:
     - name: actionlint
       version: v1.7.12

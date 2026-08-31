@@ -237,8 +237,11 @@ func (m Manifest) Validate() error {
 	validateCompilerCache(add, m.CompilerCache)
 	validateGoCacheSeed(add, m.GoCacheSeed)
 	validateToolchains(add, m.Toolchains)
-	if m.Guest.BuilderDiskGiB < 12 || m.Guest.BuilderDiskGiB > 24 {
-		add("guest.builder_disk_gib", "must be between 12 and 24 GiB")
+	// 24 GiB fit the image until the CodeQL bundle joined the tool cache:
+	// 0.8 GiB of archive plus 2.6 GiB unpacked, doubled transiently while the
+	// rootfs is packed for publish.
+	if m.Guest.BuilderDiskGiB < 12 || m.Guest.BuilderDiskGiB > 32 {
+		add("guest.builder_disk_gib", "must be between 12 and 32 GiB")
 	}
 	variant := m.Guest.EffectiveVariant()
 	if variant != "standard" && variant != "integration" {

@@ -31,8 +31,8 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 		len(manifest.GoCacheSeed.Packages) != 1 || manifest.GoCacheSeed.Packages[0] != "./cmd/gha-fleet" {
 		t.Fatalf("Go cache seed is not exactly pinned: %#v", manifest.GoCacheSeed)
 	}
-	if manifest.Guest.BuilderDiskGiB != 20 {
-		t.Fatalf("builder disk = %d GiB, want 20", manifest.Guest.BuilderDiskGiB)
+	if manifest.Guest.BuilderDiskGiB != 22 {
+		t.Fatalf("builder disk = %d GiB, want 22", manifest.Guest.BuilderDiskGiB)
 	}
 	assertBakedToolchains(t, manifest)
 	fingerprint, err := manifest.Fingerprint()
@@ -42,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:47a1569f94fa824b69de51d5ee917a5e8b72cc4a4c9b727c214019f891615a56" {
+	if fingerprint != "sha256:fe9f3da1c5e7b997008fe2b8ea04e1d4e1cfdb60f30db69cabdb4d69e06fb4b8" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -103,7 +103,7 @@ func TestIntegrationManifestPinsDockerToolchain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration manifest: %v", err)
 	}
-	if !manifest.Guest.DockerCapable() || manifest.Guest.BuilderDiskGiB != 24 {
+	if !manifest.Guest.DockerCapable() || manifest.Guest.BuilderDiskGiB != 30 {
 		t.Fatalf("unexpected integration guest: %#v", manifest.Guest)
 	}
 	for _, pkg := range []string{"busybox-static", "docker-buildx", "docker-compose-v2", "docker.io", "pigz"} {

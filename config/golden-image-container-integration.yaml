@@ -122,7 +122,7 @@ browser_smoke:
   binary_path: chrome-linux64/chrome
 
 guest:
-  builder_disk_gib: 24
+  builder_disk_gib: 30
   variant: integration
   browser: chromium
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
