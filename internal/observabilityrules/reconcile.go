@@ -179,7 +179,23 @@ func (c *OpenObserveClient) Plan(ctx context.Context, desired OpenObserveBundle)
 			}
 			if !reflect.DeepEqual(actual, wanted) {
 				copy := wanted
-				plan.Actions = append(plan.Actions, ReconcileAction{Kind: "update", Name: wanted.Name, AlertID: summary.AlertID, Desired: &copy})
+				// A moved stream is a replacement, not an edit. OpenObserve
+				// accepts the PUT and silently keeps the previous stream_name,
+				// so an update plan for that difference can never converge: the
+				// expression and threshold change, the stream does not, and the
+				// next read-back reports the same drift forever. Observed on
+				// lifecycle_queued_delivery_stall and queue_wait_slow_burn when
+				// they moved off the state clock -- apply reported "read-back
+				// did not converge" and replanning produced the identical two
+				// updates.
+				if actual.StreamName != wanted.StreamName {
+					plan.Actions = append(plan.Actions,
+						ReconcileAction{Kind: "delete", Name: summary.Name, AlertID: summary.AlertID},
+						ReconcileAction{Kind: "create", Name: wanted.Name, Desired: &copy},
+					)
+				} else {
+					plan.Actions = append(plan.Actions, ReconcileAction{Kind: "update", Name: wanted.Name, AlertID: summary.AlertID, Desired: &copy})
+				}
 			}
 			continue
 		}
