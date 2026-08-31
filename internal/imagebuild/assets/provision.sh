@@ -44,6 +44,15 @@ ln -sfn /usr/bin/pip3 /usr/local/bin/pip3
 python --version >/dev/null
 pip --version >/dev/null
 
+systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
+git lfs install --system
+groupadd --force docker
+groupadd --force lxd
+
+if ! id runner >/dev/null 2>&1; then
+  useradd --create-home --home-dir /home/runner --shell /bin/bash --groups sudo runner
+fi
+
 # bubblewrap is on the image for consumers that need a network isolator, but
 # a binary on disk is not a capability: Ubuntu 24.04 ships
 # kernel.apparmor_restrict_unprivileged_userns=1, and without an AppArmor
@@ -61,15 +70,6 @@ APPARMOR
 chmod 0644 /etc/apparmor.d/bwrap-userns
 apparmor_parser --replace /etc/apparmor.d/bwrap-userns
 runuser -u runner -- env HOME=/home/runner bwrap --ro-bind / / true
-
-systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
-git lfs install --system
-groupadd --force docker
-groupadd --force lxd
-
-if ! id runner >/dev/null 2>&1; then
-  useradd --create-home --home-dir /home/runner --shell /bin/bash --groups sudo runner
-fi
 install -d -o root -g root -m 0750 /etc/sudoers.d
 printf 'runner ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/90-nddev-runner
 chmod 0440 /etc/sudoers.d/90-nddev-runner
