@@ -26,7 +26,7 @@ func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 	for _, expected := range []Limit{
 		{Pool: "nddev-linux-fast", Workers: 4, Binding: BindingMemory},
 		{Pool: "nddev-linux-standard", Workers: 3, Binding: BindingMemory},
-		{Pool: "nddev-linux-integration", Workers: 2, Binding: BindingCPU},
+		{Pool: "nddev-linux-integration", Workers: 1, Binding: BindingMemory},
 		{Pool: "nddev-linux-untrusted", Workers: 2, Binding: BindingCPU},
 		{Pool: "nddev-linux-release", Workers: 2, Binding: BindingCPU},
 	} {
@@ -40,11 +40,11 @@ func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 	}
 }
 
-// The container migration removes the old 8-GiB VM granularity. Two measured
-// 6-GiB heavy workers plus the host reserve fit on every 15991-MiB member;
-// a third does not. The ten-unit logical CPU budget leaves space for one light
-// job only when the physical-RAM commitment envelope and live pressure admit it.
-func TestTwoIntegrationContainersFitAndAThirdDoesNot(t *testing.T) {
+// The traced C/C++ workload establishes the 8-GiB hard class. One heavy worker
+// plus the host reserve fits every 15991-MiB member; two do not. Concurrency
+// comes from four failure-domain members rather than by overcommitting the hard
+// memory promise on one member.
+func TestOneIntegrationContainerFitsAndASecondDoesNot(t *testing.T) {
 	t.Parallel()
 	cfg := load(t, "example-runner-2.yaml")
 
@@ -59,18 +59,18 @@ func TestTwoIntegrationContainersFitAndAThirdDoesNot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if limit.Workers != 2 || limit.Binding != BindingCPU {
+	if limit.Workers != 1 || limit.Binding != BindingMemory {
 		t.Fatalf("with the CPU cap opened to the whole host, integration derives %+v; "+
-			"expected two four-vCPU containers", limit)
+			"expected one memory-bounded container", limit)
 	}
 
 	// And the memory a second worker would need, against what the host has.
 	const observedHostMiB = 15991 // measured on gha-runner-1..4, 2026-08-15
-	if want := 2 * integration.Resources.MemoryMiB; want+cfg.HostReserve.MinimumMemoryMiB > observedHostMiB {
-		t.Fatalf("two integration containers plus reserve want %d MiB and the host has %d MiB", want+cfg.HostReserve.MinimumMemoryMiB, observedHostMiB)
+	if want := integration.Resources.MemoryMiB; want+cfg.HostReserve.MinimumMemoryMiB > observedHostMiB {
+		t.Fatalf("one integration container plus reserve wants %d MiB and the host has %d MiB", want+cfg.HostReserve.MinimumMemoryMiB, observedHostMiB)
 	}
-	if want := 3 * integration.Resources.MemoryMiB; want <= observedHostMiB {
-		t.Fatalf("three integration containers unexpectedly fit: want %d MiB host %d MiB", want, observedHostMiB)
+	if want := 2 * integration.Resources.MemoryMiB; want <= observedHostMiB {
+		t.Fatalf("two integration containers unexpectedly fit: want %d MiB host %d MiB", want, observedHostMiB)
 	}
 }
 

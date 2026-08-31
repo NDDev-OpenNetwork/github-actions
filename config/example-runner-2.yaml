@@ -224,7 +224,7 @@ pools:
     trust: trusted
     resources:
       vcpu: 4
-      memory_mib: 6144
+      memory_mib: 8192
       disk_gib: 50
     max_running: 8
     # A GitHub runner scale set name is unique per repository, so two hosts

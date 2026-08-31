@@ -19,9 +19,9 @@ func TestRenderCPUAwarePlacementFromPortablePolicy(t *testing.T) {
 	for _, required := range []string{
 		`PROJECT = "gha-fleet"`, `POOL = "gha-lvm"`,
 		"MINIMUM_MEMORY_BYTES = 1024 * 1024 * 1024",
-		"MINIMUM_MEMORY_PERCENT = 10", "MAX_WORKER_MEMORY_BYTES = 6144 * 1024 * 1024",
-		"MAX_WORKER_CPU_UNITS = 4", "CPU_ALLOWANCE_BY_LIMIT_MIB = {2048: 2, 3072: 2, 4096: 2, 6144: 4}",
-		"2048: 2048", "3072: 3072", "4096: 4096", "6144: 6144",
+		"MINIMUM_MEMORY_PERCENT = 10", "MAX_WORKER_MEMORY_BYTES = 8192 * 1024 * 1024",
+		"MAX_WORKER_CPU_UNITS = 4", "CPU_ALLOWANCE_BY_LIMIT_MIB = {2048: 2, 3072: 2, 4096: 2, 6144: 4, 8192: 4}",
+		"2048: 2048", "3072: 3072", "4096: 4096", "6144: 6144", "8192: 8192",
 		"LOAD_TIE_EPSILON = 0.05", "def load_per_core(state, resources)",
 		`getattr(sysinfo, "load_averages", None)`, `getattr(cpu, "total", 0)`,
 		"def committed_cpu_units(instances, pending_count)",
