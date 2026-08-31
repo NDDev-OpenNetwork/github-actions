@@ -558,11 +558,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	var orphanedStarts []string
 	var uncorrelatedStarts []string
 	var reservationTransfers [][2]string
+	var redeliveryTransfers [][2]string
 	var suppressedTerminalAssignments []string
 	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		orphanedStarts = orphanedStarts[:0]
 		uncorrelatedStarts = uncorrelatedStarts[:0]
 		reservationTransfers = reservationTransfers[:0]
+		redeliveryTransfers = redeliveryTransfers[:0]
 		suppressedTerminalAssignments = suppressedTerminalAssignments[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
@@ -570,7 +572,22 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			if !validQueueText(job.JobID) {
 				return fmt.Errorf("completed job has invalid job ID")
 			}
-			completedKeys[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)] = struct{}{}
+			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
+			intent, exists := journal.Intents[key]
+			// GitHub may retire a capacity waiter before it ever emits
+			// JobAvailable, then immediately assign the same workflow job under a
+			// new UUID. Retain that unstarted intent as a terminal lineage marker;
+			// it is excluded from admission below and lets the replacement inherit
+			// the original queue time instead of starving at the tail forever.
+			if exists && intent.RunnerRequestID == 0 && intent.RunnerName == "" && intent.State != queueStateRunning {
+				intent.State = queueStateQueued
+				intent.StateEnteredAt = now
+				intent.UpdatedAt = now
+				intent.ExpiresAt = expiryForState(config, queueStateQueued, now)
+				journal.Intents[key] = intent
+			} else {
+				completedKeys[key] = struct{}{}
+			}
 			markTerminalJob(journal, job.JobID, now.Add(time.Duration(config.ExecutionTTLSeconds)*time.Second))
 		}
 		for _, job := range started {
@@ -676,6 +693,15 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			if _, startedInBatch := startedKeys[intent.Key]; startedInBatch && !exists {
 				continue
 			}
+			if !exists {
+				fromJobID, transferred, transferErr := transferTerminalWaiterLineage(journal, scaleSet, entity, &intent, now)
+				if transferErr != nil {
+					return transferErr
+				}
+				if transferred {
+					redeliveryTransfers = append(redeliveryTransfers, [2]string{fromJobID, intent.JobID})
+				}
+			}
 			if exists {
 				if !queueIntentCoreIdentityEqual(existing, intent) {
 					return fmt.Errorf("duplicate assigned intent %q changed immutable identity", intent.Key)
@@ -703,6 +729,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			"scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
 		)
 	}
+	for _, transfer := range redeliveryTransfers {
+		slog.Info(
+			"transferred terminal waiter lineage to redelivered job",
+			"from_job_id", transfer[0], "to_job_id", transfer[1],
+			"scale_set", scaleSet.Name, "scale_set_id", scaleSet.ScaleSetID,
+		)
+	}
 	for _, key := range orphanedStarts {
 		slog.Warn(
 			"started job has no admitted queue intent; acknowledging anyway",
@@ -725,6 +758,45 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	// Retaining JobAssigned at GitHub only causes head-of-line redelivery and
 	// prevents later JobCompleted messages from reaching this listener.
 	return false, err
+}
+
+func transferTerminalWaiterLineage(
+	journal *queueIntentJournal,
+	scaleSet params.ScaleSet,
+	entity params.ForgeEntity,
+	replacement *queueIntent,
+	now time.Time,
+) (string, bool, error) {
+	if replacement == nil || replacement.WorkflowRunID <= 0 || !validQueueText(replacement.JobDisplayName) {
+		return "", false, nil
+	}
+	candidates := make([]queueIntent, 0, 1)
+	for _, candidate := range journal.Intents {
+		terminalExpiry, terminal := journal.TerminalJobs[candidate.JobID]
+		if !terminal || !terminalExpiry.After(now) || candidate.JobID == replacement.JobID ||
+			candidate.State != queueStateQueued || candidate.RunnerRequestID != 0 || candidate.RunnerName != "" ||
+			candidate.ScaleSetID != int64(scaleSet.ScaleSetID) || candidate.ScaleSetName != scaleSet.Name ||
+			candidate.Owner != entity.Owner || candidate.WorkflowRunID != replacement.WorkflowRunID ||
+			candidate.JobDisplayName != replacement.JobDisplayName {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) > 1 {
+		return "", false, fmt.Errorf("redelivered waiter identity is ambiguous for workflow run %d job %q", replacement.WorkflowRunID, replacement.JobDisplayName)
+	}
+	if len(candidates) == 0 {
+		return "", false, nil
+	}
+	lineage := candidates[0]
+	delete(journal.Intents, lineage.Key)
+	replacement.QueueTime = lineage.QueueTime
+	replacement.Priority = lineage.Priority
+	replacement.Repository = lineage.Repository
+	replacement.State = queueStateQueued
+	replacement.StateEnteredAt = now
+	replacement.UpdatedAt = now
+	return lineage.JobID, true, nil
 }
 
 func transferAssignedReservation(
@@ -1149,7 +1221,8 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		if queueHasCompetingRepository(journal, intent.Repository) {
 			limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
 		}
-		if intent.State != queueStateQueued ||
+		terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
+		if intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
 			inFlight[intent.Repository] >= limit ||
 			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) {
 			continue

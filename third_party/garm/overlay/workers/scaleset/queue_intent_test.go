@@ -71,11 +71,60 @@ func TestCompletedJobCannotBeResurrectedByDelayedAssignedRedelivery(t *testing.T
 		t.Fatal(err)
 	}
 	key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
-	if _, exists := journal.Intents[key]; exists {
-		t.Fatalf("delayed JobAssigned resurrected terminal intent: %#v", journal.Intents[key])
+	if intent, exists := journal.Intents[key]; !exists || intent.State != queueStateQueued {
+		t.Fatalf("terminal waiter lineage was not retained safely: %#v", journal.Intents[key])
 	}
 	if !journal.TerminalJobs[job.JobID].After(now) {
 		t.Fatalf("terminal tombstone is absent or expired: %#v", journal.TerminalJobs)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("terminal waiter consumed capacity: target=%d err=%v", target, err)
+	}
+}
+
+func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
+	now := time.Date(2026, 8, 31, 1, 46, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	original := testQueueJob(701, "example-owner", "example-repository", now.Add(-15*time.Minute))
+	original.MessageType = params.MessageTypeJobAssigned
+	original.RunnerRequestID = 0
+	original.RunnerName = ""
+	original.WorkflowRunID = 33347335156
+	original.JobDisplayName = "ci-gate"
+	entity := testQueueEntityForJob(original)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{original}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lineageQueueTime := initial.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)].QueueTime
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{original}); err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(5 * time.Minute)
+	replacement := original
+	replacement.JobID = "00000000-0000-4000-8000-000000000702"
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{replacement}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)]; exists {
+		t.Fatal("redelivery retained the obsolete job UUID")
+	}
+	intent := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), replacement.JobID)]
+	if intent.JobID != replacement.JobID || !intent.QueueTime.Equal(lineageQueueTime) || intent.State != queueStateAssigned {
+		t.Fatalf("redelivered waiter lost lineage: %#v", intent)
+	}
+	if !journal.TerminalJobs[original.JobID].After(now) {
+		t.Fatal("obsolete UUID lost its terminal tombstone")
 	}
 }
 
