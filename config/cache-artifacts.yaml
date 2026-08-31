@@ -34,11 +34,11 @@ oci_registry:
   architecture: amd64
   build_profile: minimal
   storage_driver: filesystem
-  extensions_enabled: false
+  extensions_enabled: true
   binary:
-    name: zot-linux-amd64-minimal
-    url: https://github.com/project-zot/zot/releases/download/v2.1.20/zot-linux-amd64-minimal
-    sha256: 902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6
+    name: zot-linux-amd64
+    url: https://github.com/project-zot/zot/releases/download/v2.1.20/zot-linux-amd64
+    sha256: a32e42d042d1f17b5b1317e55cc1a415a744c873dcd05c25c56b665478258bcb
   checksums:
     name: checksums.sha256.txt
     url: https://github.com/project-zot/zot/releases/download/v2.1.20/checksums.sha256.txt
@@ -55,7 +55,7 @@ oci_registry:
     build_mode: pie
     commit_description: v2.1.20-0-g3b5796d
     independent_builds: 2
-    output_sha256: 902ea958c4a59c0f5c4ac9fa2bbaad8716e80551bcaede7ab4ea998bf57190a6
+    output_sha256: a32e42d042d1f17b5b1317e55cc1a415a744c873dcd05c25c56b665478258bcb
     evidence_file: zot-v2.1.20-reproducibility.json
     evidence_sha256: 020b153ba1c150c751e6ee00d1efe9af81b90321587f228f1271cd7525293d57
   runtime_evidence:
