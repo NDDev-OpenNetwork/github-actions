@@ -97,6 +97,8 @@ RESERVATION_BY_LIMIT_MIB = {{RESERVATION_BY_LIMIT}}
 CPU_ALLOWANCE_BY_LIMIT_MIB = {{CPU_BY_LIMIT}}
 PRESSURE_SCHEMA = {{PRESSURE_SCHEMA}}
 PRESSURE_OPEN = {{PRESSURE_OPEN}}
+# Exactly the two names internal/imageplan gives a build's instances.
+MAINTENANCE_PREFIXES = ("gha-image-builder-", "gha-image-smoke-")
 LOAD_TIE_EPSILON = 0.05
 
 def memory_reserve_bytes(total):
@@ -167,11 +169,22 @@ def instance_placement(request, candidate_members):
     chosen_projected_cpu = -1.0
     chosen_score = -1.0
 
+    # An image builder is maintenance, not a job, and it is placed deliberately
+    # on a member that was drained for it. The pressure gate exists to keep new
+    # work off a busy member; applying it here made drain and build jointly
+    # unsatisfiable -- drain empties the member by closing its gate, the closed
+    # gate removes it from every candidate list, and the build then reports
+    # "no fleet member has room" about a member that is completely empty.
+    #
+    # Observed: gha-runner-2 drained to zero occupants, then a staged image
+    # build refused with insufficient-memory naming an empty member.
+    maintenance = request.name.startswith(MAINTENANCE_PREFIXES)
+
     for member in candidate_members:
         name = member.server_name
         if member.config.get("user.gha_pressure.schema", "") != PRESSURE_SCHEMA:
             continue
-        if member.config.get("user.gha_pressure.state", "") != PRESSURE_OPEN:
+        if not maintenance and member.config.get("user.gha_pressure.state", "") != PRESSURE_OPEN:
             continue
 
         state = get_cluster_member_state(name)
