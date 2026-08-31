@@ -330,7 +330,7 @@ func TestDockerIntegrationProfileIsExplicitAndBounded(t *testing.T) {
 		t.Fatal("integration profile is absent")
 	}
 	if integration.Config["limits.cpu"] != "" || integration.Config["limits.cpu.allowance"] != "400%" ||
-		integration.Config["limits.memory"] != "6144MiB" || integration.Config["security.idmap.isolated"] != "true" ||
+		integration.Config["limits.memory"] != "8192MiB" || integration.Config["security.idmap.isolated"] != "true" ||
 		integration.Config["security.nesting"] != "true" || integration.Config["security.privileged"] != "false" {
 		t.Fatalf("unexpected integration limits: %#v", integration.Config)
 	}
