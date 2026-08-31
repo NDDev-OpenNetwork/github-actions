@@ -111,8 +111,8 @@ pressure_admission:
   stale_after_seconds: 90
   heartbeat_seconds: 30
   minimum_closed_seconds: 30
-  cpu_some_close: 20
-  cpu_some_reopen: 10
+  cpu_some_close: 60
+  cpu_some_reopen: 40
   memory_full_close: 1
   memory_full_reopen: 0.1
   io_full_close: 10
