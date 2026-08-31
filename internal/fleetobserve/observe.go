@@ -27,8 +27,14 @@ const (
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion                   = 15
-	queueCorrelationGracePeriod     = 2 * time.Minute
+	SchemaVersion               = 15
+	queueCorrelationGracePeriod = 2 * time.Minute
+	// A running intent is retired by the cache broker's reclaim, which waits
+	// five minutes for the two ledgers to agree and then runs once a minute.
+	// An uncovered intent inside that window is a worker that has finished and
+	// not yet been swept, which is ordinary churn on a fleet of one-job
+	// containers. Past it, nothing is coming: that is the gap worth paging on.
+	uncoveredRunningGracePeriod     = 10 * time.Minute
 	diagnosticExportStatusMaxAge    = 3 * time.Minute
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 	deletingVisibilityGrace         = 30 * time.Second
@@ -195,27 +201,29 @@ type JournalSummary struct {
 }
 
 type QueueSummary struct {
-	Generation                      uint64           `json:"generation"`
-	Stored                          int              `json:"stored"`
-	Active                          int              `json:"active"`
-	Expired                         int              `json:"expired"`
-	TerminalJobs                    int              `json:"terminal_jobs"`
-	TerminalNextExpirySeconds       int64            `json:"terminal_next_expiry_seconds"`
-	InFlight                        int              `json:"in_flight"`
-	OldestQueueAgeSeconds           int64            `json:"oldest_queue_age_seconds"`
-	UncoveredRunning                int              `json:"uncovered_running"`
-	RunningWithoutRunnerIdentity    int              `json:"running_without_runner_identity"`
-	UnboundRepository               int              `json:"unbound_repository"`
-	UnboundRepositoryBeyondGrace    int              `json:"unbound_repository_beyond_grace"`
-	MissingRunnerRequestID          int              `json:"missing_runner_request_id"`
-	DirectJITWithoutRequestID       int              `json:"direct_jit_without_runner_request_id"`
-	MissingWorkflowRunID            int              `json:"missing_workflow_run_id"`
-	MissingWorkflowRunIDBeyondGrace int              `json:"missing_workflow_run_id_beyond_grace"`
-	RunningMissingGitHubRunnerID    int              `json:"running_missing_github_runner_id"`
-	ByState                         map[string]int   `json:"by_state"`
-	OldestStateAgeSeconds           map[string]int64 `json:"oldest_state_age_seconds"`
-	ByPriority                      map[int]int      `json:"by_priority"`
-	ByScaleSet                      map[string]int   `json:"by_scale_set"`
+	Generation                       uint64           `json:"generation"`
+	Stored                           int              `json:"stored"`
+	Active                           int              `json:"active"`
+	Expired                          int              `json:"expired"`
+	TerminalJobs                     int              `json:"terminal_jobs"`
+	TerminalNextExpirySeconds        int64            `json:"terminal_next_expiry_seconds"`
+	InFlight                         int              `json:"in_flight"`
+	OldestQueueAgeSeconds            int64            `json:"oldest_queue_age_seconds"`
+	UncoveredRunning                 int              `json:"uncovered_running"`
+	UncoveredRunningBeyondGrace      int              `json:"uncovered_running_beyond_grace"`
+	OldestUncoveredRunningAgeSeconds int64            `json:"oldest_uncovered_running_age_seconds"`
+	RunningWithoutRunnerIdentity     int              `json:"running_without_runner_identity"`
+	UnboundRepository                int              `json:"unbound_repository"`
+	UnboundRepositoryBeyondGrace     int              `json:"unbound_repository_beyond_grace"`
+	MissingRunnerRequestID           int              `json:"missing_runner_request_id"`
+	DirectJITWithoutRequestID        int              `json:"direct_jit_without_runner_request_id"`
+	MissingWorkflowRunID             int              `json:"missing_workflow_run_id"`
+	MissingWorkflowRunIDBeyondGrace  int              `json:"missing_workflow_run_id_beyond_grace"`
+	RunningMissingGitHubRunnerID     int              `json:"running_missing_github_runner_id"`
+	ByState                          map[string]int   `json:"by_state"`
+	OldestStateAgeSeconds            map[string]int64 `json:"oldest_state_age_seconds"`
+	ByPriority                       map[int]int      `json:"by_priority"`
+	ByScaleSet                       map[string]int   `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -464,17 +472,14 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Queue.RunningWithoutRunnerIdentity = correlation.RunningWithoutRunnerIdentity
 		snapshot.Journal.CreatedWithoutRunningIdentity = correlation.CreatedWithoutRunningIdentity
 		snapshot.Journal.OldestCreatedWithoutRunningIdentityAgeSeconds = correlation.OldestCreatedWithoutRunningIdentityAgeSeconds
-		executionLeases := snapshot.Journal.ByState[string(providerjournal.StateCreated)] +
-			snapshot.Journal.ByState[string(providerjournal.StateWarmClaimed)]
-		running := snapshot.Queue.ByState[string(queueintent.StateRunning)]
-		if running > executionLeases {
-			snapshot.Queue.UncoveredRunning = running - executionLeases
-		}
+		snapshot.Queue.UncoveredRunning = correlation.UncoveredRunning
+		snapshot.Queue.UncoveredRunningBeyondGrace = correlation.UncoveredRunningBeyondGrace
+		snapshot.Queue.OldestUncoveredRunningAgeSeconds = correlation.OldestUncoveredRunningAgeSeconds
 	}
 	sort.Strings(snapshot.CollectionErrors)
 	snapshot.Healthy = len(snapshot.CollectionErrors) == 0 &&
 		snapshot.Incus.OrphanInstances == 0 && snapshot.Incus.MissingInstances == 0 &&
-		snapshot.Queue.UncoveredRunning == 0
+		snapshot.Queue.UncoveredRunningBeyondGrace == 0
 	for _, service := range snapshot.Services {
 		if !service.Active {
 			snapshot.Healthy = false
@@ -495,20 +500,58 @@ type executionCorrelation struct {
 	RunningWithoutRunnerIdentity                  int
 	CreatedWithoutRunningIdentity                 int
 	OldestCreatedWithoutRunningIdentityAgeSeconds int64
+	UncoveredRunning                              int
+	UncoveredRunningBeyondGrace                   int
+	OldestUncoveredRunningAgeSeconds              int64
 }
 
 func summarizeExecutionCorrelation(journal providerjournal.Journal, queue queueintent.Snapshot, now time.Time) executionCorrelation {
 	runningNames := make(map[string]struct{})
 	result := executionCorrelation{}
+	// Which runners hold an execution lease. A claim carries both the provider
+	// instance name and the runner name a warm container was promoted under, and
+	// either one covers the intent.
+	covered := make(map[string]struct{}, len(journal.Leases)+len(journal.Claims))
+	for name := range journal.Leases {
+		covered[name] = struct{}{}
+	}
+	for _, claim := range journal.Claims {
+		if claim.JobName != "" {
+			covered[claim.JobName] = struct{}{}
+		}
+		if claim.InstanceName != "" {
+			covered[claim.InstanceName] = struct{}{}
+		}
+	}
 	for _, intent := range queue.Active {
 		if intent.State != queueintent.StateRunning {
 			continue
 		}
-		if intent.RunnerName == "" {
+		// A running intent with no runner name cannot be matched to a lease at
+		// all, so it is uncovered by definition rather than by lookup.
+		named := intent.RunnerName != ""
+		if !named {
 			result.RunningWithoutRunnerIdentity++
-			continue
+		} else {
+			runningNames[intent.RunnerName] = struct{}{}
 		}
-		runningNames[intent.RunnerName] = struct{}{}
+		if named {
+			if _, held := covered[intent.RunnerName]; held {
+				continue
+			}
+		}
+		// Counted by identity rather than by subtracting lease count from
+		// running count. The subtraction reported a gap whenever the two
+		// totals differed for any reason, and reported none when an uncovered
+		// intent happened to be balanced by an extra lease.
+		result.UncoveredRunning++
+		age := now.Sub(intent.StateEnteredAt)
+		if age >= uncoveredRunningGracePeriod {
+			result.UncoveredRunningBeyondGrace++
+		}
+		if seconds := int64(age / time.Second); seconds > result.OldestUncoveredRunningAgeSeconds {
+			result.OldestUncoveredRunningAgeSeconds = seconds
+		}
 	}
 	for name, lease := range journal.Leases {
 		if lease.State != providerjournal.StateCreated {

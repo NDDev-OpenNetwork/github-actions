@@ -428,7 +428,14 @@ rules:
     # backend, so this page has never fired in its life. All three are
     # non-negative counts compared against zero, so their sum is positive
     # exactly when any one of them is.
-    expression: max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances) + max(gha_fleet_queue_uncovered_running)
+    #
+    # The third term is the beyond-grace count, not the raw one. A one-job
+    # container that has finished leaves its running intent uncovered until the
+    # broker's reclaim sweeps it, which is ordinary churn: measured over five
+    # minutes of normal traffic the raw counter was non-zero in two samples of
+    # twenty-four. Paging on that buries the case worth waking for, which is an
+    # intent still uncovered after nothing is coming for it.
+    expression: max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances) + max(gha_fleet_queue_uncovered_running_beyond_grace)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
