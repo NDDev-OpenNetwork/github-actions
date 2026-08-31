@@ -247,8 +247,14 @@ type QueueSummary struct {
 	// can never fire.
 	OldestQueuedWaitSeconds           int64            `json:"oldest_queued_wait_seconds"`
 	OldestQueuedWaitSecondsByScaleSet map[string]int64 `json:"oldest_queued_wait_seconds_by_scale_set"`
-	ByPriority                        map[int]int      `json:"by_priority"`
-	ByScaleSet                        map[string]int   `json:"by_scale_set"`
+	// QueuedWithoutFirstStamp is how many waiting intents have no immutable
+	// stamp, so their wait is measured from the rewritten QueueTime and is a
+	// lower bound. Without this a rollout window looks calm for the same reason
+	// the old metric did: the number cannot reach the threshold, and nothing
+	// says so. Non-zero means the wait above is under-reported for that many.
+	QueuedWithoutFirstStamp int            `json:"queued_without_first_stamp"`
+	ByPriority              map[int]int    `json:"by_priority"`
+	ByScaleSet              map[string]int `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -723,6 +729,9 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			// From the immutable first-seen stamp, not QueueTime: reconciliation
 			// moves QueueTime forward on an intent that is still waiting, so a
 			// wait measured from it has a ceiling like the state clock does.
+			if intent.FirstQueuedAt.IsZero() {
+				summary.QueuedWithoutFirstStamp++
+			}
 			wait := int64(now.Sub(intent.WaitSince()).Seconds())
 			if wait > summary.OldestQueuedWaitSeconds {
 				summary.OldestQueuedWaitSeconds = wait

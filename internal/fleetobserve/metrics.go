@@ -154,6 +154,10 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	// resets when an assigned intent returns to queued, so it has a ceiling near
 	// the assignment timeout and cannot carry a wait threshold.
 	gauge(&output, "gha_fleet_queue_oldest_queued_wait_seconds", "Longest wait since GitHub queued an intent that is still queued.", float64(snapshot.Queue.OldestQueuedWaitSeconds))
+	// Read beside the wait, never alone. While this is non-zero the wait above
+	// is a lower bound for that many intents, so "under the threshold" and
+	// "under the threshold with nothing to measure by" stay distinguishable.
+	gauge(&output, "gha_fleet_queue_queued_without_first_stamp", "Waiting intents with no immutable first-queued stamp, whose wait is therefore a lower bound.", float64(snapshot.Queue.QueuedWithoutFirstStamp))
 	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", "Longest wait since GitHub queued a still-queued intent, per configured scale set.")
 	for _, scaleSet := range scaleSets {
 		metric(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.OldestQueuedWaitSecondsByScaleSet[scaleSet]))
