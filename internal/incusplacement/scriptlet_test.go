@@ -64,3 +64,41 @@ func TestRenderRejectsAmbiguousCPUAllowanceForOneMemoryClass(t *testing.T) {
 		t.Fatalf("ambiguous memory-to-CPU class was accepted: %v", err)
 	}
 }
+
+// TestMaintenanceInstancesIgnoreTheClosedGate pins the pair that was jointly
+// unsatisfiable. A build requires its member to be empty, and the only way to
+// empty one is drain -- which closes the member's pressure gate. The gate then
+// removed that member from every candidate list, so the build reported
+// "no fleet member has room" about a member with zero occupants.
+//
+// Observed live: gha-runner-2 drained to zero, staged build refused with
+// insufficient-memory.
+func TestMaintenanceInstancesIgnoreTheClosedGate(t *testing.T) {
+	cfg, err := config.Load("../../config/example-runner-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := Render(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`MAINTENANCE_PREFIXES = ("gha-image-builder-", "gha-image-smoke-")`,
+		"maintenance = request.name.startswith(MAINTENANCE_PREFIXES)",
+		`if not maintenance and member.config.get("user.gha_pressure.state", "") != PRESSURE_OPEN:`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("rendered scriptlet does not exempt maintenance placement: missing %q", required)
+		}
+	}
+	// The exemption is for the gate only. Memory, disk and the pool check still
+	// apply, or a build would be placed where it cannot fit.
+	for _, stillEnforced := range []string{
+		"if remaining < 0:",
+		"if pool.space.total - pool.space.used < want.root_disk_size:",
+	} {
+		if !strings.Contains(script, stillEnforced) {
+			t.Fatalf("maintenance exemption removed a real capacity check: missing %q", stillEnforced)
+		}
+	}
+}
