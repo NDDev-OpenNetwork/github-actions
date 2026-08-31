@@ -42,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:4c76a6c764a529923aa4dcd0327863aa43a4700b3a5e5d99aa30426a7db96217" {
+	if fingerprint != "sha256:47a1569f94fa824b69de51d5ee917a5e8b72cc4a4c9b727c214019f891615a56" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -71,6 +71,7 @@ func assertBakedToolchains(t *testing.T, manifest Manifest) {
 	t.Helper()
 	wanted := map[string]struct{ version, archiveSHA256 string }{
 		"bun":    {"1.3.14", "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"},
+		"codeql": {"2.26.4", "48e1ab8b874d57bd6fd7c90fefee75addc5a45e9bd063982df9beb45a62dd5d3"},
 		"gh":     {"2.97.0", "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112"},
 		"go":     {"1.26.6", "708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"},
 		"node22": {"22.23.2", "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"},

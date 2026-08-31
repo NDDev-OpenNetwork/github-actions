@@ -112,6 +112,16 @@ var toolchainAssets = map[string]struct {
 			return "/rustup/archive/" + version + "/x86_64-unknown-linux-gnu/rustup-init"
 		},
 	},
+	// The CodeQL bundle the action would otherwise download on every analyze
+	// job of an ephemeral runner: 800 MB per run, resolved from the runner
+	// tool cache when present.
+	"codeql": {
+		Host:    "github.com",
+		Archive: func(string) string { return "codeql-bundle-linux64.tar.gz" },
+		Path: func(version string) string {
+			return "/github/codeql-action/releases/download/codeql-bundle-v" + version + "/codeql-bundle-linux64.tar.gz"
+		},
+	},
 	"uv": {
 		Host:    "github.com",
 		Archive: func(string) string { return "uv-x86_64-unknown-linux-gnu.tar.gz" },

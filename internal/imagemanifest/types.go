@@ -122,7 +122,7 @@ func BakedToolchains() []string {
 	// was unreachable in the shipped image. The default channel serves jobs
 	// that call cargo directly, and actions-rust-lang/setup-rust-toolchain
 	// resolves rust-toolchain.toml channels through rustup either way.
-	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rustup", "uv", "yarn"}
+	return []string{"bun", "codeql", "gh", "go", "node22", "node24", "node25", "pnpm", "rustup", "uv", "yarn"}
 }
 
 // OptionalToolchains may be pinned by an image that needs them and omitted by
