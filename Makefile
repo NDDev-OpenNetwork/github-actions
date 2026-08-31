@@ -29,7 +29,9 @@ build-controller:
 	mkdir -p dist
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-fleet ./cmd/gha-fleet
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-fleet-observer ./cmd/gha-fleet-observer
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-cache-broker ./cmd/gha-cache-broker
 	@./dist/gha-fleet version
+	@./dist/gha-cache-broker -version
 
 garm-derivative-script:
 	go run ./cmd/gha-fleet render-garm-build

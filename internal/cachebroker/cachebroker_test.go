@@ -314,6 +314,104 @@ func TestAuthenticatedClaimBindsExactRunningQueueCorrelation(t *testing.T) {
 	}
 }
 
+func TestWarmClaimBindsProviderInstanceToExactRuntimeRunner(t *testing.T) {
+	now := time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	token := bytes.Repeat([]byte{6}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "warm-standard-example", "example-standard", "correlation-only", token); err != nil {
+		t.Fatal(err)
+	}
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	queueLock := filepath.Join(directory, "queue-intents.lock")
+	key := "github-scale-set-job:v2:42:job-warm"
+	queue := queueintent.Journal{
+		SchemaVersion: queueintent.SchemaVersion, Generation: 7, UpdatedAt: now,
+		Intents: map[string]queueintent.Intent{key: {
+			Key: key, ScaleSetID: 42, JobID: "job-warm", RunnerRequestID: 99,
+			ScaleSetName: "example-standard", JobDisplayName: "quality / go (1.26)", Owner: "example-org",
+			Repository: "example-org", WorkflowRef: "unavailable-before-job-available", EventName: "push",
+			QueueTime: now.Add(-time.Minute), State: queueintent.StateAcquired, Priority: 1,
+			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+		}}, Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
+	}
+	raw, err := json.Marshal(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002",
+		Region: "us-east-1", Bucket: "github-actions-cache", CAFile: "/tmp/ca",
+		JournalFile: store.Path, JournalLock: store.LockPath, QueueJournalFile: queuePath, QueueJournalLock: queueLock,
+	}
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "warm-standard-example", RunnerName: "runner-runtime", Repository: "example-org/example-repo",
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1, JobName: "quality",
+		WorkflowRef: "example-org/example-repo/.github/workflows/ci.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("a", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
+	correlator := &queueintent.Correlator{
+		Path: queuePath, LockPath: queueLock, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1,
+	}
+	var logs bytes.Buffer
+	response := httptest.NewRecorder()
+	Handler{Config: config, Store: store, QueueCorrelator: correlator, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}.
+		ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s logs=%s", response.Code, response.Body.String(), logs.String())
+	}
+	snapshot, err := (queueintent.Reader{Path: queuePath, Now: func() time.Time { return now.Add(time.Second) }}).ReadActive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := snapshot.Active[0]
+	if intent.RunnerName != "runner-runtime" || intent.Repository != "example-org/example-repo" || intent.State != queueintent.StateRunning {
+		t.Fatalf("warm runtime correlation=%+v", intent)
+	}
+	journal, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Claims["warm-standard-example"].ClaimedRepository != "example-org/example-repo" {
+		t.Fatalf("warm claim was not bound to the exact repository: %+v", journal.Claims["warm-standard-example"])
+	}
+	if !strings.Contains(logs.String(), `"msg":"warm runner correlation bound"`) ||
+		!strings.Contains(logs.String(), `"runner.name":"runner-runtime"`) {
+		t.Fatalf("warm correlation evidence is missing: %s", logs.String())
+	}
+}
+
+func TestWarmClaimWithoutExactQueueCorrelationIsDenied(t *testing.T) {
+	directory := t.TempDir()
+	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	token := bytes.Repeat([]byte{8}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "warm-standard-denied", "example-standard", "correlation-only", token); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "warm-standard-denied", RunnerName: "runner-unproved", Repository: "example-org/example-repo",
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1, JobName: "quality",
+		WorkflowRef: "example-org/example-repo/.github/workflows/ci.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("a", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
+	response := httptest.NewRecorder()
+	Handler{Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}.
+		ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	journal, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Claims["warm-standard-denied"].ClaimedRepository != "" {
+		t.Fatal("uncorrelated warm claim consumed the one-job token")
+	}
+}
+
 func TestAsyncCorrelationUsesExactRunnerAfterHookReturns(t *testing.T) {
 	now := time.Date(2026, 8, 26, 20, 0, 0, 0, time.UTC)
 	directory := t.TempDir()
