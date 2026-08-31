@@ -88,6 +88,20 @@ toolchains:
     archive: rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
     download_url: https://static.rust-lang.org/dist/rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
     archive_sha256: 88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f
+  - name: rustup
+    version: 1.29.0
+    archive: rustup-init
+    download_url: https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init
+    archive_sha256: 4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+    # The channels the estate actually pins. All seven public setup-systems name
+    # 1.98.0 in rust-toolchain.toml with rustfmt and clippy, and their MSRV job
+    # asks for 1.89; the workflows request them 28 and 7 times respectively.
+    # Baking them here is what stops every one of those runs downloading a
+    # toolchain it could have found already installed.
+    channels:
+      - "1.98.0"
+      - "1.89"
+    default_channel: "1.98.0"
   - name: uv
     version: 0.11.30
     archive: uv-x86_64-unknown-linux-gnu.tar.gz
@@ -156,6 +170,7 @@ guest:
     - zip
     - zstd
   packages:
+    - bubblewrap
     - build-essential
     - busybox-static
     - ca-certificates

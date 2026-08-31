@@ -91,6 +91,12 @@ type Toolchain struct {
 	Archive       string `json:"archive" yaml:"archive"`
 	DownloadURL   string `json:"download_url" yaml:"download_url"`
 	ArchiveSHA256 string `json:"archive_sha256" yaml:"archive_sha256"`
+	// Channels are the extra toolchains a version manager installs beside
+	// itself, and DefaultChannel is the one it selects. Only rustup uses them:
+	// its own version says nothing about which Rust a job gets, and the estate
+	// pins those in rust-toolchain.toml rather than in the image.
+	Channels       []string `json:"channels,omitempty" yaml:"channels,omitempty"`
+	DefaultChannel string   `json:"default_channel,omitempty" yaml:"default_channel,omitempty"`
 }
 
 // BrowserSmoke pins browser bytes used only to launch-test the image. The
@@ -110,7 +116,12 @@ type BrowserSmoke struct {
 // already on PATH, and actions/setup-go resolves a pre-seeded runner tool cache,
 // so a complete set turns per-job toolchain installation into a no-op.
 func BakedToolchains() []string {
-	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "uv", "yarn"}
+	// rustup is baked beside rust, not instead of it. A system-wide rustc
+	// satisfies a job that calls cargo directly; it is invisible to
+	// actions-rust-lang/setup-rust-toolchain, which resolves the channel in
+	// rust-toolchain.toml through rustup. Both are needed because the estate
+	// does both.
+	return []string{"bun", "gh", "go", "node22", "node24", "node25", "pnpm", "rust", "rustup", "uv", "yarn"}
 }
 
 // OptionalToolchains may be pinned by an image that needs them and omitted by

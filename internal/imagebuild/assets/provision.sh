@@ -219,9 +219,9 @@ toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
 toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-if [[ "${toolchain_set}" != bun,gh,go,rust,uv \
-  && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rust,uv,yarn \
-  && "${toolchain_set}" != bun,flutter,gh,go,node22,node24,node25,pnpm,rust,uv,yarn ]]; then
+if [[ "${toolchain_set}" != bun,gh,go,rust,rustup,uv \
+  && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rust,rustup,uv,yarn \
+  && "${toolchain_set}" != bun,flutter,gh,go,node22,node24,node25,pnpm,rust,rustup,uv,yarn ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -333,6 +333,19 @@ for toolchain_name in "${toolchain_names[@]}"; do
 		[[ "$(pnpm --version)" == "${toolchain_version}" ]]
 		;;
     rust)
+      # The standalone archive alone is not what the estate asks for. Every
+      # setup-system pins rust-toolchain.toml to a channel with rustfmt and
+      # clippy, and actions-rust-lang/setup-rust-toolchain resolves that through
+      # rustup -- so a system-wide rustc with no rustup, no clippy and no
+      # rustfmt is invisible to it and every job downloads a toolchain instead.
+      # Measured across the seven public anchors: 28 workflow requests for
+      # 1.98.0 and 7 for the 1.89 MSRV, against a baked 1.97.1.
+      #
+      # rustup owns the layout, so the archive installs into it rather than into
+      # /usr/local, and the extra channels are installed beside it. RUSTUP_HOME
+      # and CARGO_HOME are system paths so the toolchains are shared rather than
+      # re-fetched per job, and the shims land on PATH for jobs that never call
+      # the action at all.
       tar --extract --xz --file "${toolchain_archive}" \
         --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
       "${toolchain_scratch}/rust-${toolchain_version}-x86_64-unknown-linux-gnu/install.sh" \
@@ -340,6 +353,34 @@ for toolchain_name in "${toolchain_names[@]}"; do
         --components=rustc,cargo,rust-std-x86_64-unknown-linux-gnu >/dev/null
       [[ "$(rustc --version)" == "rustc ${toolchain_version} "* ]]
       [[ "$(cargo --version)" == "cargo ${toolchain_version} "* ]]
+      ;;
+    rustup)
+      install -o root -g root -m 0755 "${toolchain_archive}" "${toolchain_scratch}/rustup-init"
+      export RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+      install -d -o root -g root -m 0755 "${RUSTUP_HOME}" "${CARGO_HOME}"
+      "${toolchain_scratch}/rustup-init" -y --no-modify-path --profile minimal \
+        --default-toolchain none >/dev/null
+      [[ "$("${CARGO_HOME}/bin/rustup" --version 2>/dev/null)" == "rustup ${toolchain_version} "* ]]
+      # Every channel the estate pins, with the two components its
+      # rust-toolchain.toml files name, so the action finds them already present.
+      mapfile -t rust_channels < <(jq -r '.channels[]?' <<<"${entry}")
+      rust_default="$(jq -r '.default_channel // ""' <<<"${entry}")"
+      [[ ${#rust_channels[@]} -gt 0 && -n "${rust_default}" ]]
+      for channel in "${rust_channels[@]}"; do
+        "${CARGO_HOME}/bin/rustup" toolchain install "${channel}" \
+          --profile minimal --component clippy --component rustfmt >/dev/null
+        [[ "$("${CARGO_HOME}/bin/rustup" run "${channel}" cargo clippy --version)" == "clippy "* ]]
+        [[ "$("${CARGO_HOME}/bin/rustup" run "${channel}" rustfmt --version)" == "rustfmt "* ]]
+      done
+      "${CARGO_HOME}/bin/rustup" default "${rust_default}" >/dev/null
+      # Readable by the runner without being writable by it: a job must not be
+      # able to edit a toolchain the next job inherits.
+      chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}"
+      for shim in rustup cargo rustc rustfmt cargo-clippy cargo-fmt clippy-driver; do
+        ln -sfn "${CARGO_HOME}/bin/${shim}" "/usr/local/bin/${shim}"
+      done
+      printf 'RUSTUP_HOME=%s\nCARGO_HOME=%s\n' "${RUSTUP_HOME}" "${CARGO_HOME}" \
+        >> /etc/environment
       ;;
     uv)
       tar --extract --gzip --file "${toolchain_archive}" \

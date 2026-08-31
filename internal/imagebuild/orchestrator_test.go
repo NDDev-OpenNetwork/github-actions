@@ -164,7 +164,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// alias is part of the recipe, so a manifest whose contents changed under an
 	// unchanged alias would otherwise ask the builder to produce different bytes
 	// for a name that is already promoted.
-	if first != "sha256:94237e9c38f839f5062c37f4a5a32b0d0a4aa0714c15c36a87a4f19ac3c3fc0e" {
+	if first != "sha256:43872591ca0e452ea67560b23710650e34ba02b301ba26a35a72ddf1ac195e69" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
