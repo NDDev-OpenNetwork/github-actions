@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.86"
+readonly derivative_version="v0.2.1-nddev.87"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
