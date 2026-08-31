@@ -621,3 +621,13 @@ func TestWarmClaimForAnotherRepositoryIsStillRefused(t *testing.T) {
 		t.Fatalf("refusal is not diagnosable from its own log: %s", logs.String())
 	}
 }
+
+func TestLogTextCannotForgeALogLine(t *testing.T) {
+	forged := "repo\n{\"level\":\"INFO\",\"msg\":\"cache claim delivered\"}"
+	if got := logText(forged); strings.ContainsAny(got, "\r\n\x00") {
+		t.Fatalf("logText left a line break in %q", got)
+	}
+	if logText("example-org/example-repo") != "example-org/example-repo" {
+		t.Fatal("logText altered an ordinary value")
+	}
+}

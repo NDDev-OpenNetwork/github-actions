@@ -173,22 +173,22 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		if authorizeErr := h.QueueCorrelator.AuthorizeRunning(ctx, correlation); authorizeErr != nil {
 			logger.WarnContext(ctx, "warm runner correlation refused",
-				telemetryattrs.InstanceName, claimRequest.InstanceName,
-				telemetryattrs.RunnerName, claimRequest.RunnerName,
-				telemetryattrs.GitHubRepository, claimRequest.Repository,
+				telemetryattrs.InstanceName, logText(claimRequest.InstanceName),
+				telemetryattrs.RunnerName, logText(claimRequest.RunnerName),
+				telemetryattrs.GitHubRepository, logText(claimRequest.Repository),
 				telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
-				telemetryattrs.GitHubJobName, claimRequest.JobName,
-				"pool", claim.PoolName,
+				telemetryattrs.GitHubJobName, logText(claimRequest.JobName),
+				"pool", logText(claim.PoolName),
 				"error", authorizeErr)
 			deny(logger, writer, request, http.StatusForbidden, "warm runner correlation refused")
 			return
 		}
 		logger.InfoContext(ctx, "warm runner correlation authorized",
-			telemetryattrs.InstanceName, claimRequest.InstanceName,
-			telemetryattrs.RunnerName, claimRequest.RunnerName,
-			telemetryattrs.GitHubRepository, claimRequest.Repository,
+			telemetryattrs.InstanceName, logText(claimRequest.InstanceName),
+			telemetryattrs.RunnerName, logText(claimRequest.RunnerName),
+			telemetryattrs.GitHubRepository, logText(claimRequest.Repository),
 			telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
-			"pool", claim.PoolName)
+			"pool", logText(claim.PoolName))
 	}
 	if claimRequest.WorkflowRunID > 0 {
 		if h.QueueCorrelator != nil {
@@ -321,6 +321,21 @@ func validateJobCorrelation(request ClaimRequest) error {
 		}
 	}
 	return nil
+}
+
+// logText makes the CR/LF/NUL guarantee local to the log call.
+//
+// validateJobCorrelation already refuses those characters through boundedText,
+// so nothing reaching here can forge a log line today. That is an invariant
+// held a hundred lines away in a handler that has grown, and a reader of the
+// log call cannot see it; CodeQL cannot either, and flagged the refusal path
+// for exactly that reason. Stripping at the boundary costs nothing and keeps
+// the property true if the validator is ever relaxed.
+func logText(value string) string {
+	if !strings.ContainsAny(value, "\r\n\x00") {
+		return value
+	}
+	return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(value)
 }
 
 func boundedText(value string) bool {
