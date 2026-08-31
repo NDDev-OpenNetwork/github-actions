@@ -43,7 +43,7 @@ func jsonFieldNames(t *testing.T, value any) []string {
 // that decision -- internal/providerjournal already carries a worked example of
 // a version ladder that upgrades in memory.
 func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
-	if SchemaVersion != 5 {
+	if SchemaVersion != 6 {
 		t.Fatalf("SchemaVersion = %d; update the golden field sets below with it", SchemaVersion)
 	}
 	for _, testCase := range []struct {
@@ -64,7 +64,7 @@ func TestQueueIntentWireShapeIsPinnedToItsSchemaVersion(t *testing.T) {
 			wanted: []string{
 				"key", "scale_set_id", "job_id", "runner_request_id", "workflow_run_id", "job_display_name", "github_runner_id", "scale_set_name",
 				"runner_name", "owner", "repository", "workflow_ref", "event_name", "queue_time",
-				"state", "priority", "state_entered_at", "updated_at", "expires_at",
+				"first_queued_at", "state", "priority", "state_entered_at", "updated_at", "expires_at",
 			},
 		},
 		{
@@ -154,5 +154,64 @@ func TestUnknownFieldRejectsTheWholeJournalRatherThanOneIntent(t *testing.T) {
 	}
 	if len(snapshot.Active) != 1 || snapshot.Generation != 7 {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+}
+
+// TestVersionFiveJournalUpgradesWithoutInventingAWait pins the migration this
+// field forced. A version 5 document carries no first_queued_at; the reader must
+// accept it, upgrade it in memory, and leave the stamp zero so WaitSince falls
+// back to QueueTime. Synthesising a stamp here would manufacture a wait for an
+// intent whose QueueTime has already been rewritten an unknown number of times.
+func TestVersionFiveJournalUpgradesWithoutInventingAWait(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "queue-intents.json")
+	now := time.Now().UTC().Truncate(time.Second)
+	journal := map[string]any{
+		"schema_version": PreviousSchemaVersion,
+		"generation":     uint64(7),
+		"updated_at":     now,
+		"intents": map[string]any{
+			"github-scale-set-job:v2:11:job-1": map[string]any{
+				"key":               "github-scale-set-job:v2:11:job-1",
+				"scale_set_id":      11,
+				"job_id":            "job-1",
+				"runner_request_id": 3,
+				"scale_set_name":    "nddev-linux-standard",
+				"repository":        "example-org/example-actions",
+				"workflow_ref":      "example-org/example-actions/.github/workflows/ci.yml@refs/heads/main",
+				"event_name":        "push",
+				"queue_time":        now.Add(-time.Hour),
+				"state":             string(StateQueued),
+				"priority":          1,
+				"state_entered_at":  now.Add(-time.Minute),
+				"updated_at":        now,
+				"expires_at":        now.Add(time.Hour),
+			},
+		},
+		"repositories":  map[string]any{},
+		"terminal_jobs": map[string]any{},
+	}
+	encoded, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Reader{Path: path}.ReadActive(context.Background())
+	if err != nil {
+		t.Fatalf("a version %d journal must load: %v", PreviousSchemaVersion, err)
+	}
+	if len(snapshot.Active) != 1 {
+		t.Fatalf("active intents = %d, want 1", len(snapshot.Active))
+	}
+	intent := snapshot.Active[0]
+	if !intent.FirstQueuedAt.IsZero() {
+		t.Fatalf("FirstQueuedAt = %v; a version %d document has none to carry",
+			intent.FirstQueuedAt, PreviousSchemaVersion)
+	}
+	if !intent.WaitSince().Equal(intent.QueueTime) {
+		t.Fatalf("WaitSince() = %v, want the queue time %v as the fallback",
+			intent.WaitSince(), intent.QueueTime)
 	}
 }

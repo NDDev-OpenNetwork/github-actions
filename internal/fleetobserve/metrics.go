@@ -150,6 +150,14 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	for _, scaleSet := range scaleSets {
 		metric(&output, "gha_fleet_queue_intents_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.ByScaleSet[scaleSet]))
 	}
+	// The wait, not the state clock. gha_fleet_queue_intent_oldest_state_age_seconds
+	// resets when an assigned intent returns to queued, so it has a ceiling near
+	// the assignment timeout and cannot carry a wait threshold.
+	gauge(&output, "gha_fleet_queue_oldest_queued_wait_seconds", "Longest wait since GitHub queued an intent that is still queued.", float64(snapshot.Queue.OldestQueuedWaitSeconds))
+	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", "Longest wait since GitHub queued a still-queued intent, per configured scale set.")
+	for _, scaleSet := range scaleSets {
+		metric(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.OldestQueuedWaitSecondsByScaleSet[scaleSet]))
+	}
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
 	gauge(&output, "gha_fleet_incus_visible_maintenance_instances", "Visible exact image builder or smoke instances; observable maintenance capacity, never GitHub job runners.", float64(snapshot.Incus.VisibleMaintenanceInstances))
 	gauge(&output, "gha_fleet_incus_orphan_instances", "Visible Incus instances without an admitted, created, deleting or warm journal lease.", float64(snapshot.Incus.OrphanInstances))

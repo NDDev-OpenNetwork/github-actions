@@ -236,8 +236,19 @@ type QueueSummary struct {
 	RunningMissingGitHubRunnerID     int              `json:"running_missing_github_runner_id"`
 	ByState                          map[string]int   `json:"by_state"`
 	OldestStateAgeSeconds            map[string]int64 `json:"oldest_state_age_seconds"`
-	ByPriority                       map[int]int      `json:"by_priority"`
-	ByScaleSet                       map[string]int   `json:"by_scale_set"`
+	// OldestQueuedWaitSeconds is how long the longest-waiting intent that is
+	// still queued has waited since GitHub queued it.
+	//
+	// OldestStateAgeSeconds["queued"] answers a different question and reads
+	// like this one. An intent that is assigned and then returns to queued
+	// restarts its state clock, so that value has a ceiling around the
+	// assignment timeout no matter how long the job has actually waited --
+	// measured at 9 minutes against a real wait of 52. A threshold built on it
+	// can never fire.
+	OldestQueuedWaitSeconds           int64            `json:"oldest_queued_wait_seconds"`
+	OldestQueuedWaitSecondsByScaleSet map[string]int64 `json:"oldest_queued_wait_seconds_by_scale_set"`
+	ByPriority                        map[int]int      `json:"by_priority"`
+	ByScaleSet                        map[string]int   `json:"by_scale_set"`
 }
 
 type IncusSummary struct {
@@ -637,19 +648,21 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		knownScaleSets[pool.ScaleSetName] = struct{}{}
 	}
 	summary := QueueSummary{
-		Generation:                snapshot.Generation,
-		Stored:                    snapshot.Stored,
-		Active:                    len(snapshot.Active),
-		Expired:                   snapshot.Expired,
-		TerminalJobs:              snapshot.TerminalJobs,
-		TerminalNextExpirySeconds: snapshot.TerminalNextExpirySeconds,
-		ByState:                   make(map[string]int),
-		OldestStateAgeSeconds:     make(map[string]int64),
-		ByPriority:                make(map[int]int),
-		ByScaleSet:                make(map[string]int),
+		Generation:                        snapshot.Generation,
+		Stored:                            snapshot.Stored,
+		Active:                            len(snapshot.Active),
+		Expired:                           snapshot.Expired,
+		TerminalJobs:                      snapshot.TerminalJobs,
+		TerminalNextExpirySeconds:         snapshot.TerminalNextExpirySeconds,
+		ByState:                           make(map[string]int),
+		OldestStateAgeSeconds:             make(map[string]int64),
+		ByPriority:                        make(map[int]int),
+		ByScaleSet:                        make(map[string]int),
+		OldestQueuedWaitSecondsByScaleSet: make(map[string]int64),
 	}
 	for scaleSet := range knownScaleSets {
 		summary.ByScaleSet[scaleSet] = 0
+		summary.OldestQueuedWaitSecondsByScaleSet[scaleSet] = 0
 	}
 	for _, intent := range snapshot.Active {
 		if _, exists := knownScaleSets[intent.ScaleSetName]; !exists {
@@ -705,6 +718,18 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		age := int64(now.Sub(intent.QueueTime).Seconds())
 		if age > summary.OldestQueueAgeSeconds {
 			summary.OldestQueueAgeSeconds = age
+		}
+		if intent.State == queueintent.StateQueued {
+			// From the immutable first-seen stamp, not QueueTime: reconciliation
+			// moves QueueTime forward on an intent that is still waiting, so a
+			// wait measured from it has a ceiling like the state clock does.
+			wait := int64(now.Sub(intent.WaitSince()).Seconds())
+			if wait > summary.OldestQueuedWaitSeconds {
+				summary.OldestQueuedWaitSeconds = wait
+			}
+			if wait > summary.OldestQueuedWaitSecondsByScaleSet[intent.ScaleSetName] {
+				summary.OldestQueuedWaitSecondsByScaleSet[intent.ScaleSetName] = wait
+			}
 		}
 	}
 	return summary, nil

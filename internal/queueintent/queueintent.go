@@ -21,8 +21,8 @@ import (
 
 const (
 	LegacySchemaVersion   = 1
-	PreviousSchemaVersion = 4
-	SchemaVersion         = 5
+	PreviousSchemaVersion = 5
+	SchemaVersion         = 6
 	maxJournalBytes       = 4 * 1024 * 1024
 )
 
@@ -60,11 +60,16 @@ type Intent struct {
 	// knows the account it serves and has no reason to know the registry ID
 	// the fleet files it under. Translating one into the other is the
 	// provider's job, at the one place that compares them.
-	Owner          string    `json:"owner,omitempty"`
-	Repository     string    `json:"repository"`
-	WorkflowRef    string    `json:"workflow_ref"`
-	EventName      string    `json:"event_name"`
-	QueueTime      time.Time `json:"queue_time"`
+	Owner       string    `json:"owner,omitempty"`
+	Repository  string    `json:"repository"`
+	WorkflowRef string    `json:"workflow_ref"`
+	EventName   string    `json:"event_name"`
+	QueueTime   time.Time `json:"queue_time"`
+	// FirstQueuedAt is when the intent was first written and is never rewritten.
+	// QueueTime is reassigned by authoritative reconciliation and moves forward
+	// while an intent waits, so it cannot measure a wait. Zero on intents
+	// written before the field existed; read it through WaitSince.
+	FirstQueuedAt  time.Time `json:"first_queued_at,omitempty"`
 	State          State     `json:"state"`
 	Priority       int       `json:"priority"`
 	StateEnteredAt time.Time `json:"state_entered_at"`
@@ -297,8 +302,14 @@ func readJournal(path string) (Journal, error) {
 	case 3:
 		journal.TerminalJobs = make(map[string]time.Time)
 		journal.SchemaVersion = SchemaVersion
-	case PreviousSchemaVersion:
+	case 4:
 		journal.TerminalJobs = make(map[string]time.Time)
+		journal.SchemaVersion = SchemaVersion
+	case PreviousSchemaVersion:
+		// Version 5 carries no first_queued_at. The field stays zero and
+		// WaitSince falls back to QueueTime for those intents, which
+		// under-reports their wait until they are rewritten rather than
+		// inventing one. Nothing else about a version 5 document changes.
 		journal.SchemaVersion = SchemaVersion
 	case SchemaVersion:
 	default:
@@ -378,4 +389,18 @@ func (r Reader) now() time.Time {
 		return r.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// WaitSince returns the instant an intent started waiting: its immutable
+// first-seen stamp, or its queue time when that stamp predates the field.
+//
+// The fallback under-reports for those older records rather than inventing a
+// wait, because QueueTime on a waiting intent moves forward as reconciliation
+// reassigns it -- two still-queued intents were measured moving it 15 minutes
+// in a three-minute sample.
+func (intent Intent) WaitSince() time.Time {
+	if !intent.FirstQueuedAt.IsZero() {
+		return intent.FirstQueuedAt
+	}
+	return intent.QueueTime
 }
