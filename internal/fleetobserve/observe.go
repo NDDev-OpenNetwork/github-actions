@@ -39,6 +39,7 @@ const (
 	diagnosticExportSyncGracePeriod = 90 * time.Second
 	deletingVisibilityGrace         = 30 * time.Second
 	createdVisibilityGrace          = 30 * time.Second
+	orphanVisibilityGrace           = 60 * time.Second
 )
 
 const (
@@ -100,26 +101,39 @@ type Collector struct {
 	Service            ServiceSource
 	DiagnosticMaxBytes int64
 	Now                func() time.Time
-	CreatedVisibility  *CreatedVisibilityTracker
+	CreatedVisibility  *VisibilityTracker
+	OrphanVisibility   *VisibilityTracker
 }
 
-// CreatedVisibilityTracker remembers when a created lease was first observed
+// VisibilityTracker remembers when a name was first observed in a
+// disagreement between two ledgers, so a transient one is not reported as a gap
 // absent from Incus. Lease age cannot answer this question: a worker can run for
 // hours before terminal teardown creates a short journal/inventory race.
-type CreatedVisibilityTracker struct {
+type VisibilityTracker struct {
 	mu        sync.Mutex
 	firstSeen map[string]time.Time
 	grace     time.Duration
 }
 
-func NewCreatedVisibilityTracker() *CreatedVisibilityTracker {
-	return &CreatedVisibilityTracker{
+func NewCreatedVisibilityTracker() *VisibilityTracker {
+	return &VisibilityTracker{
 		firstSeen: make(map[string]time.Time),
 		grace:     createdVisibilityGrace,
 	}
 }
 
-func (t *CreatedVisibilityTracker) observe(names []string, now time.Time) (map[string]bool, int64) {
+// NewOrphanVisibilityTracker mirrors the created-visibility grace on the other
+// side of the same disagreement. An instance is visible in Incus a moment
+// before its lease is journaled, and counting that instant as an orphan turned
+// an ordinary create into a page.
+func NewOrphanVisibilityTracker() *VisibilityTracker {
+	return &VisibilityTracker{
+		firstSeen: make(map[string]time.Time),
+		grace:     orphanVisibilityGrace,
+	}
+}
+
+func (t *VisibilityTracker) observe(names []string, now time.Time) (map[string]bool, int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	current := make(map[string]struct{}, len(names))
@@ -230,6 +244,7 @@ type IncusSummary struct {
 	VisibleInstances            int   `json:"visible_instances"`
 	VisibleMaintenanceInstances int   `json:"visible_maintenance_instances"`
 	OrphanInstances             int   `json:"orphan_instances"`
+	OrphanInstancesWithinGrace  int   `json:"orphan_instances_within_grace"`
 	MissingInstances            int   `json:"missing_instances"`
 	MissingDeletingWithinGrace  int   `json:"missing_deleting_within_grace"`
 	MissingCreatedWithinGrace   int   `json:"missing_created_within_grace"`
@@ -409,14 +424,31 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 					createdWithinGrace, snapshot.Incus.OldestMissingCreatedAgeSecs =
 						c.CreatedVisibility.observe(missingCreated, now)
 				}
+				uncoveredVisible := make([]string, 0)
 				for name := range visibleNames {
 					if _, exists := coveredNames[name]; !exists {
 						if providerjournal.IsImageMaintenanceInstance(name) {
 							snapshot.Incus.VisibleMaintenanceInstances++
 						} else {
-							snapshot.Incus.OrphanInstances++
+							uncoveredVisible = append(uncoveredVisible, name)
 						}
 					}
+				}
+				// An instance becomes visible in Incus a moment before the
+				// provider journals its lease, so the instant between the two is
+				// an ordinary create and not an orphan. This is the same grace
+				// the created side already applies to the mirror-image
+				// disagreement; without it a normal create was a page.
+				orphanWithinGrace := map[string]bool{}
+				if c.OrphanVisibility != nil {
+					orphanWithinGrace, _ = c.OrphanVisibility.observe(uncoveredVisible, now)
+				}
+				for _, name := range uncoveredVisible {
+					if orphanWithinGrace[name] {
+						snapshot.Incus.OrphanInstancesWithinGrace++
+						continue
+					}
+					snapshot.Incus.OrphanInstances++
 				}
 				for name, lease := range expectedNames {
 					if _, exists := visibleNames[name]; !exists {
