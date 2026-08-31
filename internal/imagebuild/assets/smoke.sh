@@ -64,9 +64,9 @@ runner_tool_cache="$(jq -er .runner_tool_cache /etc/nddev/image-build.json)"
 smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
 smoke_toolchain_set="$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-[[ "${smoke_toolchain_set}" == bun,gh,go,rustup,uv \
-  || "${smoke_toolchain_set}" == bun,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
-  || "${smoke_toolchain_set}" == bun,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]
+[[ "${smoke_toolchain_set}" == bun,codeql,gh,go,rustup,uv \
+  || "${smoke_toolchain_set}" == bun,codeql,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
+  || "${smoke_toolchain_set}" == bun,codeql,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -74,6 +74,12 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   [[ "$(jq -er --arg name "${smoke_toolchain}" '.toolchains[$name].version' /etc/nddev/image-build.json)" == "${expected_version}" ]]
   [[ "$(jq -er --arg name "${smoke_toolchain}" '.toolchains[$name].archive_sha256' /etc/nddev/image-build.json)" == "${expected_sha256}" ]]
 	case "${smoke_toolchain}" in
+    codeql)
+      codeql_root="${runner_tool_cache}/CodeQL/0.0.0-codeql-bundle-v${expected_version}"
+      test -f "${codeql_root}/x64.complete"
+      [[ "$(stat --format='%U' -- "${codeql_root}/x64/codeql/codeql")" == runner ]]
+      [[ "$(runuser -u runner -- "${codeql_root}/x64/codeql/codeql" version --format=terse)" == "${expected_version}" ]]
+      ;;
 	  bun)
 	    [[ "$(bun --version)" == "${expected_version}" ]]
 	    # The path oven-sh/setup-bun probes before deciding to download.

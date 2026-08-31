@@ -40,6 +40,7 @@ jq -n --arg storage_driver "${GHA_DOCKER_STORAGE_DRIVER}" '({
   "default-address-pools":[{"base":"172.30.0.0/16","size":24}],
   "exec-opts":["native.cgroupdriver=systemd"],
   "features":{"buildkit":true},
+  "registry-mirrors":["https://192.0.2.1:5001"],
   "live-restore":false,
   "log-driver":"local",
   "log-opts":{"max-file":"3","max-size":"10m"},

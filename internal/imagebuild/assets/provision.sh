@@ -237,9 +237,9 @@ toolchain_manifest="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
 toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
-if [[ "${toolchain_set}" != bun,gh,go,rustup,uv \
-  && "${toolchain_set}" != bun,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
-  && "${toolchain_set}" != bun,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]; then
+if [[ "${toolchain_set}" != bun,codeql,gh,go,rustup,uv \
+  && "${toolchain_set}" != bun,codeql,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
+  && "${toolchain_set}" != bun,codeql,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -254,6 +254,20 @@ for toolchain_name in "${toolchain_names[@]}"; do
   echo "${toolchain_sha256}  ${toolchain_archive}" | sha256sum --check --strict
   toolchain_scratch="$(mktemp -d /var/tmp/gha-toolchain.XXXXXXXXXX)"
 	case "${toolchain_name}" in
+    codeql)
+      # The action resolves ${runner_tool_cache}/CodeQL/0.0.0-codeql-bundle-v<ver>
+      # with an x64.complete marker beside x64/, and prefers it over the 800 MB
+      # network download an ephemeral runner would otherwise repeat every
+      # analyze job.
+      codeql_root="${runner_tool_cache}/CodeQL/0.0.0-codeql-bundle-v${toolchain_version}"
+      install -d -o runner -g runner -m 0755 "${runner_tool_cache}/CodeQL" \
+        "${codeql_root}" "${codeql_root}/x64"
+      tar --extract --gzip --file "${toolchain_archive}" \
+        --directory "${codeql_root}/x64" --no-same-owner --no-same-permissions
+      chown -R runner:runner "${codeql_root}"
+      install -o runner -g runner -m 0644 /dev/null "${codeql_root}/x64.complete"
+      [[ "$(runuser -u runner -- "${codeql_root}/x64/codeql/codeql" version --format=terse)" == "${toolchain_version}" ]]
+      ;;
 	  bun)
       unzip -q "${toolchain_archive}" -d "${toolchain_scratch}"
       install -o root -g root -m 0755 \

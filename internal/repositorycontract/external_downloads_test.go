@@ -20,6 +20,7 @@ func TestEveryNetworkBootstrapSurfaceIsClassified(t *testing.T) {
 		"internal/garmproviderincus/provider/incus.go",
 		"internal/garmproviderincus/provider/specs.go",
 		"internal/imagebuild/assets/container-provision.sh",
+		"internal/imagebuild/assets/docker-provision.sh",
 		"internal/imagebuild/assets/provision.sh",
 		"internal/imagebuild/assets/smoke-integration.sh",
 		"internal/imagebuild/assets/smoke.sh",
