@@ -68,7 +68,7 @@ func TestExternalDownloadFallbackMarkersRemainBounded(t *testing.T) {
 			"--retry 2", "verify_candidate", "nddev_tool_cache_event=",
 		},
 		"scripts/install-benchmark-toolchain.sh": {
-			"--retry 2", "toolchain SHA-256 mismatch", "rustc 1.97.1",
+			"--retry 2", "toolchain SHA-256 mismatch", "rustc 1.98.0",
 		},
 		"internal/garmproviderincus/provider/incus.go": {
 			"--retry 2", "validateRunnerTool",

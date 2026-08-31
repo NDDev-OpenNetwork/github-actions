@@ -68,8 +68,8 @@ install -d -m 0700 "${install_root}" "${binary_root}"
 
 case "${toolchain}" in
   rust)
-    if [[ "$(rustc --version 2>/dev/null || true)" == "rustc 1.97.1 "* &&
-      "$(cargo --version 2>/dev/null || true)" == "cargo 1.97.1 "* ]]; then
+    if [[ "$(rustc --version 2>/dev/null || true)" == "rustc 1.98.0 "* &&
+      "$(cargo --version 2>/dev/null || true)" == "cargo 1.98.0 "* ]]; then
       exit 0
     fi
     : "${CARGO_HOME:?CARGO_HOME is required for Rust installation}"
@@ -85,12 +85,12 @@ case "${toolchain}" in
       "${rustup_init}"
     chmod 0700 "${rustup_init}"
     export RUSTUP_HOME="${rustup_home}"
-    "${rustup_init}" --default-toolchain 1.97.1 --profile minimal --no-modify-path -y
+    "${rustup_init}" --default-toolchain 1.98.0 --profile minimal --no-modify-path -y
     printf 'RUSTUP_HOME=%s\n' "${rustup_home}" >>"${GITHUB_ENV}"
     printf '%s/bin\n' "${CARGO_HOME}" >>"${GITHUB_PATH}"
     export PATH="${CARGO_HOME}/bin:${PATH}"
-    [[ "$(rustc --version)" == "rustc 1.97.1 "* ]]
-    [[ "$(cargo --version)" == "cargo 1.97.1 "* ]]
+    [[ "$(rustc --version)" == "rustc 1.98.0 "* ]]
+    [[ "$(cargo --version)" == "cargo 1.98.0 "* ]]
     ;;
   uv)
     if [[ "$(uv --version 2>/dev/null || true)" == "uv 0.11.30"* ]]; then
