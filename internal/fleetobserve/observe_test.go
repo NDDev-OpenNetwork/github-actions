@@ -982,3 +982,33 @@ func TestStampedIntentsAreNotCountedAsUnmeasurable(t *testing.T) {
 			summary.QueuedWithoutFirstStamp)
 	}
 }
+
+// TestWarmInstancesAreNotUnboundWorkers covers the category error. A warm
+// instance is created with no job on purpose, so counting it as a created lease
+// without a running identity reports the fleet's own pre-provisioning as a
+// fault, and the count cannot reach zero while any pool keeps warm capacity.
+func TestWarmInstancesAreNotUnboundWorkers(t *testing.T) {
+	lease := func(name string) providerjournal.Lease {
+		return providerjournal.Lease{
+			InstanceName: name,
+			PoolName:     "nddev-priority-standard",
+			PoolID:       "pool-priority-standard",
+			State:        providerjournal.StateCreated,
+			AdmittedAt:   observationTime.Add(-time.Hour),
+			UpdatedAt:    observationTime.Add(-time.Minute),
+		}
+	}
+	journal := providerjournal.Journal{
+		SchemaVersion: providerjournal.SchemaVersion,
+		Leases: map[string]providerjournal.Lease{
+			"warm-nddev-priority-standard-5a19e1a25aec": lease("warm-nddev-priority-standard-5a19e1a25aec"),
+			"nddev-ggfuzaevr7is":                        lease("nddev-ggfuzaevr7is"),
+		},
+		Claims: map[string]providerjournal.Claim{},
+	}
+	correlation := summarizeExecutionCorrelation(journal, queueintent.Snapshot{}, observationTime)
+	if correlation.CreatedWithoutRunningIdentity != 1 {
+		t.Fatalf("CreatedWithoutRunningIdentity = %d, want 1: the warm lease is not an unbound worker",
+			correlation.CreatedWithoutRunningIdentity)
+	}
+}
