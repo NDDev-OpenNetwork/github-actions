@@ -378,7 +378,7 @@ func TestWarmClaimBindsProviderInstanceToExactRuntimeRunner(t *testing.T) {
 	if journal.Claims["warm-standard-example"].ClaimedRepository != "example-org/example-repo" {
 		t.Fatalf("warm claim was not bound to the exact repository: %+v", journal.Claims["warm-standard-example"])
 	}
-	if !strings.Contains(logs.String(), `"msg":"warm runner correlation bound"`) ||
+	if !strings.Contains(logs.String(), `"msg":"warm runner correlation authorized"`) ||
 		!strings.Contains(logs.String(), `"runner.name":"runner-runtime"`) {
 		t.Fatalf("warm correlation evidence is missing: %s", logs.String())
 	}
@@ -482,5 +482,142 @@ func TestJobCorrelationIsAllOrNothingAndBounded(t *testing.T) {
 	oversized.JobName = strings.Repeat("x", 1025)
 	if err := validateJobCorrelation(oversized); err == nil {
 		t.Fatal("oversized job identity accepted")
+	}
+}
+
+// A matrix job's display name is what GitHub puts in the scale-set message --
+// `Analyze (python)` -- while GITHUB_JOB is the workflow's job id, `analyze`.
+// Requiring those to match refused the cache to every matrix job on a warm
+// runner: 19 refusals against 7 binds in one live hour. Authorization asks the
+// tighter question instead, whether this scale set is serving that repository's
+// exact workflow run.
+func TestWarmClaimIsAuthorizedForAMatrixJobDisplayName(t *testing.T) {
+	now := time.Date(2026, 8, 31, 3, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	token := bytes.Repeat([]byte{9}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "warm-standard-matrix", "example-standard", "correlation-only", token); err != nil {
+		t.Fatal(err)
+	}
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	queueLock := filepath.Join(directory, "queue-intents.lock")
+	intents := map[string]queueintent.Intent{}
+	for index, language := range []string{"python", "go", "rust"} {
+		key := "github-scale-set-job:v2:42:job-matrix-" + language
+		intents[key] = queueintent.Intent{
+			Key: key, ScaleSetID: 42, JobID: "job-matrix-" + language, RunnerRequestID: int64(700 + index),
+			ScaleSetName: "example-standard", JobDisplayName: "Analyze (" + language + ")", Owner: "example-org",
+			Repository: "example-org/example-repo", WorkflowRef: "unavailable-before-job-available", EventName: "push",
+			QueueTime: now.Add(-time.Minute), State: queueintent.StateAssigned, Priority: 1, WorkflowRunID: 456,
+			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+		}
+	}
+	queue := queueintent.Journal{
+		SchemaVersion: queueintent.SchemaVersion, Generation: 11, UpdatedAt: now, Intents: intents,
+		Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
+	}
+	raw, err := json.Marshal(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002",
+		Region: "us-east-1", Bucket: "github-actions-cache", CAFile: "/tmp/ca",
+		JournalFile: store.Path, JournalLock: store.LockPath, QueueJournalFile: queuePath, QueueJournalLock: queueLock,
+	}
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "warm-standard-matrix", RunnerName: "runner-runtime-matrix", Repository: "example-org/example-repo",
+		RepositoryID: 123, WorkflowRunID: 456, RunAttempt: 1, JobName: "analyze",
+		WorkflowRef: "example-org/example-repo/.github/workflows/codeql.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("b", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
+	correlator := &queueintent.Correlator{
+		Path: queuePath, LockPath: queueLock, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1,
+	}
+	var logs bytes.Buffer
+	response := httptest.NewRecorder()
+	Handler{Config: config, Store: store, QueueCorrelator: correlator, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}.
+		ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("a matrix job was refused its cache: status=%d body=%s logs=%s", response.Code, response.Body.String(), logs.String())
+	}
+	journal, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Claims["warm-standard-matrix"].ClaimedRepository != "example-org/example-repo" {
+		t.Fatalf("warm claim was not bound to the exact repository: %+v", journal.Claims["warm-standard-matrix"])
+	}
+	// Three sibling intents share this run, so no single one can be resolved and
+	// the journal must be left for the asynchronous binder rather than guessed at.
+	if !strings.Contains(logs.String(), `"msg":"warm runner correlation authorized"`) ||
+		!strings.Contains(logs.String(), `"msg":"queue running correlation deferred"`) {
+		t.Fatalf("authorization evidence is missing: %s", logs.String())
+	}
+}
+
+// Authorization is not a weakening: a warm runner presenting a repository this
+// scale set holds no active work for is still refused, and its one-job token is
+// not consumed.
+func TestWarmClaimForAnotherRepositoryIsStillRefused(t *testing.T) {
+	now := time.Date(2026, 8, 31, 3, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	store := Store{Path: filepath.Join(directory, "claims.json"), LockPath: filepath.Join(directory, "claims.lock")}
+	token := bytes.Repeat([]byte{10}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "warm-standard-foreign", "example-standard", "correlation-only", token); err != nil {
+		t.Fatal(err)
+	}
+	queuePath := filepath.Join(directory, "queue-intents.json")
+	queueLock := filepath.Join(directory, "queue-intents.lock")
+	key := "github-scale-set-job:v2:42:job-owned"
+	queue := queueintent.Journal{
+		SchemaVersion: queueintent.SchemaVersion, Generation: 3, UpdatedAt: now,
+		Intents: map[string]queueintent.Intent{key: {
+			Key: key, ScaleSetID: 42, JobID: "job-owned", RunnerRequestID: 71,
+			ScaleSetName: "example-standard", JobDisplayName: "Analyze (python)", Owner: "example-org",
+			Repository: "example-org/example-repo", WorkflowRef: "unavailable-before-job-available", EventName: "push",
+			QueueTime: now.Add(-time.Minute), State: queueintent.StateAssigned, Priority: 1, WorkflowRunID: 456,
+			StateEnteredAt: now.Add(-30 * time.Second), UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+		}}, Repositories: map[string]queueintent.RepositoryState{}, TerminalJobs: map[string]time.Time{},
+	}
+	raw, err := json.Marshal(queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(ClaimRequest{
+		InstanceName: "warm-standard-foreign", RunnerName: "runner-runtime-foreign", Repository: "other-org/other-repo",
+		RepositoryID: 321, WorkflowRunID: 456, RunAttempt: 1, JobName: "analyze",
+		WorkflowRef: "other-org/other-repo/.github/workflows/codeql.yml@refs/heads/main",
+		CommitSHA:   strings.Repeat("c", 40), Token: base64.RawURLEncoding.EncodeToString(token),
+	})
+	correlator := &queueintent.Correlator{
+		Path: queuePath, LockPath: queueLock, Now: func() time.Time { return now.Add(time.Second) }, Attempts: 1,
+	}
+	var logs bytes.Buffer
+	response := httptest.NewRecorder()
+	Handler{Store: store, QueueCorrelator: correlator, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}.
+		ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://x"+ClaimPath, bytes.NewReader(body)))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("a foreign repository was authorized: status=%d body=%s", response.Code, response.Body.String())
+	}
+	journal, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Claims["warm-standard-foreign"].ClaimedRepository != "" {
+		t.Fatal("a refused warm claim consumed the one-job token")
+	}
+	// The refusal used to log nothing at all, which made the one failure that
+	// costs every warm runner its cache the only one that could not be read.
+	if !strings.Contains(logs.String(), `"msg":"warm runner correlation refused"`) ||
+		!strings.Contains(logs.String(), `"github.repository":"other-org/other-repo"`) ||
+		!strings.Contains(logs.String(), `"github.job_name":"analyze"`) {
+		t.Fatalf("refusal is not diagnosable from its own log: %s", logs.String())
 	}
 }

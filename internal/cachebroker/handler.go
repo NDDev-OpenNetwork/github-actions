@@ -142,7 +142,6 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		deny(logger, writer, request, http.StatusForbidden, "claim refused")
 		return
 	}
-	correlationBound := false
 	var correlation queueintent.RunningCorrelation
 	if claimRequest.WorkflowRunID > 0 {
 		correlation = queueintent.RunningCorrelation{
@@ -153,32 +152,47 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	// A promoted warm container intentionally keeps its provider instance name
 	// while the one-job JIT runner receives GitHub's runner name. The claim token
-	// proves the former; an exact active queue correlation proves that the latter
-	// is the runner executing this repository job. Never weaken this to accepting
-	// two arbitrary names or to a timing/job-name heuristic.
+	// proves the former; an active queue intent for this exact repository and
+	// workflow run proves that the latter is the runner executing this
+	// repository's job. Never weaken this to accepting two arbitrary names or to
+	// a timing heuristic.
+	//
+	// It used to require BindRunning, which must resolve one intent because it
+	// writes to it, and which picks between a run's sibling jobs by comparing
+	// the journal's display name against GITHUB_JOB. Those disagree for every
+	// matrix job, so a correct warm runner was refused its cache and built from
+	// cold: 19 refusals against 7 binds in an hour on the live fleet. The
+	// credential is repository-scoped, so the run is the right key and the job
+	// name was never load-bearing for authorization. The exact intent is still
+	// bound below, and retried asynchronously once GitHub reports the job
+	// started.
 	if warmRuntimeIdentity {
 		if claimRequest.WorkflowRunID <= 0 || h.QueueCorrelator == nil {
 			deny(logger, writer, request, http.StatusForbidden, "warm runner correlation required")
 			return
 		}
-		result, bindErr := h.QueueCorrelator.BindRunning(ctx, correlation)
-		if bindErr != nil {
-			logger.WarnContext(ctx, "warm runner correlation refused")
+		if authorizeErr := h.QueueCorrelator.AuthorizeRunning(ctx, correlation); authorizeErr != nil {
+			logger.WarnContext(ctx, "warm runner correlation refused",
+				telemetryattrs.InstanceName, claimRequest.InstanceName,
+				telemetryattrs.RunnerName, claimRequest.RunnerName,
+				telemetryattrs.GitHubRepository, claimRequest.Repository,
+				telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
+				telemetryattrs.GitHubJobName, claimRequest.JobName,
+				"pool", claim.PoolName,
+				"error", authorizeErr)
 			deny(logger, writer, request, http.StatusForbidden, "warm runner correlation refused")
 			return
 		}
-		correlationBound = true
-		logger.InfoContext(ctx, "warm runner correlation bound",
-			"journal_generation", result.Generation,
-			"changed", result.Changed)
+		logger.InfoContext(ctx, "warm runner correlation authorized",
+			telemetryattrs.InstanceName, claimRequest.InstanceName,
+			telemetryattrs.RunnerName, claimRequest.RunnerName,
+			telemetryattrs.GitHubRepository, claimRequest.Repository,
+			telemetryattrs.GitHubWorkflowRunID, claimRequest.WorkflowRunID,
+			"pool", claim.PoolName)
 	}
 	if claimRequest.WorkflowRunID > 0 {
 		if h.QueueCorrelator != nil {
-			var result queueintent.CorrelationResult
-			var bindErr error
-			if !correlationBound {
-				result, bindErr = h.QueueCorrelator.BindRunning(ctx, correlation)
-			}
+			result, bindErr := h.QueueCorrelator.BindRunning(ctx, correlation)
 			if bindErr != nil {
 				logger.WarnContext(ctx, "queue running correlation deferred",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
@@ -188,7 +202,7 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				if errors.Is(bindErr, queueintent.ErrRunningCorrelationNotReady) {
 					h.retryQueueCorrelation(correlation, logger)
 				}
-			} else if !correlationBound {
+			} else {
 				logger.InfoContext(ctx, "queue running correlation bound",
 					telemetryattrs.InstanceName, claimRequest.InstanceName,
 					telemetryattrs.GitHubRepository, claimRequest.Repository,

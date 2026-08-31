@@ -50,6 +50,68 @@ func (c Correlator) Ready(ctx context.Context) error {
 	return err
 }
 
+// AuthorizeRunning proves that this scale set currently holds active work for
+// the exact repository and workflow run the runner presents, without demanding
+// the one intent that job will eventually occupy.
+//
+// BindRunning has to identify a single intent, because it writes to it. To pick
+// one out of a run's sibling jobs it compares the journal's job display name --
+// what GitHub puts in the scale-set message -- against GITHUB_JOB, which is the
+// job id from the workflow file. Those two agree for a bare job and for a
+// reusable-workflow prefix, and disagree for every matrix job: `Analyze
+// (python)` is not `analyze`. Measured over one hour on the live fleet, 19 warm
+// claims were refused and 7 bound.
+//
+// Authorization does not need that. The credential a claim yields is scoped to
+// a repository, so the question is whether this warm container is serving that
+// repository's run -- and (scale set, owner, repository, workflow run id) is a
+// strictly tighter answer than any job-name comparison. Siblings of the same
+// run are interchangeable for this purpose: they carry the same repository and
+// the same trust role. Nothing here mutates the journal; the exact intent is
+// still bound by BindRunning and its asynchronous retry once GitHub reports the
+// job started.
+func (c Correlator) AuthorizeRunning(ctx context.Context, correlation RunningCorrelation) error {
+	if err := validateRunningCorrelation(correlation); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(c.Path) {
+		return errors.New("queue journal must be an absolute path")
+	}
+	journal, err := readJournal(c.Path)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if c.Now != nil {
+		now = c.Now().UTC()
+	}
+	owner := strings.SplitN(correlation.Repository, "/", 2)[0]
+	for _, intent := range journal.Intents {
+		if !intent.ExpiresAt.After(now) || intent.ScaleSetName != correlation.PoolName {
+			continue
+		}
+		switch intent.State {
+		case StateAssigned, StateAcquiring, StateAcquired, StateRunning:
+		default:
+			continue
+		}
+		if intent.OwnerAccount() != owner || (intent.Repository != owner && intent.Repository != correlation.Repository) {
+			continue
+		}
+		// An intent admitted before JobAvailable carries no run id yet, and
+		// BindRunning already treats that as compatible. Refusing it here would
+		// deny a warm runner exactly the head-of-queue case warm capacity serves.
+		if intent.WorkflowRunID != 0 && intent.WorkflowRunID != correlation.WorkflowRunID {
+			continue
+		}
+		return nil
+	}
+	return ErrRunningCorrelationNotReady
+}
+
 func (c Correlator) BindRunning(ctx context.Context, correlation RunningCorrelation) (CorrelationResult, error) {
 	if err := validateRunningCorrelation(correlation); err != nil {
 		return CorrelationResult{}, err
