@@ -468,6 +468,18 @@ func (l *Incus) renderCacheClaim(ctx context.Context, instanceName string, boots
 	if err != nil {
 		return nil, nil, true, fmt.Errorf("load cache claim contract: %w", err)
 	}
+	// The claim endpoint is served by the worker gateway, while compiler-cache
+	// delivery endpoints use the RustFS CA. Cold workers also install the
+	// bootstrap gateway CA through cloud-init, but direct-JIT warm workers never
+	// run that installer. Carry both roots in the one-job claim bundle so warm
+	// and cold workers authenticate the exact same endpoint without relying on
+	// ambient image state.
+	if len(bootstrap.CACertBundle) > 0 {
+		if len(ca) > 0 && ca[len(ca)-1] != '\n' {
+			ca = append(ca, '\n')
+		}
+		ca = append(ca, bootstrap.CACertBundle...)
+	}
 	defer clear(ca)
 	if err := cachebroker.ValidateClaimEndpoint(endpoint); err != nil {
 		return nil, nil, true, err

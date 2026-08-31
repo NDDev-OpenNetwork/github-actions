@@ -94,6 +94,27 @@ func TestOrganizationBootstrapInjectsOneTimeClaimWithoutCacheSecret(t *testing.T
 	require.Equal(t, "trusted-writer", journal.Claims[bootstrap.Name].Role)
 }
 
+func TestCacheClaimCarriesRustFSAndWorkerGatewayTrust(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	configureTestCacheClaim(t, provider)
+	bootstrap := validBootstrap()
+	bootstrap.CACertBundle = []byte("worker-gateway-ca")
+	var assignment []byte
+	cli.On("CreateInstanceFile", bootstrap.Name, cacheAssignmentPath, mock.Anything).Run(func(arguments mock.Arguments) {
+		args := arguments.Get(2).(incus.InstanceFileArgs)
+		assignment, _ = io.ReadAll(args.Content)
+	}).Return(nil).Once()
+	cli.On("CreateInstanceFile", bootstrap.Name, cacheReadyPath, mock.Anything).Return(nil).Once()
+
+	require.NoError(t, provider.injectColdCacheAssignment(context.Background(), bootstrap.Name, bootstrap))
+	var claim workerCacheClaim
+	require.NoError(t, json.Unmarshal(assignment, &claim))
+	trust, err := base64.StdEncoding.DecodeString(claim.CAPEMB64)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-ca\nworker-gateway-ca", string(trust))
+}
+
 func TestCloudConfigContainsNoCacheSecret(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
 	configureTestCacheClaim(t, provider)
