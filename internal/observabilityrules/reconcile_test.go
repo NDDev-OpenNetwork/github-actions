@@ -65,10 +65,16 @@ func (f *fakeOpenObserve) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		case http.MethodGet:
 			_ = json.NewEncoder(writer).Encode(alert)
 		case http.MethodPut:
+			// OpenObserve accepts the whole document and keeps the stream it
+			// already has. Modelled here because the difference is invisible
+			// otherwise: the PUT succeeds, everything but the stream changes,
+			// and the reconcile reports drift forever.
+			previousStream := alert.StreamName
 			if json.NewDecoder(request.Body).Decode(&alert) != nil {
 				http.Error(writer, "bad alert", http.StatusBadRequest)
 				return
 			}
+			alert.StreamName = previousStream
 			f.alerts[id] = alert
 			_ = json.NewEncoder(writer).Encode(map[string]string{"status": "ok"})
 		case http.MethodDelete:
@@ -159,5 +165,50 @@ func TestReconcileCreateUpdateDeleteAndReadBack(t *testing.T) {
 	}
 	if len(drift.Actions) != 1 || drift.Actions[0].Kind != "update" {
 		t.Fatalf("update plan = %#v", drift)
+	}
+}
+
+// TestMovingAStreamReplacesTheAlertRatherThanEditingIt covers the case that
+// could not converge. OpenObserve keeps an existing alert's stream_name through
+// a PUT, so planning an update for a rule whose metric moved changes the
+// expression and the threshold, leaves the stream behind, and reports the same
+// drift on every subsequent run.
+//
+// Observed live on lifecycle_queued_delivery_stall and queue_wait_slow_burn when
+// they moved off the state clock: apply returned "read-back did not converge"
+// and replanning produced the identical two updates.
+func TestMovingAStreamReplacesTheAlertRatherThanEditingIt(t *testing.T) {
+	desired := desiredFixture(t)
+	wanted := desired.Alerts[0]
+	fake := &fakeOpenObserve{
+		destination: true,
+		streams:     []string{wanted.StreamName},
+		alerts: map[string]OpenObserveAlert{
+			"moved": {Name: wanted.Name, StreamName: "gha_fleet_some_previous_series", Tags: []string{managedTag}},
+		},
+	}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	client, err := NewOpenObserveClient(server.URL, "operator", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := client.Plan(context.Background(), desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]int{}
+	for _, action := range plan.Actions {
+		kinds[action.Kind]++
+	}
+	if kinds["update"] != 0 || kinds["delete"] != 1 || kinds["create"] != 1 {
+		t.Fatalf("a moved stream must be replaced, not edited: %#v", plan.Actions)
+	}
+	applied, err := client.Apply(context.Background(), desired)
+	if err != nil {
+		t.Fatalf("apply must converge after a replacement: %v", err)
+	}
+	if applied.State != "managed" {
+		t.Fatalf("state = %q, want managed", applied.State)
 	}
 }
