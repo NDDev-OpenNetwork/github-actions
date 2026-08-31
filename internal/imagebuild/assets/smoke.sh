@@ -116,25 +116,22 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       ;;
 	pnpm) [[ "$(pnpm --version)" == "${expected_version}" ]] ;;
     rustup)
-      # rustup owns the whole Rust surface: the estate pins channels in
-      # rust-toolchain.toml, actions-rust-lang/setup-rust-toolchain resolves
-      # them through rustup, and the shims on PATH serve jobs that never call
-      # the action. Every pinned channel must already hold clippy and rustfmt,
-      # or the per-job download this image exists to remove comes back.
-      [[ "$(rustup --version 2>/dev/null)" == "rustup ${expected_version} "* ]]
-      [[ "$(stat --format='%U' -- /usr/local/rustup)" == root ]]
-      [[ "$(stat --format='%U' -- /usr/local/cargo)" == root ]]
-      grep -q '^RUSTUP_HOME=/usr/local/rustup$' /etc/environment
+      # Verified exactly as a job sees it: through the runner user, whose
+      # home is where the action and the shims resolve toolchains. The
+      # root-eye view once stayed green while every job saw nothing.
+      [[ "$(runuser -u runner -- env HOME=/home/runner rustup --version 2>/dev/null)" == "rustup ${expected_version} "* ]]
+      [[ "$(stat --format='%U' -- /home/runner/.rustup)" == runner ]]
+      [[ "$(stat --format='%U' -- /home/runner/.cargo)" == runner ]]
       mapfile -t smoke_rust_channels < <(jq -r '.channels[]?' <<<"${entry}")
       smoke_rust_default="$(jq -er '.default_channel' <<<"${entry}")"
       [[ ${#smoke_rust_channels[@]} -gt 0 ]]
       for smoke_rust_channel in "${smoke_rust_channels[@]}"; do
-        [[ "$(rustup run "${smoke_rust_channel}" rustc --version)" == "rustc ${smoke_rust_channel}"* ]]
-        [[ "$(rustup run "${smoke_rust_channel}" cargo clippy --version)" == clippy* ]]
-        [[ "$(rustup run "${smoke_rust_channel}" rustfmt --version)" == rustfmt* ]]
+        [[ "$(runuser -u runner -- env HOME=/home/runner rustup run "${smoke_rust_channel}" rustc --version)" == "rustc ${smoke_rust_channel}"* ]]
+        [[ "$(runuser -u runner -- env HOME=/home/runner rustup run "${smoke_rust_channel}" cargo clippy --version)" == clippy* ]]
+        [[ "$(runuser -u runner -- env HOME=/home/runner rustup run "${smoke_rust_channel}" rustfmt --version)" == rustfmt* ]]
       done
-      [[ "$(rustc --version)" == "rustc ${smoke_rust_default}"* ]]
-      [[ "$(cargo --version)" == "cargo "* ]]
+      [[ "$(runuser -u runner -- env HOME=/home/runner rustc --version)" == "rustc ${smoke_rust_default}"* ]]
+      [[ "$(runuser -u runner -- env HOME=/home/runner cargo --version)" == "cargo "* ]]
       ;;
     uv)
       [[ "$(uv --version)" == "uv ${expected_version}"* ]]

@@ -333,12 +333,22 @@ for toolchain_name in "${toolchain_names[@]}"; do
 		[[ "$(pnpm --version)" == "${toolchain_version}" ]]
 		;;
     rustup)
-      install -o root -g root -m 0755 "${toolchain_archive}" "${toolchain_scratch}/rustup-init"
-      export RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
-      install -d -o root -g root -m 0755 "${RUSTUP_HOME}" "${CARGO_HOME}"
-      "${toolchain_scratch}/rustup-init" -y --no-modify-path --profile minimal \
+      # rustup lives in the runner's own home, exactly where
+      # actions-rust-lang/setup-rust-toolchain and a bare cargo on PATH
+      # resolve it. It was installed system-wide once and exported through
+      # /etc/environment -- and no job ever saw it: runuser starts the runner
+      # without pam_env, so no login file reaches a job's environment.
+      # Workers are disposable one-job containers, so runner ownership
+      # shares nothing with a later job.
+      export RUSTUP_HOME=/home/runner/.rustup CARGO_HOME=/home/runner/.cargo
+      install -d -o runner -g runner -m 0755 "${RUSTUP_HOME}" "${CARGO_HOME}"
+      install -o runner -g runner -m 0755 "${toolchain_archive}" "${toolchain_scratch}/rustup-init"
+      chmod 0755 "${toolchain_scratch}"
+      runuser -u runner -- env HOME=/home/runner \
+        RUSTUP_HOME="${RUSTUP_HOME}" CARGO_HOME="${CARGO_HOME}" \
+        "${toolchain_scratch}/rustup-init" -y --no-modify-path --profile minimal \
         --default-toolchain none >/dev/null
-      [[ "$("${CARGO_HOME}/bin/rustup" --version 2>/dev/null)" == "rustup ${toolchain_version} "* ]]
+      [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" --version 2>/dev/null)" == "rustup ${toolchain_version} "* ]]
       # Every channel the estate pins, with the two components its
       # rust-toolchain.toml files name, so the action finds them already present.
       mapfile -t rust_channels < <(jq -r '.channels[]?' <<<"${entry}")
@@ -348,20 +358,19 @@ for toolchain_name in "${toolchain_names[@]}"; do
         exit 1
       fi
       for channel in "${rust_channels[@]}"; do
-        "${CARGO_HOME}/bin/rustup" toolchain install "${channel}" \
+        runuser -u runner -- env HOME=/home/runner \
+          "${CARGO_HOME}/bin/rustup" toolchain install "${channel}" \
           --profile minimal --component clippy --component rustfmt >/dev/null
-        [[ "$("${CARGO_HOME}/bin/rustup" run "${channel}" cargo clippy --version)" == "clippy "* ]]
-        [[ "$("${CARGO_HOME}/bin/rustup" run "${channel}" rustfmt --version)" == "rustfmt "* ]]
+        [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" run "${channel}" cargo clippy --version)" == "clippy "* ]]
+        [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" run "${channel}" rustfmt --version)" == "rustfmt "* ]]
       done
-      "${CARGO_HOME}/bin/rustup" default "${rust_default}" >/dev/null
-      # Readable by the runner without being writable by it: a job must not be
-      # able to edit a toolchain the next job inherits.
-      chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}"
+      runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" default "${rust_default}" >/dev/null
+      # Shims for jobs that call cargo or rustc without the action; the rustup
+      # proxy resolves the toolchain through the calling user's home, which
+      # for every job is the runner's.
       for shim in rustup cargo rustc rustfmt cargo-clippy cargo-fmt clippy-driver; do
         ln -sfn "${CARGO_HOME}/bin/${shim}" "/usr/local/bin/${shim}"
       done
-      printf 'RUSTUP_HOME=%s\nCARGO_HOME=%s\n' "${RUSTUP_HOME}" "${CARGO_HOME}" \
-        >> /etc/environment
       ;;
     uv)
       tar --extract --gzip --file "${toolchain_archive}" \
