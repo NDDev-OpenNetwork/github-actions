@@ -27,17 +27,22 @@ const (
 )
 
 type Config struct {
-	SchemaVersion    int          `yaml:"schema_version" json:"schema_version"`
-	ListenAddress    string       `yaml:"listen_address" json:"listen_address"`
-	Endpoint         string       `yaml:"endpoint" json:"endpoint"`
-	Region           string       `yaml:"region" json:"region"`
-	Bucket           string       `yaml:"bucket" json:"bucket"`
-	CAFile           string       `yaml:"ca_file" json:"ca_file"`
-	JournalFile      string       `yaml:"journal_file" json:"journal_file"`
-	JournalLock      string       `yaml:"journal_lock_file" json:"journal_lock_file"`
-	QueueJournalFile string       `yaml:"queue_journal_file,omitempty" json:"queue_journal_file,omitempty"`
-	QueueJournalLock string       `yaml:"queue_journal_lock_file,omitempty" json:"queue_journal_lock_file,omitempty"`
-	Repositories     []Repository `yaml:"repositories" json:"repositories"`
+	SchemaVersion    int    `yaml:"schema_version" json:"schema_version"`
+	ListenAddress    string `yaml:"listen_address" json:"listen_address"`
+	Endpoint         string `yaml:"endpoint" json:"endpoint"`
+	Region           string `yaml:"region" json:"region"`
+	Bucket           string `yaml:"bucket" json:"bucket"`
+	CAFile           string `yaml:"ca_file" json:"ca_file"`
+	JournalFile      string `yaml:"journal_file" json:"journal_file"`
+	JournalLock      string `yaml:"journal_lock_file" json:"journal_lock_file"`
+	QueueJournalFile string `yaml:"queue_journal_file,omitempty" json:"queue_journal_file,omitempty"`
+	QueueJournalLock string `yaml:"queue_journal_lock_file,omitempty" json:"queue_journal_lock_file,omitempty"`
+	// ProviderJournalFile is the provider's execution ledger, read without its
+	// lock. It answers one question this process cannot otherwise ask: which
+	// runners still hold a lease. A running queue intent whose runner holds
+	// none has finished, and nothing else in the system reclaims it.
+	ProviderJournalFile string       `yaml:"provider_journal_file,omitempty" json:"provider_journal_file,omitempty"`
+	Repositories        []Repository `yaml:"repositories" json:"repositories"`
 }
 
 type Repository struct {
@@ -110,6 +115,18 @@ func (c Config) Validate() error {
 		}
 		if filepath.Dir(c.QueueJournalFile) != filepath.Dir(c.QueueJournalLock) || c.QueueJournalFile == c.QueueJournalLock {
 			return errors.New("queue journal and lock must be distinct siblings")
+		}
+	}
+	if c.ProviderJournalFile != "" {
+		if !filepath.IsAbs(c.ProviderJournalFile) || filepath.Clean(c.ProviderJournalFile) != c.ProviderJournalFile || c.ProviderJournalFile == "/" {
+			return errors.New("provider_journal_file must be an absolute clean non-root path")
+		}
+		if c.QueueJournalFile == "" {
+			return errors.New("provider_journal_file reclaims running queue intents and needs the queue journal")
+		}
+		if c.ProviderJournalFile == c.QueueJournalFile || c.ProviderJournalFile == c.QueueJournalLock ||
+			c.ProviderJournalFile == c.JournalFile || c.ProviderJournalFile == c.JournalLock {
+			return errors.New("provider_journal_file must be distinct from every journal this process writes")
 		}
 	}
 	if len(c.Repositories) == 0 {
