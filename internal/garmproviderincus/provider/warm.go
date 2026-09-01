@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	errors2 "errors"
 	"fmt"
 	"io"
 	"sort"
@@ -33,15 +34,22 @@ var newWarmSuffix = func() (string, error) {
 }
 
 type WarmPoolResult struct {
-	Applied           bool                `json:"applied"`
-	Pool              string              `json:"pool"`
-	TargetReady       int                 `json:"target_ready"`
-	ReadyBefore       int                 `json:"ready_before"`
-	ReadyAfter        int                 `json:"ready_after"`
-	Preparing         int                 `json:"preparing"`
-	Claimed           int                 `json:"claimed"`
-	Deferred          bool                `json:"deferred"`
-	DeferralReason    admission.Reason    `json:"deferral_reason,omitempty"`
+	Applied        bool             `json:"applied"`
+	Pool           string           `json:"pool"`
+	TargetReady    int              `json:"target_ready"`
+	ReadyBefore    int              `json:"ready_before"`
+	ReadyAfter     int              `json:"ready_after"`
+	Preparing      int              `json:"preparing"`
+	Claimed        int              `json:"claimed"`
+	Deferred       bool             `json:"deferred"`
+	DeferralReason admission.Reason `json:"deferral_reason,omitempty"`
+	// RecycledStale names warm-ready instances whose release currency -- the
+	// provider identity or the pinned worker image -- no longer matches the
+	// current contract. They are deleted (a warm instance is disposable by
+	// definition) and the deficit refills at the current identity, which
+	// removes the manual delete every provider bump and image wave used to
+	// require. Dry runs record the plan without deleting.
+	RecycledStale     []string            `json:"recycled_stale,omitempty"`
 	AdmissionDecision *admission.Decision `json:"admission_decision,omitempty"`
 	Created           []string            `json:"created"`
 	Consumed          []string            `json:"consumed_during_create"`
@@ -167,6 +175,15 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 			preparing = append(preparing, instance.Name)
 		case lifecycleWarmUnregistered:
 			if err := l.validateWarmReadyMetadata(instance, flavor); err != nil {
+				if errors2.Is(err, errWarmOutdated) {
+					result.RecycledStale = append(result.RecycledStale, instance.Name)
+					if apply {
+						if err := l.DeleteInstance(ctx, instance.Name); err != nil {
+							return result, errors.Wrap(err, "recycling outdated warm instance")
+						}
+					}
+					continue
+				}
 				return result, errors.Wrap(err, "validating warm-ready inventory")
 			}
 			ready = append(ready, instance.Name)
@@ -483,6 +500,10 @@ func (l *Incus) promoteWarmReady(ctx context.Context, name, flavor string) (bool
 	return true, nil
 }
 
+// errWarmOutdated marks a warm instance whose release currency has moved on;
+// the reconciler recycles it instead of failing.
+var errWarmOutdated = errors2.New("warm instance is outdated")
+
 func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor string) error {
 	if instance == nil {
 		return fmt.Errorf("warm instance is not present")
@@ -495,16 +516,29 @@ func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor str
 	if err != nil {
 		return err
 	}
+	// Currency keys move with every release and image wave; a mismatch there
+	// is an OUTDATED disposable, not a boundary violation, and the caller
+	// recycles it. Everything below stays a hard contract.
+	for _, currency := range []struct {
+		key      string
+		expected string
+	}{
+		{providerVersionKey, Version},
+		{providerCommitKey, Commit},
+		{imageAliasKey, imagePolicy.Alias},
+		{imageFingerprintKey, imagePolicy.Fingerprint},
+	} {
+		if actual := instance.ExpandedConfig[currency.key]; actual != currency.expected {
+			return fmt.Errorf("%w: warm instance %q has %s=%q, current is %q",
+				errWarmOutdated, instance.Name, currency.key, actual, currency.expected)
+		}
+	}
 	checks := []struct {
 		key      string
 		expected string
 	}{
 		{controllerIDKeyName, l.controllerID},
 		{poolIDKey, warmPoolIDPrefix + flavor},
-		{imageAliasKey, imagePolicy.Alias},
-		{imageFingerprintKey, imagePolicy.Fingerprint},
-		{providerVersionKey, Version},
-		{providerCommitKey, Commit},
 		{flavorKey, flavor},
 		{lifecycleKey, lifecycleWarmUnregistered},
 		{warmReadyKey, "true"},
