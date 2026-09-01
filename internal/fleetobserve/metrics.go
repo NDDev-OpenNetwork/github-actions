@@ -110,6 +110,10 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_queue_intents_in_flight", "Acquiring, acquired, assigned or running queue intents.", float64(snapshot.Queue.InFlight))
 	gauge(&output, "gha_fleet_queue_oldest_age_seconds", "Age of the oldest active GitHub queue intent.", float64(snapshot.Queue.OldestQueueAgeSeconds))
 	gauge(&output, "gha_fleet_queue_uncovered_running", "Running queue intents whose runner holds no provider execution lease or claim.", float64(snapshot.Queue.UncoveredRunning))
+	labeledGaugeHeader(&output, "gha_fleet_visibility_degraded", "Cluster members deliberately held out by a drain while offline; inventory gaps are unattributable and suppressed while any is set.")
+	for _, member := range snapshot.HeldOutMembers {
+		metric(&output, "gha_fleet_visibility_degraded", map[string]string{"member": member}, 1)
+	}
 	gauge(&output, "gha_fleet_queue_uncovered_running_beyond_grace", "Running queue intents still uncovered after the broker reclaim window, which is the gap nothing is coming to close.", float64(snapshot.Queue.UncoveredRunningBeyondGrace))
 	gauge(&output, "gha_fleet_queue_uncovered_running_oldest_age_seconds", "Age of the oldest running queue intent whose runner holds no execution lease.", float64(snapshot.Queue.OldestUncoveredRunningAgeSeconds))
 	gauge(&output, "gha_fleet_queue_running_without_runner_identity", "Running queue intents written before or without an exact JobStarted runner identity.", float64(snapshot.Queue.RunningWithoutRunnerIdentity))

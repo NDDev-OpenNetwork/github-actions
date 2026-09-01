@@ -285,6 +285,43 @@ func validateResolvedWorkerImage(image *api.Image, policy config.WorkerImage) er
 // Probe performs the same read-only API calls needed before GARM can create a
 // worker. It intentionally does not touch the admission journal or mutate
 // Incus, and is run as the production garm user during deployment.
+// MemberVisibility reports one cluster member as the observer needs it: is it
+// answering, and if it is deliberately held out, why. A member whose gate was
+// closed through the drain marker publishes a reason with the "drained: "
+// prefix; that reason travelling here is what lets an inventory reader tell a
+// maintenance hold from an incident.
+type MemberVisibility struct {
+	Name        string `json:"name"`
+	Online      bool   `json:"online"`
+	DrainReason string `json:"drain_reason,omitempty"`
+}
+
+// ClusterMemberVisibility lists every cluster member with its availability and
+// published drain reason. Read-only, like Probe.
+func (l *Incus) ClusterMemberVisibility(ctx context.Context) ([]MemberVisibility, error) {
+	cli, err := l.getCLI(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "fetching client")
+	}
+	members, err := cli.GetClusterMembers()
+	if err != nil {
+		return nil, errors.Wrap(err, "listing cluster members")
+	}
+	visibility := make([]MemberVisibility, 0, len(members))
+	for _, member := range members {
+		entry := MemberVisibility{
+			Name:   member.ServerName,
+			Online: member.Status == "Online",
+		}
+		if reason := member.Config["user.gha_pressure.reason"]; strings.HasPrefix(reason, "drained: ") {
+			entry.DrainReason = reason
+		}
+		visibility = append(visibility, entry)
+	}
+	sort.Slice(visibility, func(i, j int) bool { return visibility[i].Name < visibility[j].Name })
+	return visibility, nil
+}
+
 func (l *Incus) Probe(ctx context.Context, profile string) (CompatibilityProbe, error) {
 	if strings.TrimSpace(profile) == "" || profile != strings.TrimSpace(profile) {
 		return CompatibilityProbe{}, runnerErrors.NewBadRequestError("profile is required")

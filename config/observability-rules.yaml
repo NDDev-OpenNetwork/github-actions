@@ -193,6 +193,28 @@ rules:
     summary: The authoritative fleet observer reports an unhealthy platform.
     action: Stop promotion work and inspect exact collection errors and service states.
     recovery: Platform health remains one and all correlated gap metrics are zero.
+  - id: fleet_visibility_degraded
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_visibility_degraded
+    # A drain-marked member that is offline makes the cluster listing partial
+    # by design: inventory gap counts are unattributable and the observer
+    # suppresses them instead of paging. This rule is the guard on that
+    # suppression -- a hold that lasts half an hour is either a forgotten
+    # drain or a member that failed to come back, and someone must look.
+    expression: max(gha_fleet_visibility_degraded)
+    operator: ">"
+    threshold: 0
+    evaluation_seconds: 300
+    hold_seconds: 1800
+    repeat_seconds: 14400
+    destination_ref: fleet_oncall
+    enabled: true
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: A drained member has been offline for half an hour, and inventory gaps are suppressed meanwhile.
+    action: Finish the maintenance and restore the member, or investigate why it did not come back; gap suppression ends when it does.
+    recovery: No cluster member is offline while drain-marked.
   - id: github_correlation_persistent
     severity: page
     query_language: promql
