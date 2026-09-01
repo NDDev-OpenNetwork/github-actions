@@ -68,6 +68,21 @@ var managedIdentities = []Identity{
 		UsernameFile: "zot-github-actions-untrusted-username",
 		PasswordFile: "zot-github-actions-untrusted-password",
 	},
+	// The BuildKit layer cache carries the same poisoning boundary as the
+	// object cache, so its writers are separate identities in separate
+	// registry namespaces (buildcache/<owner>/<repo>/<class>).
+	{
+		Role:         "buildcache-trusted-writer",
+		Username:     "gha-zot-example-user-github-actions-buildcache-trusted",
+		UsernameFile: "zot-github-actions-buildcache-trusted-username",
+		PasswordFile: "zot-github-actions-buildcache-trusted-password",
+	},
+	{
+		Role:         "buildcache-untrusted-writer",
+		Username:     "gha-zot-example-user-github-actions-buildcache-untrusted",
+		UsernameFile: "zot-github-actions-buildcache-untrusted-username",
+		PasswordFile: "zot-github-actions-buildcache-untrusted-password",
+	},
 }
 
 func Identities() []Identity {
