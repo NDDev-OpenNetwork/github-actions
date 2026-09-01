@@ -226,6 +226,14 @@ func (r Rule) Validate() error {
 	// so its condition must live in the statement itself (HAVING), it must be a
 	// single statement, and its trigger threshold must be a whole row count.
 	if r.QueryLanguage == "sql" {
+		// The message template reads two columns from a SQL rule's result row,
+		// because a scheduled SQL alert has no firing series to take them from:
+		// `subject` names what the alert is about and `value` is the observed
+		// number. A rule without them renders its placeholders literally, which
+		// is what the first tenant alert did.
+		if !strings.Contains(r.Expression, " AS subject") || !strings.Contains(r.Expression, " AS value") {
+			return fmt.Errorf("sql expression must select `subject` and `value` columns for the notification")
+		}
 		if strings.Contains(r.Expression, ";") {
 			return fmt.Errorf("sql expression must be a single statement")
 		}
