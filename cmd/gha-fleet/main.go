@@ -50,6 +50,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueadmission"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/rustfscache"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/slabheal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetrymanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/zotcredentials"
 	incusclient "github.com/lxc/incus/v7/client"
@@ -82,6 +83,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPreflight(args[1:], stdout, stderr)
 	case "publish-pressure":
 		return runPublishPressure(args[1:], stdout, stderr)
+	case "slab-heal":
+		return runSlabHeal(args[1:], stdout, stderr)
 	case "drain-member":
 		return runDrainMember(args[1:], stdout, stderr)
 	case "reconcile-incus":
@@ -1731,6 +1734,177 @@ func (g pressureGate) Reopen(ctx context.Context) (string, error) {
 	}, "")
 }
 
+// runSlabHeal is the automated rolling reboot for unreclaimable slab: decide
+// timidly, drain through the marker, write the cooldown, and only then ask
+// systemd to reboot. With --restore-after-boot it reopens exactly the drains
+// it created, never an operator's.
+func runSlabHeal(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("slab-heal", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "", "exact platform configuration path")
+	statePath := flags.String("state-path", "/var/lib/gha-fleet/pressure-gate.json", "private pressure gate state")
+	incusSocket := flags.String("incus-socket", "/var/lib/incus/unix.socket", "local Incus unix socket")
+	timerUnit := flags.String("timer-unit", memberdrain.DefaultTimerUnit, "the timer that owns this member's gate")
+	thresholdBytes := flags.Uint64("threshold-bytes", 2<<30, "SUnreclaim budget; the alert pages at the same value")
+	cooldownFile := flags.String("cooldown-file", "/var/lib/gha-fleet/slab-heal.json", "when this member last healed")
+	cooldown := flags.Duration("cooldown", 12*time.Hour, "minimum time between heals of this member")
+	timeout := flags.Duration("timeout", memberdrain.DefaultTimeout, "how long to wait for running jobs to finish")
+	poll := flags.Duration("poll", memberdrain.DefaultPoll, "how often to re-read what the member is carrying")
+	restoreAfterBoot := flags.Bool("restore-after-boot", false, "reopen the gate if and only if the standing drain is a slab heal")
+	apply := flags.Bool("apply", false, "drain, record the heal, and reboot, rather than reporting the decision")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *configPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: slab-heal requires --config and no positional arguments")
+		return 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if !cfg.Incus.Cluster.Enabled || cfg.Incus.Cluster.MemberName == "" || !cfg.Pressure.Required {
+		fmt.Fprintln(stderr, "gha-fleet: slab-heal requires an Incus cluster member config with pressure admission")
+		return 1
+	}
+	hostname, err := os.Hostname()
+	if err != nil || hostname != cfg.Platform.Host || hostname != cfg.Incus.Cluster.MemberName {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal host %q differs from platform/member %q/%q\n", hostname, cfg.Platform.Host, cfg.Incus.Cluster.MemberName)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout+2*time.Minute)
+	defer cancel()
+	client, err := incusclient.ConnectIncusUnixWithContext(ctx, *incusSocket, &incusclient.ConnectionArgs{})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: connect Incus: %v\n", err)
+		return 1
+	}
+	deps := memberdrain.Deps{
+		Client: drainClient{client.UseProject(cfg.Incus.Project)},
+		Units:  systemdUnits{},
+		Gate: pressureGate{
+			client: client, memberName: cfg.Incus.Cluster.MemberName,
+			statePath: *statePath, policy: cfg.Pressure,
+		},
+		Marker: drainMarker{statePath: *statePath},
+	}
+	if *restoreAfterBoot {
+		marker, err := pressuregate.ReadDrainMarker(*statePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "gha-fleet: slab-heal: read drain marker: %v\n", err)
+			return 1
+		}
+		if marker == nil {
+			return writeJSONOrFail(stdout, stderr, map[string]any{"action": "restore-after-boot", "restored": false, "reason": "no drain marker; nothing to reopen"})
+		}
+		if !strings.HasPrefix(marker.Reason, slabheal.HealReasonPrefix) {
+			return writeJSONOrFail(stdout, stderr, map[string]any{"action": "restore-after-boot", "restored": false, "reason": "standing drain is not a slab heal; it belongs to its operator"})
+		}
+		result, err := memberdrain.Restore(ctx, deps, memberdrain.Options{
+			MemberName: cfg.Incus.Cluster.MemberName, TimerUnit: *timerUnit,
+			Timeout: *timeout, Poll: *poll, Apply: *apply,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
+			return 1
+		}
+		return writeJSONOrFail(stdout, stderr, result)
+	}
+	meminfo, err := os.Open("/proc/meminfo")
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
+		return 1
+	}
+	sunreclaim, err := slabheal.ParseSUnreclaim(meminfo)
+	meminfo.Close()
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
+		return 1
+	}
+	members, err := client.GetClusterMembers()
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: read cluster members: %v\n", err)
+		return 1
+	}
+	selfState := ""
+	otherStates := map[string]string{}
+	for _, member := range members {
+		state := member.Config["user.gha_pressure.state"]
+		if member.ServerName == cfg.Incus.Cluster.MemberName {
+			selfState = state
+		} else {
+			otherStates[member.ServerName] = state
+		}
+	}
+	instances, err := client.UseProject(cfg.Incus.Project).GetInstances(api.InstanceTypeAny)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: read occupants: %v\n", err)
+		return 1
+	}
+	nonWarm := 0
+	for _, instance := range instances {
+		if instance.Location == cfg.Incus.Cluster.MemberName && !strings.HasPrefix(instance.Name, "warm-") {
+			nonWarm++
+		}
+	}
+	lastHeal := time.Time{}
+	if raw, err := os.ReadFile(*cooldownFile); err == nil {
+		var record struct {
+			LastHealAt time.Time `json:"last_heal_at"`
+		}
+		if json.Unmarshal(raw, &record) == nil {
+			lastHeal = record.LastHealAt
+		}
+	}
+	facts := slabheal.Facts{
+		SUnreclaimBytes: sunreclaim, ThresholdBytes: *thresholdBytes,
+		SelfState: selfState, OtherStates: otherStates,
+		NonWarmOccupants: nonWarm, LastHealAt: lastHeal,
+		Cooldown: *cooldown, Now: time.Now().UTC(),
+	}
+	decision := slabheal.Decide(facts)
+	if !decision.Heal || !*apply {
+		return writeJSONOrFail(stdout, stderr, map[string]any{
+			"action": "slab-heal", "heal": decision.Heal, "applied": false,
+			"reason": decision.Reason, "sunreclaim_bytes": sunreclaim,
+		})
+	}
+	reason := fmt.Sprintf("%sSUnreclaim %.1f GiB over the %.1f GiB budget", slabheal.HealReasonPrefix, float64(sunreclaim)/(1<<30), float64(*thresholdBytes)/(1<<30))
+	result, err := memberdrain.Drain(ctx, deps, memberdrain.Options{
+		MemberName: cfg.Incus.Cluster.MemberName, Reason: reason,
+		TimerUnit: *timerUnit, Timeout: *timeout, Poll: *poll, Apply: true,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
+		return 1
+	}
+	if !result.Drained {
+		fmt.Fprintln(stderr, "gha-fleet: slab-heal: drain did not complete; refusing to reboot")
+		return 1
+	}
+	record, err := json.Marshal(map[string]any{"schema_version": 1, "last_heal_at": facts.Now, "sunreclaim_bytes": sunreclaim})
+	if err == nil {
+		temporary := *cooldownFile + ".tmp"
+		if os.WriteFile(temporary, record, 0o600) == nil {
+			_ = os.Rename(temporary, *cooldownFile)
+		}
+	}
+	if err := writeJSONOrFail(stdout, stderr, map[string]any{
+		"action": "slab-heal", "heal": true, "applied": true,
+		"reason": reason, "recycled_warm": result.RecycledWarm, "rebooting": true,
+	}); err != 0 {
+		return err
+	}
+	reboot := exec.CommandContext(ctx, "systemctl", "reboot")
+	reboot.Stdout, reboot.Stderr = stdout, stderr
+	if err := reboot.Run(); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: slab-heal: request reboot: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func runDrainMember(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("drain-member", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -2182,5 +2356,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|export-job-lifecycle|render|admit|preflight|publish-pressure|drain-member|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|export-job-lifecycle|render|admit|preflight|publish-pressure|drain-member|slab-heal|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
 }
