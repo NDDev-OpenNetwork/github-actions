@@ -16,8 +16,14 @@ exact v0.92 API payload with:
 ```bash
 gha-fleet render-openobserve-alerts \
   --config config/observability-rules.yaml \
+  --overlay /etc/gha-fleet/observability-rules-estate.yaml \
   --destination fleet_oncall
 ```
+
+`--overlay` merges the estate's tenant-supplied bundle into the public rules
+at load; an overlay adds rules and never redefines one. See
+`docs/tenant-observability-overlay.md` for the contract and the tenant
+runbooks.
 
 The default output is disabled. Use `--enable` only after the named destination
 has passed an independent delivery-and-recovery test. A missing, synthetic or
@@ -34,6 +40,7 @@ other live alerts are outside its ownership.
 ```bash
 gha-fleet reconcile-openobserve-alerts \
   --config config/observability-rules.yaml \
+  --overlay /etc/gha-fleet/observability-rules-estate.yaml \
   --destination fleet_oncall \
   --endpoint https://openobserve.example.invalid \
   --username-file /run/credentials/openobserve-username \
@@ -69,6 +76,20 @@ gha-fleet reconcile-openobserve-alerts \
   until normal successful consolidation removes or supersedes it.
 - Slow-burn tickets: inspect class/tenant percentiles and capacity evidence;
   do not page an operator for a trend without an immediate action.
+- Visibility-degraded tickets: a drain-marked member is offline, so the
+  cluster listing is partial by design. Inventory gap counts move to their
+  `*_unattributable` snapshot fields and a loud listing failure moves to
+  `listing_unavailable` -- suppressed with attribution, never hidden -- while
+  `gha_fleet_visibility_held_out_members` says so. The ticket fires when the
+  hold outlives half an hour: finish the maintenance and restore the member,
+  or find out why it did not come back. An offline member WITHOUT a drain
+  reason is an incident and fails the platform immediately.
+- Pressure-staleness pages during maintenance: a member drained through the
+  drain marker keeps publishing a fresh closed state carrying
+  `drained: <reason>` on every timer tick, so staleness stays silent for the
+  right reason. The publisher needs the local Incus API to publish, so a hold
+  that stops the daemon for longer than the staleness window will page --
+  keep real daemon-down holds short, or expect and acknowledge that page.
 
 OpenObserve v0.92 pauses outcome evaluation during notification silence.
 Managed pages therefore use ten-minute silence and tickets use fifteen-minute
