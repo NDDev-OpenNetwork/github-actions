@@ -30,7 +30,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"compute_pressure_observer_missing": `count(up{service_name="pressure-state"} == 1)`,
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
 		"compute_root_disk_low":             "system_filesystem_usage",
-		"kernel_slab_unreclaimable":         `state="slab_unreclaimable"`,
+		"kernel_slab_unreclaimable":         "gha_fleet_host_slab_unreclaimable_attributed_bytes",
 		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
 		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
 		"host_compliance_observer_missing":  "gha_fleet_host_compliance_observer_up",
