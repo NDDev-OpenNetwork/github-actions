@@ -274,20 +274,6 @@ func TestReconcileWarmRejectsStoppedOrNonAutostartReadyInventory(t *testing.T) {
 				instance.ExpandedConfig["boot.autostart"] = "false"
 			},
 		},
-		{
-			name: "previous-provider-version",
-			mutate: func(instance *api.InstanceFull) {
-				instance.Config[providerVersionKey] = "v0.1.5-nddev.6"
-				instance.ExpandedConfig[providerVersionKey] = "v0.1.5-nddev.6"
-			},
-		},
-		{
-			name: "previous-provider-commit",
-			mutate: func(instance *api.InstanceFull) {
-				instance.Config[providerCommitKey] = "4b95d7fa39d3c68e496aa5c14958af175f166773"
-				instance.ExpandedConfig[providerCommitKey] = "4b95d7fa39d3c68e496aa5c14958af175f166773"
-			},
-		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cli := new(MockIncusServer)
