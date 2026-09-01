@@ -1586,6 +1586,14 @@ func (c drainClient) GetInstances(kind api.InstanceType) ([]api.Instance, error)
 }
 
 func (c drainClient) DeleteInstance(name string) error {
+	// Incus refuses to delete a running instance, and a warm occupant is
+	// running by definition. Force-stop first; if the stop fails because the
+	// instance is already stopped or already gone, the delete below is the
+	// call that decides.
+	stop, err := c.incus.UpdateInstanceState(name, api.InstanceStatePut{Action: "stop", Force: true, Timeout: -1}, "")
+	if err == nil {
+		_ = stop.Wait()
+	}
 	op, err := c.incus.DeleteInstance(name)
 	if err != nil {
 		return err
