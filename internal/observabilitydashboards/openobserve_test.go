@@ -14,7 +14,7 @@ func TestRenderOpenObserveV8IsDeterministicAndManaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dashboards) != 10 {
+	if len(dashboards) != 11 {
 		t.Fatalf("dashboards=%d", len(dashboards))
 	}
 	for _, dashboard := range dashboards {
@@ -25,7 +25,9 @@ func TestRenderOpenObserveV8IsDeterministicAndManaged(t *testing.T) {
 			t.Fatalf("dashboard %q is not managed", dashboard.Title)
 		}
 		for index, panel := range dashboard.Tabs[0].Panels {
-			if panel.QueryType != "promql" || len(panel.Queries) != 1 || panel.Queries[0].Fields.StreamType != "metrics" || panel.Queries[0].Fields.Stream == "" {
+			validPromQL := panel.QueryType == "promql" && panel.Queries[0].Fields.StreamType == "metrics"
+			validSQL := panel.QueryType == "sql" && panel.Queries[0].Fields.StreamType == "logs"
+			if (!validPromQL && !validSQL) || len(panel.Queries) != 1 || panel.Queries[0].Fields.Stream == "" {
 				t.Fatalf("invalid panel %#v", panel)
 			}
 			stream := panel.Queries[0].Fields.Stream
