@@ -90,10 +90,19 @@ const (
 )
 
 const (
-	directJITPhasePath        = "/home/runner/actions-runner/_diag/nddev-direct-jit-phase.log"
-	directJITPhaseMaxBytes    = 4096
-	directJITStartWaitTimeout = 5 * time.Second
+	directJITPhasePath     = "/home/runner/actions-runner/_diag/nddev-direct-jit-phase.log"
+	directJITPhaseMaxBytes = 4096
+	// How long a create waits, after injecting the assignment, for the warm
+	// agent's path unit to start the script. Five seconds refused 6 of 596
+	// creates on 2026-09-01 evening -- every one on a member carrying six or
+	// seven workers, where the guest's path unit took longer than that to
+	// notice the file -- and each refusal cost the job a full retry plus a
+	// wasted boot. The wait ends the moment the phase file appears, so a
+	// generous ceiling costs nothing when the guest is quick; a guest that
+	// stopped is noticed by the probe below rather than by the ceiling.
+	directJITStartWaitTimeout = 45 * time.Second
 	directJITStartPoll        = 20 * time.Millisecond
+	directJITStartStateProbe  = time.Second
 )
 
 const (
@@ -1100,7 +1109,17 @@ func (l *Incus) waitDirectJITAssignmentStarted(ctx context.Context, cli Instance
 	defer cancel()
 	ticker := time.NewTicker(directJITStartPoll)
 	defer ticker.Stop()
+	nextStateProbe := time.Now().Add(directJITStartStateProbe)
 	for {
+		if time.Now().After(nextStateProbe) {
+			// A guest that stopped will never write the phase file; do not
+			// spend the ceiling on it.
+			nextStateProbe = time.Now().Add(directJITStartStateProbe)
+			if instance, _, probeErr := cli.GetInstanceFull(instanceName); probeErr == nil &&
+				instance != nil && instance.State != nil && instance.State.Status != "Running" {
+				return fmt.Errorf("instance %q is %s before the assignment started", instanceName, instance.State.Status)
+			}
+		}
 		content, response, err := cli.GetInstanceFile(instanceName, directJITPhasePath)
 		if err == nil {
 			raw, readErr := io.ReadAll(io.LimitReader(content, directJITPhaseMaxBytes+1))

@@ -1622,3 +1622,36 @@ func TestCreateInstanceDirectJITColdRetryDeliversAMissingAssignment(t *testing.T
 	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
 	cli.AssertExpectations(t)
 }
+
+// A loaded member's path unit can take longer than a few seconds to notice
+// the assignment; the wait ends the moment the phase file appears and must
+// not give up before then.
+func TestWaitDirectJITAssignmentStartedOutlivesASlowPathUnit(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(nil, nil, os.ErrNotExist).Times(8)
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
+		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
+		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
+	).Once()
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil).Maybe()
+
+	require.NoError(t, provider.waitDirectJITAssignmentStarted(context.Background(), cli, "runner-test-instance", "nddev-linux-standard"))
+	cli.AssertExpectations(t)
+}
+
+// A guest that stopped will never write the phase file; the wait notices
+// within a probe interval instead of spending its whole ceiling.
+func TestWaitDirectJITAssignmentStartedStopsWaitingWhenTheInstanceStopped(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	stopped := ownedInstance("runner-test-instance")
+	stopped.State = &api.InstanceState{Status: "Stopped"}
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(nil, nil, os.ErrNotExist)
+	cli.On("GetInstanceFull", "runner-test-instance").Return(stopped, "", nil)
+
+	started := time.Now()
+	err := provider.waitDirectJITAssignmentStarted(context.Background(), cli, "runner-test-instance", "nddev-linux-standard")
+	require.ErrorContains(t, err, "is Stopped before the assignment started")
+	require.Less(t, time.Since(started), 5*time.Second)
+}
