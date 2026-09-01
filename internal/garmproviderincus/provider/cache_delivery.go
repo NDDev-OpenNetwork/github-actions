@@ -258,6 +258,22 @@ trap 'rm -f -- "${ca_temp}"' EXIT
 jq -r '.ca_pem_b64' "${assignment}" | base64 --decode >"${ca_temp}"
 openssl x509 -in "${ca_temp}" -noout >/dev/null
 install -o runner -g runner -m 0400 "${ca_temp}" "${ca_path}"
+# The same CA signs the member's registry mirror (zot on 192.0.2.1:5001, a
+# docker.io pull-through cache the image's daemon.json already names). The
+# daemon never trusted it: every pull logged "x509: certificate signed by
+# unknown authority" against the mirror and fell through to docker.io, so
+# the cache held 30 MB after a month. dockerd reads certs.d per request, so
+# installing the CA there makes the mirror real from the first pull with
+# no daemon restart. A standard image has no daemon.json and skips this.
+if [[ -r /etc/docker/daemon.json ]]; then
+  while IFS= read -r mirror; do
+    [[ "${mirror}" == https://* ]] || continue
+    mirror_host="${mirror#https://}"
+    mirror_host="${mirror_host%%/*}"
+    [[ "${mirror_host}" =~ ^[A-Za-z0-9.:-]+$ ]] || continue
+    install -D -o root -g root -m 0644 "${ca_temp}" "/etc/docker/certs.d/${mirror_host}/ca.crt"
+  done < <(jq -r '."registry-mirrors"[]? // empty' /etc/docker/daemon.json)
+fi
 bundle_temp="$(mktemp /tmp/nddev-cache-ca-bundle.XXXXXXXXXX)"
 trap 'rm -f -- "${ca_temp}" "${bundle_temp}"' EXIT
 cat /etc/ssl/certs/ca-certificates.crt "${ca_temp}" >"${bundle_temp}"
