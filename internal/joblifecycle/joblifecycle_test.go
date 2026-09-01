@@ -59,13 +59,23 @@ func TestDiffEmitsEachTransitionExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestDiffNamesAVanishedIntent(t *testing.T) {
+func TestDiffTellsReleasedFromVanished(t *testing.T) {
 	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	journal := journalWith(map[string]intentView{"job-2": intent("job-2", "running", now)}, nil)
 	_, marks := Diff(emptyWatermarks(), journal, now)
-	// Gone without a terminal record: that is the orphan the fleet has been
-	// burned by, and it deserves its own state name.
-	records, _ := Diff(marks, journalWith(map[string]intentView{}, nil), now.Add(time.Minute))
+	// Gone from RUNNING without a terminal record: the broker's reclaim
+	// released it after its lease ended -- the fleet's ordinary finish line.
+	records, marks2 := Diff(marks, journalWith(map[string]intentView{}, nil), now.Add(time.Minute))
+	if len(records) != 1 || records[0].State != "released" {
+		t.Fatalf("records=%+v", records)
+	}
+	_ = marks2
+
+	// Gone from a PRE-running state is the orphan class: it never provably
+	// ran anywhere, and it keeps the vanished name.
+	journal = journalWith(map[string]intentView{"job-3": intent("job-3", "assigned", now)}, nil)
+	_, marks3 := Diff(emptyWatermarks(), journal, now)
+	records, _ = Diff(marks3, journalWith(map[string]intentView{}, nil), now.Add(time.Minute))
 	if len(records) != 1 || records[0].State != "vanished" {
 		t.Fatalf("records=%+v", records)
 	}
