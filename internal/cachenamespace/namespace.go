@@ -48,6 +48,21 @@ func PrefixRootFor(repository string, class TrustClass) (string, error) {
 	return strings.Join([]string{parts[0], parts[1], trustSegment, string(class)}, "/"), nil
 }
 
+// BuildcacheRepositoryFor builds the registry repository that holds a
+// project's BuildKit layer cache for one trust class. The layer cache carries
+// the same poisoning argument as the object cache: an untrusted build must
+// never write cache a trusted build reads, so the class is part of the name.
+func BuildcacheRepositoryFor(repository string, class TrustClass) (string, error) {
+	if !class.Valid() {
+		return "", fmt.Errorf("unknown cache trust class %q", string(class))
+	}
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || !validSegment(parts[0]) || !validSegment(parts[1]) {
+		return "", fmt.Errorf("cache repository %q must be organization/repository", repository)
+	}
+	return strings.Join([]string{"buildcache", parts[0], parts[1], string(class)}, "/"), nil
+}
+
 // ParsePrefixRoot returns the repository and trust class encoded by a complete
 // credential root. It rejects additional path segments and ambiguous values.
 func ParsePrefixRoot(prefix string) (string, TrustClass, error) {
