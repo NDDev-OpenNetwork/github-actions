@@ -26,14 +26,30 @@ learned by omission on a live wave:
 4. the `platform.yaml` provider pin on all five hosts — the observer and
    controller resolve identity at startup, and a missed pin reads as
    `platform_unhealthy`;
-5. **stale-stamped warm instances**. Warm must be exact-current: the warm
-   reconciler refuses a stale-identity inventory outright and the
-   `gha-warm-pool@` units fail closed until the stale instances are deleted
-   (`incus delete --project gha-fleet <warm-*> --force` from a member).
-   Observed on the .102→.103 and again on the .104→.105 waves; once the
-   reconciler happened to self-recycle, so check the stamps after every bump
-   rather than assuming either outcome.
+5. **stale-stamped warm instances**. Warm must be exact-current. Since
+   v0.1.5-nddev.107 the reconciler recycles an outdated-identity or
+   outdated-image warm instance itself (`recycled_stale` in the pool
+   result) and refills at the current release, so this pin self-heals
+   within a timer cycle; verify by watching the stamps converge rather
+   than deleting anything by hand. Before .107 the reconciler refused a
+   stale inventory outright and `gha-warm-pool@` failed closed until the
+   instances were deleted manually — the .102→.103 and .104→.105 waves
+   both paid that toll, which is why the recycle is now code. A boundary
+   violation (controller, trust, ownership, stopped, autostart) still
+   fails the reconcile: currency is recyclable, contract is not.
 
 Rollback is a rebuild: every release records `source_commit` and a
 reproducible `binary_sha256` in `config/provider-derivative.yaml`, so no
 binary backup copies are kept on hosts.
+
+## The scripted wave
+
+The estate carries the executable form of this page:
+`deploy/github-actions/scripts/rollout-provider.sh <worktree> <version>`
+(github-device-sync-estate). It refuses manifest/toml drift, rebuilds the
+binary reproducibly from the manifest’s own `source_commit` and refuses a
+sha mismatch, deploys services then members in the pin order above, and
+verifies live identity, observer health, zero failed units and warm
+convergence onto the new release. Edit and review the estate toml and the
+five platform pins first — the script deploys reviewed state, it does not
+invent it.

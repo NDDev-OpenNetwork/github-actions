@@ -14,7 +14,10 @@ one arc and the first live windows found what the fakes could not.
   `drained: <reason>` — the staleness alert stays armed and silent for the
   right reason, and the drain survives a reboot;
 - it **recycles warm occupants** (force-stop, then delete: Incus refuses to
-  delete a running instance) instead of waiting out disposable capacity;
+  delete a running instance) instead of waiting out disposable capacity —
+  and since provider v0.1.5-nddev.107 the warm reconciler also recycles
+  outdated-identity or outdated-image instances on its own timer, so a
+  stale-stamp sweep after maintenance is no longer a manual step;
 - it **waits for real jobs** to finish and never aborts one;
 - `--restore --apply` clears the marker, republishes from live pressure, and
   heals members drained by older controllers.
