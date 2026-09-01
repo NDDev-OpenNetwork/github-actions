@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.87
+derivative_version: v0.2.1-nddev.88
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -93,13 +93,13 @@ patches:
     purpose: Treat a completed workflow run as authoritative over a queued child job so cancelled runs release their exact queue intent and cannot be resurrected during scale-set reconciliation.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: c8c595c3a9dc0c4557676dd6719b346fcd8e21b6b8734eeddb9f506d10f8e015
+    sha256: 675e114073f1673b013bb75fd48c2ed48d83ca8d9bd26cbf8d09314f7f599224
     purpose: Fsync-backed central queue admission where a GitHub-replaced, never-started waiter inherits its exact workflow-job lineage and original queue time instead of starving behind every five-minute UUID replacement, while terminal execution suppression, repository binding, running rehydration and stable phase-entry semantics remain intact, and every intent carries an immutable first-queued stamp that reconciliation cannot move so a wait can be measured at all.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: d2501295729475fa70c2bc5265c67b4aaae45c07d3f4f2ff2296644dfc5061e7
+    sha256: 7670e2e2d5972fee177d3439bcb0f55fb1e39247e03520c4c69fab79135ee1d0
     purpose: Deterministic terminal waiter lineage transfer and delayed-redelivery suppression, disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement and concurrent-selection tests.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: 78cf49829a3c4d6a0ff4c0173fd0ca044cf34949a41565619a60e3cbcda907db
+    sha256: ff2bdba2bbce2184511ffb6653e65f20afdb45a4e7745519d0a9ecdcc31d50b0
     purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases, pruning inactive terminal jobs while retaining active state, and selecting the oldest eligible tenant-qualified retry domain so same-named scale sets cannot alias across forge owners.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
     sha256: 882e4cc3f13e124ddcc91404d437da69db37857ba3185d650befe8d3b180605b
@@ -118,7 +118,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: cf25d81d767593a35d6ec03d6a2222b7af14efaeda5ef094c33f096ec77a198c
+  binary_sha256: f872c55adc14e2ecaafbaff5dc496918dd0d8f3c9df20f5ba32d4d6ae966b6d3
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true
@@ -145,7 +145,7 @@ runtime_contract:
   pre_job_retry_identity: durable-queue-intent
   provider_retry_maximum_attempts: 3
   provider_retry_backoff_cap_seconds: 300
-  capacity_retry_backoff_cap_seconds: 300
+  capacity_retry_backoff_cap_seconds: 30
   capacity_retry_wake_after_delete: true
   capacity_retry_single_domain_lease: true
   shared_capacity_probe_domain: true

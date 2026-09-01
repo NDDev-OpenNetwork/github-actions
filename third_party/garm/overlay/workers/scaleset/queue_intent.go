@@ -671,6 +671,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 				replacement.StateEnteredAt = now
 				replacement.UpdatedAt = now
 				replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
+				bindStartedIdentity(journal, config, &replacement, job)
 				journal.Intents[key] = replacement
 				ensureRepositoryState(journal, config, replacement.Repository)
 				continue
@@ -682,6 +683,7 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			if validQueueText(job.RunnerName) {
 				intent.RunnerName = job.RunnerName
 			}
+			bindStartedIdentity(journal, config, &intent, job)
 			if job.WorkflowRunID > 0 {
 				intent.WorkflowRunID = job.WorkflowRunID
 			}
@@ -780,6 +782,33 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 	// Retaining JobAssigned at GitHub only causes head-of-line redelivery and
 	// prevents later JobCompleted messages from reaching this listener.
 	return false, err
+}
+
+// bindStartedIdentity gives a running intent the identity its JobStarted
+// message carries. An organization scale set on direct JIT goes from the
+// sparse JobAssigned straight to JobStarted and may never see JobAvailable,
+// so its intent kept the bare account as its repository until the
+// authoritative reconciler reached it -- ten jobs per cycle, one minute
+// apart. In a wave that took longer than the two-minute correlation grace,
+// and github_correlation_persistent paged on a job that was running exactly
+// where it should (2026-09-01T20:20Z). The message names the repository the
+// moment the job starts; the same compatibility rule JobAvailable obeys
+// keeps the binding inside the admitted account.
+func bindStartedIdentity(journal *queueIntentJournal, config queueAdmissionConfig, intent *queueIntent, job params.ScaleSetJobMessage) {
+	if !queueIntentRepositoryBound(*intent) && validQueueText(job.OwnerName) && validQueueText(job.RepositoryName) {
+		repository := job.OwnerName + "/" + job.RepositoryName
+		if validRepository(repository) &&
+			queueIntentRepositoryCompatible(*intent, queueIntent{Owner: intent.Owner, Repository: repository}) {
+			intent.Repository = repository
+			ensureRepositoryState(journal, config, repository)
+		}
+	}
+	if intent.WorkflowRef == "unavailable-before-job-available" && validQueueText(job.JobWorkflowRef) {
+		intent.WorkflowRef = job.JobWorkflowRef
+	}
+	if intent.EventName == "unavailable-before-job-available" && validQueueText(job.EventName) {
+		intent.EventName = job.EventName
+	}
 }
 
 func transferTerminalWaiterLineage(
