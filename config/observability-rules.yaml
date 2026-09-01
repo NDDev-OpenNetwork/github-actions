@@ -196,13 +196,13 @@ rules:
   - id: fleet_visibility_degraded
     severity: ticket
     query_language: promql
-    stream_name: gha_fleet_visibility_degraded
+    stream_name: gha_fleet_visibility_held_out_members
     # A drain-marked member that is offline makes the cluster listing partial
     # by design: inventory gap counts are unattributable and the observer
     # suppresses them instead of paging. This rule is the guard on that
     # suppression -- a hold that lasts half an hour is either a forgotten
     # drain or a member that failed to come back, and someone must look.
-    expression: max(gha_fleet_visibility_degraded)
+    expression: max(gha_fleet_visibility_held_out_members)
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
