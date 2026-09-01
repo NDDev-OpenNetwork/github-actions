@@ -258,6 +258,14 @@ if ss -H -lnt 'sport = :22' | grep -q .; then
   echo "SSH listener is present in smoke VM" >&2
   exit 1
 fi
+for unit in snapd.service snapd.socket snapd.seeded.service plymouth-quit-wait.service e2scrub_reap.service \
+  dpkg-db-backup.timer logrotate.timer motd-news.timer sysstat.service; do
+  if [[ "$(systemctl is-enabled "${unit}" 2>/dev/null || true)" != "masked" ]]; then
+    echo "server unit ${unit} is not masked on a one-job worker" >&2
+    exit 1
+  fi
+done
+[[ "$(id -u runner)" == 1000 && "$(id -g runner)" == 1001 ]]
 
 curl --fail --silent --show-error --location --max-time 20 https://github.com/robots.txt >/dev/null
 if curl --silent --max-time 3 http://169.254.169.254/latest/meta-data/ >/dev/null 2>&1; then
