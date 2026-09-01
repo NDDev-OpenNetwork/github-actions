@@ -165,6 +165,13 @@ func Build(cfg config.Config, selectedPools []string) (Plan, error) {
 				"lvm.thinpool_name": "gha-thin",
 				"lvm.use_thinpool":  "true",
 				"size":              strconv.Itoa(cfg.Incus.StorageSizeGiB) + "GiB",
+				// Image volumes take the pool default because only instance
+				// roots carry a per-profile size. The LVM default of 10 GiB
+				// held until the CodeQL bundle joined the tool cache; the
+				// unpacked b21 rootfs is ~12 GiB and the unpack fails inside
+				// the image volume, not the builder, which is exactly where
+				// two builds died before this became a managed value.
+				"volume.size": "16GiB",
 			},
 		},
 		Network: Network{
