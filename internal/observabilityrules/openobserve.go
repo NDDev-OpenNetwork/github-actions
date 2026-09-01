@@ -31,11 +31,11 @@ type OpenObserveAlert struct {
 }
 
 type OpenObserveQuery struct {
-	Type             string                    `json:"type"`
-	SQL              string                    `json:"sql,omitempty"`
-	PromQL           string                    `json:"promql"`
-	PromQLCondition  OpenObserveValueCondition `json:"promql_condition"`
-	PromQLMultiAlert bool                      `json:"promql_multi_alert"`
+	Type             string                     `json:"type"`
+	SQL              string                     `json:"sql,omitempty"`
+	PromQL           string                     `json:"promql"`
+	PromQLCondition  *OpenObserveValueCondition `json:"promql_condition,omitempty"`
+	PromQLMultiAlert bool                       `json:"promql_multi_alert"`
 }
 
 type OpenObserveValueCondition struct {
@@ -113,7 +113,7 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			query = OpenObserveQuery{
 				Type:   "promql",
 				PromQL: promQL,
-				PromQLCondition: OpenObserveValueCondition{
+				PromQLCondition: &OpenObserveValueCondition{
 					Column: "value", Operator: rule.Operator, Value: rule.Threshold,
 				},
 			}
