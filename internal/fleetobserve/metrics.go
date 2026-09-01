@@ -110,7 +110,11 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_queue_intents_in_flight", "Acquiring, acquired, assigned or running queue intents.", float64(snapshot.Queue.InFlight))
 	gauge(&output, "gha_fleet_queue_oldest_age_seconds", "Age of the oldest active GitHub queue intent.", float64(snapshot.Queue.OldestQueueAgeSeconds))
 	gauge(&output, "gha_fleet_queue_uncovered_running", "Running queue intents whose runner holds no provider execution lease or claim.", float64(snapshot.Queue.UncoveredRunning))
-	labeledGaugeHeader(&output, "gha_fleet_visibility_degraded", "Cluster members deliberately held out by a drain while offline; inventory gaps are unattributable and suppressed while any is set.")
+	// The total is always emitted so the stream exists from the first scrape:
+	// an alert can only be reconciled over a stream that exists, and a rule
+	// that guards a suppression must be installable before the first hold.
+	gauge(&output, "gha_fleet_visibility_held_out_members", "Cluster members deliberately held out by a drain while offline; inventory gaps are unattributable and suppressed while this is above zero.", float64(len(snapshot.HeldOutMembers)))
+	labeledGaugeHeader(&output, "gha_fleet_visibility_degraded", "One row per held-out member, for attribution.")
 	for _, member := range snapshot.HeldOutMembers {
 		metric(&output, "gha_fleet_visibility_degraded", map[string]string{"member": member}, 1)
 	}
