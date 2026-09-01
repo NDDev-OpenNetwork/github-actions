@@ -80,3 +80,34 @@ func TestOnlineMembersLeaveTheSnapshotUntouched(t *testing.T) {
 		t.Fatalf("online members disturbed the snapshot: %#v", snapshot)
 	}
 }
+
+// A daemon that is deliberately down can fail the whole cluster listing
+// loudly. While its member is held out, that loudness is maintenance: the
+// error moves to ListingUnavailable, the platform stays healthy, and the
+// degraded-visibility rule guards the window. Without a hold the same
+// failure pages exactly as before.
+func TestListingFailureIsMaintenanceOnlyUnderAHold(t *testing.T) {
+	collector := healthyCollector(t)
+	collector.Members = func(context.Context) ([]MemberVisibility, error) {
+		return []MemberVisibility{{Name: "gha-runner-4", Online: false, DrainReason: "drained: proof"}}, nil
+	}
+	collector.Instances = func(context.Context) ([]string, error) {
+		return nil, context.DeadlineExceeded
+	}
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy {
+		t.Fatalf("held-out listing failure failed the platform: %v", snapshot.CollectionErrors)
+	}
+	if snapshot.Incus.ListingUnavailable == "" {
+		t.Fatal("the listing failure vanished instead of being attributed")
+	}
+
+	loud := healthyCollector(t)
+	loud.Instances = func(context.Context) ([]string, error) {
+		return nil, context.DeadlineExceeded
+	}
+	snapshot = loud.Collect(context.Background())
+	if snapshot.Healthy {
+		t.Fatal("an unattributed listing failure left the platform healthy")
+	}
+}

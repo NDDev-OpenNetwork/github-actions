@@ -281,17 +281,22 @@ type QueueSummary struct {
 }
 
 type IncusSummary struct {
-	VisibleInstances            int   `json:"visible_instances"`
-	VisibleMaintenanceInstances int   `json:"visible_maintenance_instances"`
-	OrphanInstances             int   `json:"orphan_instances"`
-	OrphanUnattributable        int   `json:"orphan_unattributable,omitempty"`
-	OrphanInstancesWithinGrace  int   `json:"orphan_instances_within_grace"`
-	MissingInstances            int   `json:"missing_instances"`
-	MissingUnattributable       int   `json:"missing_unattributable,omitempty"`
-	MissingDeletingWithinGrace  int   `json:"missing_deleting_within_grace"`
-	MissingCreatedWithinGrace   int   `json:"missing_created_within_grace"`
-	OldestMissingCreatedAgeSecs int64 `json:"oldest_missing_created_within_grace_age_seconds"`
-	MissingMaintenanceInstances int   `json:"missing_maintenance_instances"`
+	VisibleInstances            int `json:"visible_instances"`
+	VisibleMaintenanceInstances int `json:"visible_maintenance_instances"`
+	OrphanInstances             int `json:"orphan_instances"`
+	OrphanUnattributable        int `json:"orphan_unattributable,omitempty"`
+	OrphanInstancesWithinGrace  int `json:"orphan_instances_within_grace"`
+	MissingInstances            int `json:"missing_instances"`
+	MissingUnattributable       int `json:"missing_unattributable,omitempty"`
+	// ListingUnavailable carries the instance-listing error observed while a
+	// drain-marked member was offline: a daemon that is deliberately down can
+	// fail the whole cluster listing loudly, and that loudness is maintenance,
+	// not an incident. Empty in steady state.
+	ListingUnavailable          string `json:"listing_unavailable,omitempty"`
+	MissingDeletingWithinGrace  int    `json:"missing_deleting_within_grace"`
+	MissingCreatedWithinGrace   int    `json:"missing_created_within_grace"`
+	OldestMissingCreatedAgeSecs int64  `json:"oldest_missing_created_within_grace_age_seconds"`
+	MissingMaintenanceInstances int    `json:"missing_maintenance_instances"`
 }
 
 type ServiceStatus struct {
@@ -481,7 +486,15 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	}
 
 	if instancesErr != nil {
-		snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("incus", instancesErr))
+		if visibilityDegraded {
+			// The listing failed while a member is deliberately held out: the
+			// failure is attributed there rather than paged, and the
+			// fleet_visibility_degraded rule guards against this state
+			// outliving its maintenance window.
+			snapshot.Incus.ListingUnavailable = safeError("incus", instancesErr)
+		} else {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("incus", instancesErr))
+		}
 	} else {
 		visibleNames, err := validateInstanceNames(instances)
 		if err != nil {
