@@ -156,15 +156,16 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
 	// Pinned so a recipe change has to be stated rather than noticed. It has
-	// moved three times: when the alias advanced to b15, when restoring the warm
-	// agent changed what provision.sh writes, and here, because provision.sh now
-	// creates /home/runner/.cache explicitly instead of letting `install -d`
-	// leave it root-owned. b17 is built and promoted, so its contents cannot
-	// change under it -- the alias goes to b18. That coupling is the point: the
-	// alias is part of the recipe, so a manifest whose contents changed under an
-	// unchanged alias would otherwise ask the builder to produce different bytes
-	// for a name that is already promoted.
-	if first != "sha256:f3067c98c8598549a1f81bd1c082aec5fb302fa31c52a986d17725fda57f9ac7" {
+	// moved with every recipe change -- the b15 alias, the restored warm agent,
+	// the runner-owned /home/runner/.cache -- and moves here because b22 pins
+	// the runner's uid and gid, skips the warm-up on a one-job worker, lets
+	// cloud-init exit when there is no cloud-config to apply, and masks the
+	// server units a one-job worker never needs. b21 is built and promoted, so
+	// its contents cannot change under it -- the alias goes to b22. That
+	// coupling is the point: the alias is part of the recipe, so a manifest
+	// whose contents changed under an unchanged alias would otherwise ask the
+	// builder to produce different bytes for a name that is already promoted.
+	if first != "sha256:4907420fca653164a305497fd7bb836a709a8e0c26ece6d1d0768effe04ce07f" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
