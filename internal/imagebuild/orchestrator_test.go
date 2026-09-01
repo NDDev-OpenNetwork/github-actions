@@ -447,7 +447,7 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefix, _, found := strings.Cut(string(content), "cloud-init status")
+	prefix, _, found := strings.Cut(string(content), "# --- smoke prelude ends here")
 	if !found {
 		t.Fatal("integration smoke cleanup test marker is absent")
 	}
