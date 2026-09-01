@@ -49,11 +49,21 @@ trap 'exit 130' INT TERM
 # --- smoke prelude ends here: everything above must exit cleanly on its own ---
 # A worker started without a cloud-config -- every direct-JIT and warm worker
 # since provider .108, and this smoke instance -- runs no cloud-init stage:
-# the unit exits 0 at once and cloud-init reports "degraded done" with exit
+# the unit exits 0 at once and cloud-init settles to "degraded done" about
+# fourteen seconds after boot (measured on b22), reporting it with exit
 # status 2, its word for "the generator armed me and nobody ran me". That is
 # the contract, not a failure; the unit's own result is asserted above.
-cloud_init_status="$(cloud-init status 2>/dev/null | head -n 1 || true)"
-[[ "${cloud_init_status}" == "status: done" ]]
+# cloud-init status exits 0 when done, 2 when done with recoverable errors,
+# 1 on an error; only the last one fails the image.
+cloud_init_wait_rc=0
+cloud-init status --wait >/dev/null 2>&1 || cloud_init_wait_rc=$?
+case "${cloud_init_wait_rc}" in
+  0|2) ;;
+  *)
+    printf >&2 'cloud-init did not settle (exit %s):\n%s\n' "${cloud_init_wait_rc}" "$(cloud-init status --long 2>/dev/null || true)"
+    exit 1
+    ;;
+esac
 runner_version="${GHA_RUNNER_VERSION#v}"
 actual_version="$(/opt/cache/actions-runner/latest/bin/Runner.Listener --version | tail -n 1 | tr -d '\r')"
 [[ "${actual_version}" == "${runner_version}" ]]

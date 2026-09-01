@@ -431,6 +431,14 @@ for toolchain_name in "${toolchain_names[@]}"; do
         "${toolchain_scratch}/rustup-init" -y --no-modify-path --profile minimal \
         --default-toolchain none >/dev/null
       [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" --version 2>/dev/null)" == "rustup ${toolchain_version} "* ]]
+      # rustup self-updates from `toolchain install` whenever a newer manager
+      # has been published: b22 came out carrying 1.29.1 against a manifest
+      # that pins 1.29.0, and its smoke refused it. The manager is a pinned
+      # artifact; it moves with the manifest, never with whatever the network
+      # served the build. Disabled before the first channel is installed, and
+      # the version is asserted again after the last one.
+      runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" set auto-self-update disable >/dev/null
+      grep -q '^auto_self_update = "disable"$' "${RUSTUP_HOME}/settings.toml"
       # Every channel the estate pins, with the two components its
       # rust-toolchain.toml files name, so the action finds them already present.
       mapfile -t rust_channels < <(jq -r '.channels[]?' <<<"${entry}")
@@ -447,6 +455,7 @@ for toolchain_name in "${toolchain_names[@]}"; do
         [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" run "${channel}" rustfmt --version)" == "rustfmt "* ]]
       done
       runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" default "${rust_default}" >/dev/null
+      [[ "$(runuser -u runner -- env HOME=/home/runner "${CARGO_HOME}/bin/rustup" --version 2>/dev/null)" == "rustup ${toolchain_version} "* ]]
       # Shims for jobs that call cargo or rustc without the action; the rustup
       # proxy resolves the toolchain through the calling user's home, which
       # for every job is the runner's.
