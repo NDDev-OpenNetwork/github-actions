@@ -222,13 +222,21 @@ func Diff(marks Watermarks, journal journalView, now time.Time) ([]Record, Water
 		if _, alreadyClosed := next.Closed[key]; alreadyClosed {
 			continue
 		}
+		// Three ways an intent leaves the journal, told apart by where it was
+		// last seen. The terminal map is GARM's own completion record. A
+		// RUNNING intent that disappears without one was released by the
+		// broker's reclaim after its execution lease ended -- the fleet's
+		// ordinary finish line, measured at ~2 per minute. An intent that
+		// disappears from any EARLIER state never ran anywhere this fleet can
+		// prove, and that is the orphan class worth a name of its own.
 		state := "vanished"
 		if _, terminal := journal.TerminalJobs[key]; terminal {
 			state = "completed"
+		} else if lastState == "running" {
+			state = "released"
 		}
 		records = append(records, Record{Timestamp: now, Key: key, State: state,
 			JobDisplayName: "", Repository: "", WorkflowRunID: 0})
-		_ = lastState
 		next.Closed[key] = now
 	}
 	sort.Slice(records, func(i, j int) bool {
