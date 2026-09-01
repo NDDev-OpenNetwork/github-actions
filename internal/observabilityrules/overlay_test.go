@@ -18,7 +18,7 @@ func tenantSQLRule(id string) Rule {
 		Severity:       "ticket",
 		QueryLanguage:  "sql",
 		StreamName:     "anton_logs",
-		Expression:     `SELECT count(*) AS record_count FROM "anton_logs" HAVING count(*) < 1`,
+		Expression:     `SELECT 'server-anton-kz' AS subject, count(*) AS value FROM "anton_logs" HAVING count(*) < 1`,
 		Operator:       ">=",
 		Threshold:      1,
 		EvaluationSecs: 300,
@@ -79,7 +79,7 @@ rules:
     severity: ticket
     query_language: sql
     stream_name: anton_logs
-    expression: SELECT count(*) AS record_count FROM "anton_logs" HAVING count(*) < 1
+    expression: SELECT 'server-anton-kz' AS subject, count(*) AS value FROM "anton_logs" HAVING count(*) < 1
     operator: ">="
     threshold: 1
     evaluation_seconds: 300

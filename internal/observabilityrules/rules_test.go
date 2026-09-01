@@ -68,7 +68,7 @@ func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
 			}
 			for _, alert := range rendered.Alerts {
 				if alert.Name == rule.ID && (rule.HoldSecs != 180 || alert.TriggerCondition.Threshold != 1 ||
-					!strings.HasPrefix(alert.QueryCondition.PromQL, "min_over_time(")) {
+					!strings.HasPrefix(withoutSubject(alert.QueryCondition.PromQL), "min_over_time(")) {
 					t.Fatalf("diagnostic rule=%#v alert=%#v", rule, alert)
 				}
 			}
@@ -117,7 +117,7 @@ func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) 
 			if strings.Contains(alert.QueryCondition.PromQL, "min_over_time((max_over_time(") {
 				t.Fatalf("%s still wraps its windowed delta in a subquery a quiet window cannot satisfy: %s", id, alert.QueryCondition.PromQL)
 			}
-			if !strings.HasPrefix(alert.QueryCondition.PromQL, "max_over_time(") {
+			if !strings.HasPrefix(withoutSubject(alert.QueryCondition.PromQL), "max_over_time(") {
 				t.Fatalf("%s is not the plain windowed delta: %s", id, alert.QueryCondition.PromQL)
 			}
 		}
@@ -486,5 +486,60 @@ func TestFlagDisablesEveryRule(t *testing.T) {
 		if alert.Enabled {
 			t.Fatalf("alert %q is enabled with the flag off", alert.Name)
 		}
+	}
+}
+
+// withoutSubject strips the subject label the renderer adds around every
+// PromQL alert, so tests about an expression's shape read the expression.
+func withoutSubject(promQL string) string {
+	for _, prefix := range []string{"label_join(", "label_replace("} {
+		if strings.HasPrefix(promQL, prefix) {
+			inner := strings.TrimPrefix(promQL, prefix)
+			if index := strings.LastIndex(inner, `, "subject"`); index >= 0 {
+				return inner[:index]
+			}
+		}
+	}
+	return promQL
+}
+
+// Every rendered PromQL alert carries a `subject` label: the label the rule
+// keeps when it names one, the literal fleet when it aggregates the fleet.
+// The message template prints exactly that label, so an alert without it
+// would print the placeholder, which is what happened before this existed.
+func TestEveryPromQLAlertCarriesASubjectLabel(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grouped, scalar := 0, 0
+	for _, alert := range rendered.Alerts {
+		if alert.QueryCondition.Type != "promql" {
+			continue
+		}
+		promQL := alert.QueryCondition.PromQL
+		switch {
+		case strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "host_name")`),
+			strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "scale_set")`),
+			strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "error_class")`):
+			grouped++
+			if !alert.QueryCondition.PromQLMultiAlert {
+				t.Errorf("%s keeps a label but is not a multi-alert", alert.Name)
+			}
+		case strings.HasPrefix(promQL, "label_replace(") && strings.HasSuffix(promQL, `, "subject", "fleet", "", "")`):
+			scalar++
+			if alert.QueryCondition.PromQLMultiAlert {
+				t.Errorf("%s names the fleet but is a multi-alert", alert.Name)
+			}
+		default:
+			t.Errorf("%s carries no subject label: %s", alert.Name, promQL)
+		}
+	}
+	if grouped == 0 || scalar == 0 {
+		t.Fatalf("expected both grouped and fleet-wide alerts, got %d grouped and %d fleet", grouped, scalar)
 	}
 }

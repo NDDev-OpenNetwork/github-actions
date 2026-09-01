@@ -1041,6 +1041,13 @@ chmod 0700 "${install_script}"
 # every child Bash process; the assignment itself never exports the token.
 exec 19>/dev/null
 export BASH_XTRACEFD=19
+# The assignment's own files are written under umask 077 above. The runner
+# is not: a job's checkout has to be readable by the containers the job
+# starts, and a haproxy running as uid 99 cannot open a 0600 config the
+# runner wrote for it (almaty-libraries, 2026-09-01T20:34Z). Every secret
+# this script creates carries an explicit mode, so the default umask is the
+# runner's again from here on.
+umask 022
 /bin/bash "${install_script}"
 `, metadataURL, encodedToken, encodedCA))
 }
@@ -1066,6 +1073,14 @@ fi
 phase_now="$(date +%%s%%N)"
 [[ "${phase_now}" =~ ^[0-9]{19}$ ]]
 printf '{"schema_version":1,"phase":"runner-exec","unix_ns":%%s}\n' "${phase_now}" >>"${phase_log}"
+# The runner inherits this script's umask through exec. 077 kept the phase
+# log and the assignment's secrets private; it also made every file a job
+# writes 0600 and every directory 0700, so a container the job starts as
+# another uid could not read the config the job had just written for it
+# (almaty-libraries' haproxy as uid 99, 2026-09-01T20:34Z, three jobs).
+# The systemd runner service GARM's own installer starts runs under 022;
+# so does this one.
+umask 022
 exec "${runner_root}/run.sh" --jitconfig "${JIT_CONFIG}"
 `, directJITPhasePath, encodedJIT))
 }

@@ -115,7 +115,7 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 			}
 			query = OpenObserveQuery{
 				Type:   "promql",
-				PromQL: promQL,
+				PromQL: withSubjectLabel(promQL),
 				PromQLCondition: &OpenObserveValueCondition{
 					Column: "value", Operator: rule.Operator, Value: rule.Threshold,
 				},
@@ -172,7 +172,7 @@ var aggregationOperator = regexp.MustCompile(
 	`\b(sum|min|max|avg|count|count_values|group|stddev|stdvar|topk|bottomk|quantile)\s*\(`,
 )
 
-var keepsLabels = regexp.MustCompile(`\bby\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*`)
+var keepsLabels = regexp.MustCompile(`\bby\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
 
 // namesASubject reports whether the expression returns one series per subject
 // rather than a single collapsed number. An aggregation with no `by` clause
@@ -185,6 +185,32 @@ func namesASubject(promQL string) bool {
 		return true
 	}
 	return !aggregationOperator.MatchString(promQL)
+}
+
+// withSubjectLabel gives every PromQL alert a `subject` label for the message
+// to print. A rule that keeps a label -- host_name, scale_set, error_class --
+// names its subject with that label, and the template reads exactly one name,
+// so the identifying label is copied into `subject` with label_join. A rule
+// that aggregates the fleet into one number names the fleet.
+//
+// label_join rather than label_replace with a capture group: measured on the
+// live engine on 2026-09-01, `label_replace(v, "subject", "$1", "host_name",
+// "(.+)")` returned the series without the new label, while label_join and a
+// literal label_replace value both took. The first message rendered from the
+// template read "host: {host_name}" -- for a rule whose result carried no
+// host_name at all -- and "observed {alert_agg_value}", a variable this
+// backend version does not define. The subject is now a label the rule
+// guarantees, and the observed value is the row's `value` column.
+func withSubjectLabel(promQL string) string {
+	if match := keepsLabels.FindStringSubmatch(promQL); match != nil {
+		return fmt.Sprintf(`label_join(%s, "subject", "", %q)`, promQL, match[1])
+	}
+	if namesASubject(promQL) {
+		// No aggregation at all: the raw series keep every label the
+		// collector stamped, and host_name is the one every fleet series has.
+		return fmt.Sprintf(`label_join(%s, "subject", "", "host_name")`, promQL)
+	}
+	return fmt.Sprintf(`label_replace(%s, "subject", "fleet", "", "")`, promQL)
 }
 
 func sustainedPromQL(rule Rule) (string, error) {
