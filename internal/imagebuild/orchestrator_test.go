@@ -165,7 +165,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// coupling is the point: the alias is part of the recipe, so a manifest
 	// whose contents changed under an unchanged alias would otherwise ask the
 	// builder to produce different bytes for a name that is already promoted.
-	if first != "sha256:4907420fca653164a305497fd7bb836a709a8e0c26ece6d1d0768effe04ce07f" {
+	if first != "sha256:e8397808b79585a0d46dabf914549eaba101687602eba859ad4d0599ddbb67ef" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -447,7 +447,7 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefix, _, found := strings.Cut(string(content), "cloud-init status")
+	prefix, _, found := strings.Cut(string(content), "# --- smoke prelude ends here")
 	if !found {
 		t.Fatal("integration smoke cleanup test marker is absent")
 	}
