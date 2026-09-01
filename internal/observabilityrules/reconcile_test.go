@@ -12,7 +12,10 @@ import (
 type fakeOpenObserve struct {
 	destination bool
 	streams     []string
-	alerts      map[string]OpenObserveAlert
+	// streamsByType, when set, answers the streams listing per requested type
+	// the way the real API does; the flat streams list answers every type.
+	streamsByType map[string][]string
+	alerts        map[string]OpenObserveAlert
 }
 
 func (f *fakeOpenObserve) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -29,8 +32,12 @@ func (f *fakeOpenObserve) ServeHTTP(writer http.ResponseWriter, request *http.Re
 			_ = json.NewEncoder(writer).Encode([]destinationSummary{})
 		}
 	case request.Method == http.MethodGet && request.URL.Path == "/api/default/streams":
+		names := f.streams
+		if f.streamsByType != nil {
+			names = f.streamsByType[request.URL.Query().Get("type")]
+		}
 		response := streamList{}
-		for _, name := range f.streams {
+		for _, name := range names {
 			response.List = append(response.List, struct {
 				Name string `json:"name"`
 			}{Name: name})
