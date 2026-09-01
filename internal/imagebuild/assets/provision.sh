@@ -46,12 +46,21 @@ pip --version >/dev/null
 
 systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
 git lfs install --system
+# The runner's ids are pinned, not whatever useradd finds free. They used to
+# be: the standard image ended up with gid 1001 and the docker image with gid
+# 1000, because docker.io had taken a system gid for its group first, and the
+# provider -- which checks the owner of every file a worker hands back --
+# declared one value for both. Every warm claim on a docker-capable pool
+# failed on that difference (2026-09-01T19:57Z). One uid, one gid, on every
+# image, decided here.
+getent group runner >/dev/null || groupadd --gid 1001 runner
 groupadd --force docker
 groupadd --force lxd
 
 if ! id runner >/dev/null 2>&1; then
-  useradd --create-home --home-dir /home/runner --shell /bin/bash --groups sudo runner
+  useradd --uid 1000 --gid runner --create-home --home-dir /home/runner --shell /bin/bash --groups sudo runner
 fi
+[[ "$(id -u runner)" == 1000 && "$(id -g runner)" == 1001 ]]
 
 # bubblewrap is on the image for consumers that need a network isolator, but
 # a binary on disk is not a capability: Ubuntu 24.04 ships
@@ -110,6 +119,31 @@ Unit=gha-warm-agent.service
 [Install]
 WantedBy=multi-user.target
 UNIT
+# The warm-up runs the official runner once so a warm worker answers its
+# assignment with a hot runtime. A cold one-job worker does not wait to be
+# claimed -- its assignment arrives as soon as the network is up -- so twelve
+# seconds of Runner.Listener warm-up there only competed with the job it was
+# meant to speed up (measured on a live worker, 2026-09-01). The lifecycle
+# the provider stamps on the instance decides: a one-job worker skips it,
+# everything else -- warm-preparing, the image smoke, an unstamped instance --
+# still warms up and publishes readiness.
+cat >/usr/local/libexec/gha-warm-ready <<'READY'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+lifecycle=""
+if [[ -S /dev/incus/sock ]]; then
+  lifecycle="$(curl --silent --unix-socket /dev/incus/sock http://localhost/1.0/config/user.nddev.lifecycle || true)"
+fi
+if [[ "${lifecycle}" == "ephemeral-one-job" ]]; then
+  exit 0
+fi
+systemctl is-active --quiet gha-warm-agent.path
+! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .
+runuser --user runner -- /home/runner/actions-runner/bin/Runner.Listener warmup >/dev/null
+! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .
+printf "ready-unregistered-v1\n" >/run/gha-warm/ready
+READY
+chmod 0755 /usr/local/libexec/gha-warm-ready
 cat >/etc/systemd/system/gha-warm-ready.service <<'UNIT'
 [Unit]
 Description=Attest that the NDDev worker is warm and unregistered
@@ -118,7 +152,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'systemctl is-active --quiet gha-warm-agent.path; ! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; runuser --user runner -- /home/runner/actions-runner/bin/Runner.Listener warmup >/dev/null; ! find /opt/cache/actions-runner /home/runner/actions-runner -type f \( -name .runner -o -name .credentials -o -name .credentials_rsaparams -o -name .service \) -print -quit | grep -q .; printf "ready-unregistered-v1\n" >/run/gha-warm/ready'
+ExecStart=/usr/local/libexec/gha-warm-ready
 RemainAfterExit=yes
 
 [Install]
@@ -210,6 +244,22 @@ for unit in ssh.service ssh.socket sshd.service sshd.socket; do
   systemctl stop "${unit}" 2>/dev/null || true
   systemctl disable "${unit}" 2>/dev/null || true
   systemctl mask "${unit}"
+done
+systemctl daemon-reload
+
+# A one-job worker boots to run one job. Everything below is what an Ubuntu
+# cloud image starts for a long-lived server, and each of them cost the job
+# its first seconds on a two-vCPU worker (systemd-analyze on a live worker,
+# 2026-09-01: snapd.seeded 1.1 s, snapd 0.9 s, plymouth, e2scrub_reap,
+# dpkg-db-backup, logrotate, sysstat, motd-news and the ua timers). The
+# boot that matters is the assignment path unit, which none of these feed.
+for unit in snapd.service snapd.socket snapd.seeded.service snapd.apparmor.service snapd.autoimport.service \
+  plymouth-start.service plymouth-read-write.service plymouth-quit.service plymouth-quit-wait.service \
+  e2scrub_reap.service dpkg-db-backup.timer logrotate.timer man-db.timer motd-news.timer fstrim.timer \
+  ua-timer.timer ua-reboot-cmds.service sysstat.service sysstat-collect.timer sysstat-summary.timer; do
+  systemctl stop "${unit}" 2>/dev/null || true
+  systemctl disable "${unit}" 2>/dev/null || true
+  systemctl mask "${unit}" 2>/dev/null || true
 done
 systemctl daemon-reload
 
