@@ -240,8 +240,11 @@ jobs:
         with:
           name: garm-provider-incus-${{ steps.release.outputs.source_commit }}
           path: ${{ runner.temp }}/provider-a
+          # Evidence, not transport: the reproducibility gate verified these
+          # exact bytes, and 30 days is a declared contract rather than
+          # whatever the org default happens to be.
+          retention-days: 30
           if-no-files-found: error
-          retention-days: 7
 
   gate:
     name: Gate
