@@ -1645,3 +1645,71 @@ func TestOnlyRunningIntentsUseTheExecutionHorizon(t *testing.T) {
 		t.Fatalf("acquired lifetime=%s, want acquired TTL", got)
 	}
 }
+
+// An organization scale set on direct JIT goes from the sparse JobAssigned
+// straight to JobStarted; the started message is the first exact repository
+// the intent ever sees, and it must bind there rather than wait for the
+// authoritative reconciler's turn.
+func TestStartedMessageBindsTheRepositoryAnOrganizationIntentStillLacked(t *testing.T) {
+	now := time.Date(2026, 9, 1, 20, 20, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
+	assigned := params.ScaleSetJobMessage{MessageType: params.MessageTypeJobAssigned, JobID: "00000000-0000-4000-8000-000000000404"}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := queueIntentKey(11, assigned.JobID)
+	if intent := journal.Intents[key]; intent.Repository != "example-org" {
+		t.Fatalf("sparse assigned intent should carry the bare account, got %#v", intent)
+	}
+
+	started := testQueueJob(404, "example-org", "example-repo", now)
+	started.JobID = assigned.JobID
+	started.MessageType = params.MessageTypeJobStarted
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, []params.ScaleSetJobMessage{started}, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := journal.Intents[key]
+	if intent.State != queueStateRunning || intent.Repository != "example-org/example-repo" ||
+		intent.WorkflowRef != started.JobWorkflowRef || intent.EventName != "push" {
+		t.Fatalf("started message did not bind the identity: %#v", intent)
+	}
+	if _, exists := journal.Repositories["example-org/example-repo"]; !exists {
+		t.Fatal("bound repository has no fairness state")
+	}
+}
+
+// The binding obeys the same rule JobAvailable does: a started message naming
+// a repository outside the admitted account leaves the intent as it was.
+func TestStartedMessageCannotBindAnotherAccountsRepository(t *testing.T) {
+	now := time.Date(2026, 9, 1, 20, 20, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	entity := params.ForgeEntity{EntityType: params.ForgeEntityTypeOrganization, Owner: "example-org"}
+	assigned := params.ScaleSetJobMessage{MessageType: params.MessageTypeJobAssigned, JobID: "00000000-0000-4000-8000-000000000505"}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	started := testQueueJob(505, "other-org", "example-repo", now)
+	started.JobID = assigned.JobID
+	started.MessageType = params.MessageTypeJobStarted
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, []params.ScaleSetJobMessage{started}, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent := journal.Intents[queueIntentKey(11, assigned.JobID)]; intent.Repository != "example-org" || intent.State != queueStateRunning {
+		t.Fatalf("foreign repository must not bind: %#v", intent)
+	}
+}

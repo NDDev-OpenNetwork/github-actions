@@ -24,16 +24,26 @@ const (
 	nddevRetryPreviousSchemaVersion = 1
 	nddevRetryMaximumBytes          = 1024 * 1024
 	nddevRetryMaximum               = 3
-	nddevRetryAttemptLease          = 2 * time.Minute
-	nddevRetryExecutionTTL          = 24 * time.Hour
-	nddevRetryStaleTTL              = time.Hour
-	nddevRetryBase                  = 5 * time.Second
-	nddevRetryCap                   = 5 * time.Minute
-	nddevCapacityRetryCap           = 5 * time.Minute
-	nddevRetryFileEnv               = "GARM_NDDEV_CREATE_RETRY_FILE"
-	nddevRetryLockEnv               = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
-	nddevQueueIntentFileEnv         = "GARM_NDDEV_QUEUE_INTENT_FILE"
-	nddevCapacityDomainKey          = "capacity-domain:measured-fleet"
+	// A probe lease is how long one create may hold the shared capacity
+	// domain before the next may try. A cold create completes in 10-17 s and
+	// a warm activation in 2 s (measured 2026-09-01), so two minutes made every
+	// probe that failed without recording -- a provider timeout, a killed
+	// process -- cost every other scale set two idle minutes. Forty-five
+	// seconds still covers the slowest measured create three times over.
+	nddevRetryAttemptLease = 45 * time.Second
+	nddevRetryExecutionTTL = 24 * time.Hour
+	nddevRetryStaleTTL     = time.Hour
+	nddevRetryBase         = 5 * time.Second
+	nddevRetryCap          = 5 * time.Minute
+	// Capacity is refused for seconds, not minutes: a worker finishes about
+	// every thirty seconds at the median, and a deletion wakes the domain at
+	// once. Five minutes only mattered when nothing was deleted, and then it
+	// held a queue for a refusal that was long stale.
+	nddevCapacityRetryCap   = 30 * time.Second
+	nddevRetryFileEnv       = "GARM_NDDEV_CREATE_RETRY_FILE"
+	nddevRetryLockEnv       = "GARM_NDDEV_CREATE_RETRY_LOCK_FILE"
+	nddevQueueIntentFileEnv = "GARM_NDDEV_QUEUE_INTENT_FILE"
+	nddevCapacityDomainKey  = "capacity-domain:measured-fleet"
 )
 
 var nddevRetryNow = func() time.Time { return time.Now().UTC() }
