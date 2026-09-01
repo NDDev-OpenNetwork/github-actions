@@ -84,6 +84,60 @@ func Load(path string) (Bundle, error) {
 	return bundle, nil
 }
 
+// LoadWithOverlays loads the base bundle and merges each overlay into it, in
+// order. Overlays exist so a tenant can add alerting to the estate without
+// editing the public rules bundle: each overlay is a complete, valid bundle of
+// its own, and the union refuses an overlay rule whose id collides with any
+// rule already merged — an overlay adds, it never redefines.
+func LoadWithOverlays(path string, overlayPaths []string) (Bundle, error) {
+	bundle, err := Load(path)
+	if err != nil {
+		return Bundle{}, err
+	}
+	for _, overlayPath := range overlayPaths {
+		overlay, err := Load(overlayPath)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("overlay %s: %w", overlayPath, err)
+		}
+		bundle, err = bundle.Merge(overlay)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("overlay %s: %w", overlayPath, err)
+		}
+	}
+	return bundle, nil
+}
+
+// Merge returns the union of two bundles with the same identity. The result is
+// re-sorted and re-validated, so every bundle-level invariant — the rule
+// budget, sorted ids, per-rule contracts — holds for the union exactly as it
+// would for a single file.
+func (b Bundle) Merge(overlay Bundle) (Bundle, error) {
+	if b.SchemaVersion != overlay.SchemaVersion || b.Backend != overlay.Backend || b.Organization != overlay.Organization {
+		return Bundle{}, fmt.Errorf("overlay bundle identity differs from the base bundle")
+	}
+	seen := make(map[string]struct{}, len(b.Rules))
+	for _, rule := range b.Rules {
+		seen[rule.ID] = struct{}{}
+	}
+	merged := Bundle{
+		SchemaVersion: b.SchemaVersion,
+		Backend:       b.Backend,
+		Organization:  b.Organization,
+		Rules:         append(append([]Rule{}, b.Rules...), overlay.Rules...),
+	}
+	for _, rule := range overlay.Rules {
+		if _, duplicate := seen[rule.ID]; duplicate {
+			return Bundle{}, fmt.Errorf("overlay rule %q collides with a base rule of the same id", rule.ID)
+		}
+		seen[rule.ID] = struct{}{}
+	}
+	sort.Slice(merged.Rules, func(i, j int) bool { return merged.Rules[i].ID < merged.Rules[j].ID })
+	if err := merged.Validate(); err != nil {
+		return Bundle{}, err
+	}
+	return merged, nil
+}
+
 func (b Bundle) Validate() error {
 	if b.SchemaVersion != SchemaVersion || b.Backend != "openobserve" || b.Organization != "default" {
 		return fmt.Errorf("observability bundle identity is invalid")
@@ -110,11 +164,22 @@ func (b Bundle) Validate() error {
 }
 
 func (r Rule) Validate() error {
-	if !idPattern.MatchString(r.ID) || !metricPattern.MatchString(r.StreamName) || (r.Severity != "page" && r.Severity != "ticket") || r.QueryLanguage != "promql" {
+	if !idPattern.MatchString(r.ID) || !metricPattern.MatchString(r.StreamName) || (r.Severity != "page" && r.Severity != "ticket") || (r.QueryLanguage != "promql" && r.QueryLanguage != "sql") {
 		return fmt.Errorf("identity, severity or query language is invalid")
 	}
 	if len(r.Expression) < 3 || len(r.Expression) > 4096 || strings.ContainsAny(r.Expression, "\r\x00") {
 		return fmt.Errorf("expression is invalid")
+	}
+	// A SQL rule queries a logs stream and gates on the number of result rows,
+	// so its condition must live in the statement itself (HAVING), it must be a
+	// single statement, and its trigger threshold must be a whole row count.
+	if r.QueryLanguage == "sql" {
+		if strings.Contains(r.Expression, ";") {
+			return fmt.Errorf("sql expression must be a single statement")
+		}
+		if r.Threshold != math.Trunc(r.Threshold) || r.Threshold < 0 {
+			return fmt.Errorf("sql threshold gates result rows and must be a non-negative whole number")
+		}
 	}
 	if _, valid := map[string]struct{}{">": {}, ">=": {}, "<": {}, "<=": {}, "=": {}, "!=": {}}[r.Operator]; !valid || math.IsNaN(r.Threshold) || math.IsInf(r.Threshold, 0) {
 		return fmt.Errorf("operator or threshold is invalid")

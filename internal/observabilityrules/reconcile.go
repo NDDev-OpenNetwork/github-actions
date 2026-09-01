@@ -137,16 +137,28 @@ func (c *OpenObserveClient) Plan(ctx context.Context, desired OpenObserveBundle)
 			plan.DestinationPresent = true
 		}
 	}
-	var streams streamList
-	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/%s/streams?type=metrics", url.PathEscape(desired.Organization)), nil, &streams); err != nil {
-		return ReconcilePlan{}, err
+	// Streams are namespaced by type, and the bundle can now hold both: promql
+	// rules watch metrics streams, sql rules watch logs streams. Ask for each
+	// type the desired alerts actually use, so a logs-backed alert is not
+	// reported missing for being absent from the metrics namespace.
+	neededTypes := make(map[string]struct{}, 2)
+	for _, alert := range desired.Alerts {
+		neededTypes[alert.StreamType] = struct{}{}
 	}
-	available := make(map[string]struct{}, len(streams.List))
-	for _, stream := range streams.List {
-		available[stream.Name] = struct{}{}
+	available := make(map[string]map[string]struct{}, len(neededTypes))
+	for streamType := range neededTypes {
+		var streams streamList
+		if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/%s/streams?type=%s", url.PathEscape(desired.Organization), url.QueryEscape(streamType)), nil, &streams); err != nil {
+			return ReconcilePlan{}, err
+		}
+		names := make(map[string]struct{}, len(streams.List))
+		for _, stream := range streams.List {
+			names[stream.Name] = struct{}{}
+		}
+		available[streamType] = names
 	}
 	for _, alert := range desired.Alerts {
-		if _, exists := available[alert.StreamName]; !exists {
+		if _, exists := available[alert.StreamType][alert.StreamName]; !exists {
 			plan.MissingStreams = append(plan.MissingStreams, alert.StreamName)
 		}
 	}

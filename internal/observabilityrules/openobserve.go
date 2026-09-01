@@ -32,6 +32,7 @@ type OpenObserveAlert struct {
 
 type OpenObserveQuery struct {
 	Type             string                    `json:"type"`
+	SQL              string                    `json:"sql,omitempty"`
 	PromQL           string                    `json:"promql"`
 	PromQLCondition  OpenObserveValueCondition `json:"promql_condition"`
 	PromQLMultiAlert bool                      `json:"promql_multi_alert"`
@@ -87,31 +88,49 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 		}
 		frequencyMinutes := (rule.EvaluationSecs + 59) / 60
 		periodMinutes := max((rule.HoldSecs+59)/60, frequencyMinutes)
-		promQL, err := sustainedPromQL(rule)
-		if err != nil {
-			return OpenObserveBundle{}, err
+		streamType := "metrics"
+		var query OpenObserveQuery
+		trigger := OpenObserveTrigger{
+			Period: periodMinutes, Frequency: frequencyMinutes, FrequencyType: "minutes",
+			Silence: silence, Timezone: "UTC", AlignTime: true,
 		}
-		result.Alerts = append(result.Alerts, OpenObserveAlert{
-			Name:       rule.ID,
-			OrgID:      bundle.Organization,
-			StreamType: "metrics",
-			StreamName: rule.StreamName,
-			QueryCondition: OpenObserveQuery{
+		switch rule.QueryLanguage {
+		case "sql":
+			// A SQL rule reads a logs stream over the alert period; the
+			// condition lives in the statement (HAVING), and the trigger gates
+			// on how many result rows came back. An absence rule is therefore
+			// expressible: a global aggregate always returns its one row, and
+			// HAVING keeps it exactly when the window was empty.
+			streamType = "logs"
+			query = OpenObserveQuery{Type: "sql", SQL: rule.Expression}
+			trigger.Operator = rule.Operator
+			trigger.Threshold = int(rule.Threshold)
+		default:
+			promQL, err := sustainedPromQL(rule)
+			if err != nil {
+				return OpenObserveBundle{}, err
+			}
+			query = OpenObserveQuery{
 				Type:   "promql",
 				PromQL: promQL,
 				PromQLCondition: OpenObserveValueCondition{
 					Column: "value", Operator: rule.Operator, Value: rule.Threshold,
 				},
-			},
-			TriggerCondition: OpenObserveTrigger{
-				// OpenObserve defines threshold as a PromQL series-coverage gate,
-				// not a consecutive-evaluation counter. Sustained time semantics
-				// live in the range-subquery expression above.
-				Period: periodMinutes, Operator: ">=", Threshold: 1,
-				Frequency: frequencyMinutes, FrequencyType: "minutes", Silence: silence,
-				Timezone: "UTC", AlignTime: true,
-			},
-			Destinations: []string{destination},
+			}
+			// OpenObserve defines threshold as a PromQL series-coverage gate,
+			// not a consecutive-evaluation counter. Sustained time semantics
+			// live in the range-subquery expression above.
+			trigger.Operator = ">="
+			trigger.Threshold = 1
+		}
+		result.Alerts = append(result.Alerts, OpenObserveAlert{
+			Name:             rule.ID,
+			OrgID:            bundle.Organization,
+			StreamType:       streamType,
+			StreamName:       rule.StreamName,
+			QueryCondition:   query,
+			TriggerCondition: trigger,
+			Destinations:     []string{destination},
 			ContextAttributes: map[string]string{
 				"action": rule.Action, "owner": rule.Owner, "recovery": rule.Recovery,
 				"runbook": rule.Runbook, "severity": rule.Severity,

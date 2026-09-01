@@ -235,10 +235,20 @@ func runValidateQueueAdmission(args []string, stdout, stderr io.Writer) int {
 	return writeJSONOrFail(stdout, stderr, queue)
 }
 
+// overlayPaths turns the single optional --overlay flag value into the list
+// LoadWithOverlays takes; empty means the base bundle alone.
+func overlayPaths(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return []string{value}
+}
+
 func runValidateObservabilityRules(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("validate-observability-rules", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "config/observability-rules.yaml", "strict observability rules bundle")
+	overlayPath := flags.String("overlay", "", "optional estate overlay bundle merged into the base rules")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -246,7 +256,7 @@ func runValidateObservabilityRules(args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "gha-fleet: validate-observability-rules requires --config")
 		return 2
 	}
-	bundle, err := observabilityrules.Load(*configPath)
+	bundle, err := observabilityrules.LoadWithOverlays(*configPath, overlayPaths(*overlayPath))
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
@@ -361,6 +371,7 @@ func runRenderOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("render-openobserve-alerts", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "config/observability-rules.yaml", "strict observability rules bundle")
+	overlayPath := flags.String("overlay", "", "optional estate overlay bundle merged into the base rules")
 	destination := flags.String("destination", "fleet_oncall", "exact reviewed OpenObserve destination")
 	enable := flags.Bool("enable", false, "render alerts enabled after the destination is independently accepted")
 	if err := flags.Parse(args); err != nil {
@@ -370,7 +381,7 @@ func runRenderOpenObserveAlerts(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gha-fleet: render-openobserve-alerts requires --config and --destination")
 		return 2
 	}
-	bundle, err := observabilityrules.Load(*configPath)
+	bundle, err := observabilityrules.LoadWithOverlays(*configPath, overlayPaths(*overlayPath))
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
@@ -387,6 +398,7 @@ func runReconcileOpenObserveAlerts(args []string, stdout, stderr io.Writer) int 
 	flags := flag.NewFlagSet("reconcile-openobserve-alerts", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "config/observability-rules.yaml", "strict observability rules bundle")
+	overlayPath := flags.String("overlay", "", "optional estate overlay bundle merged into the base rules")
 	destination := flags.String("destination", "fleet_oncall", "exact reviewed OpenObserve destination")
 	endpoint := flags.String("endpoint", "", "OpenObserve HTTP(S) origin")
 	usernameFile := flags.String("username-file", "", "absolute file containing only the OpenObserve username")
@@ -400,7 +412,7 @@ func runReconcileOpenObserveAlerts(args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "gha-fleet: reconcile-openobserve-alerts requires --config, --destination, --endpoint, --username-file, and --password-file")
 		return 2
 	}
-	bundle, err := observabilityrules.Load(*configPath)
+	bundle, err := observabilityrules.LoadWithOverlays(*configPath, overlayPaths(*overlayPath))
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
