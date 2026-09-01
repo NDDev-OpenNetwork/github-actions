@@ -41,8 +41,13 @@ type Config struct {
 	// lock. It answers one question this process cannot otherwise ask: which
 	// runners still hold a lease. A running queue intent whose runner holds
 	// none has finished, and nothing else in the system reclaims it.
-	ProviderJournalFile string       `yaml:"provider_journal_file,omitempty" json:"provider_journal_file,omitempty"`
-	Repositories        []Repository `yaml:"repositories" json:"repositories"`
+	ProviderJournalFile string `yaml:"provider_journal_file,omitempty" json:"provider_journal_file,omitempty"`
+	// BuildcacheRegistry is the member-local zot origin that holds BuildKit
+	// layer caches (buildcache/<owner>/<repo>/<class>). The address is the
+	// same on every member's bridge, so one configured origin serves the
+	// whole fleet. Empty disables buildcache delivery.
+	BuildcacheRegistry string       `yaml:"buildcache_registry,omitempty" json:"buildcache_registry,omitempty"`
+	Repositories       []Repository `yaml:"repositories" json:"repositories"`
 }
 
 type Repository struct {
@@ -57,6 +62,11 @@ type Identity struct {
 	Prefix        string `yaml:"prefix" json:"prefix"`
 	AccessKeyFile string `yaml:"access_key_file" json:"access_key_file"`
 	SecretKeyFile string `yaml:"secret_key_file" json:"secret_key_file"`
+	// BuildcacheUsernameFile and BuildcachePasswordFile, when both set, add a
+	// registry credential for the role's buildcache namespace to the same
+	// delivery. Both or neither; delivery also requires buildcache_registry.
+	BuildcacheUsernameFile string `yaml:"buildcache_username_file,omitempty" json:"buildcache_username_file,omitempty"`
+	BuildcachePasswordFile string `yaml:"buildcache_password_file,omitempty" json:"buildcache_password_file,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -129,6 +139,13 @@ func (c Config) Validate() error {
 			return errors.New("provider_journal_file must be distinct from every journal this process writes")
 		}
 	}
+	if c.BuildcacheRegistry != "" {
+		parsed, err := url.Parse(c.BuildcacheRegistry)
+		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" ||
+			parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return errors.New("buildcache_registry must be a bare HTTP(S) origin")
+		}
+	}
 	if len(c.Repositories) == 0 {
 		return errors.New("repositories must not be empty")
 	}
@@ -169,6 +186,19 @@ func (c Config) Validate() error {
 			for _, value := range []string{identity.AccessKeyFile, identity.SecretKeyFile} {
 				if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
 					return fmt.Errorf("repository %q role %q credential path is invalid", repository.Name, identity.Role)
+				}
+			}
+			if (identity.BuildcacheUsernameFile == "") != (identity.BuildcachePasswordFile == "") {
+				return fmt.Errorf("repository %q role %q buildcache credential files must be configured together", repository.Name, identity.Role)
+			}
+			if identity.BuildcacheUsernameFile != "" {
+				if c.BuildcacheRegistry == "" {
+					return fmt.Errorf("repository %q role %q carries buildcache credentials without buildcache_registry", repository.Name, identity.Role)
+				}
+				for _, value := range []string{identity.BuildcacheUsernameFile, identity.BuildcachePasswordFile} {
+					if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+						return fmt.Errorf("repository %q role %q buildcache credential path is invalid", repository.Name, identity.Role)
+					}
 				}
 			}
 		}

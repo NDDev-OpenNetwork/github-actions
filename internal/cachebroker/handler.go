@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/cachenamespace"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetryattrs"
 )
@@ -52,6 +53,17 @@ type Delivery struct {
 	AccessKey     string `json:"access_key"`
 	SecretKeyB64  string `json:"secret_key_b64"`
 	CAPEMB64      string `json:"ca_pem_b64"`
+	// Buildcache, when the claimed role is provisioned for it, carries the
+	// registry credential for this repository's BuildKit layer-cache
+	// namespace on the member-local zot. Same claim, same one-job semantics.
+	Buildcache *BuildcacheDelivery `json:"buildcache,omitempty"`
+}
+
+type BuildcacheDelivery struct {
+	Registry    string `json:"registry"`
+	Repository  string `json:"repository"`
+	Username    string `json:"username"`
+	PasswordB64 string `json:"password_b64"`
 }
 
 type Handler struct {
@@ -371,7 +383,52 @@ func loadDelivery(config Config, bucket string, identity Identity, instance stri
 		Endpoint: config.Endpoint, Region: config.Region, Bucket: bucket, PrefixRoot: identity.Prefix,
 		AccessKey: accessText, SecretKeyB64: base64.StdEncoding.EncodeToString(secret), CAPEMB64: base64.StdEncoding.EncodeToString(ca)}
 	clear(secret)
+	if identity.BuildcacheUsernameFile != "" && config.BuildcacheRegistry != "" {
+		buildcache, err := loadBuildcacheDelivery(config, identity)
+		if err != nil {
+			clearDelivery(&delivery)
+			return Delivery{}, err
+		}
+		delivery.Buildcache = buildcache
+	}
 	return delivery, nil
+}
+
+func loadBuildcacheDelivery(config Config, identity Identity) (*BuildcacheDelivery, error) {
+	// The trust class rides in the validated prefix, so the layer cache lands
+	// in the same isolation boundary as the object cache it accompanies.
+	repository, class, err := cachenamespace.ParsePrefixRoot(identity.Prefix)
+	if err != nil {
+		return nil, fmt.Errorf("derive buildcache namespace: %w", err)
+	}
+	namespace, err := cachenamespace.BuildcacheRepositoryFor(repository, class)
+	if err != nil {
+		return nil, fmt.Errorf("derive buildcache namespace: %w", err)
+	}
+	username, err := readPrivateRegular(identity.BuildcacheUsernameFile)
+	if err != nil {
+		return nil, fmt.Errorf("read buildcache username: %w", err)
+	}
+	password, err := readPrivateRegular(identity.BuildcachePasswordFile)
+	if err != nil {
+		clear(username)
+		return nil, fmt.Errorf("read buildcache password: %w", err)
+	}
+	usernameText := strings.TrimSpace(string(username))
+	password = bytes.TrimSpace(password)
+	clear(username)
+	if usernameText == "" || len(password) == 0 {
+		clear(password)
+		return nil, errors.New("buildcache credential shape is invalid")
+	}
+	buildcache := &BuildcacheDelivery{
+		Registry:    config.BuildcacheRegistry,
+		Repository:  namespace,
+		Username:    usernameText,
+		PasswordB64: base64.StdEncoding.EncodeToString(password),
+	}
+	clear(password)
+	return buildcache, nil
 }
 
 func readPrivateRegular(path string) ([]byte, error) {
@@ -414,4 +471,8 @@ func clearDelivery(delivery *Delivery) {
 	delivery.AccessKey = ""
 	delivery.SecretKeyB64 = ""
 	delivery.CAPEMB64 = ""
+	if delivery.Buildcache != nil {
+		delivery.Buildcache.Username = ""
+		delivery.Buildcache.PasswordB64 = ""
+	}
 }
