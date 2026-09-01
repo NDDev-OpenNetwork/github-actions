@@ -1,23 +1,34 @@
 // Package memberdrain turns taking an Incus cluster member out of service from
 // a sequence somebody remembers into a single operation.
 //
-// The sequence is not obvious and getting it wrong looks like it worked. The
-// member's admission gate is owned by the pressure publisher, which reasserts
-// it every eleven seconds, so closing the gate without first stopping
-// gha-pressure-gate.timer is undone within one cycle -- observed live: set at
-// 17:02:27, read back open at 17:02:52. Setting scheduler.instance by hand has
-// the same fate for the same reason.
+// The member's admission gate is owned by the pressure publisher, which
+// reasserts it every eleven seconds. A drain used to stop
+// gha-pressure-gate.timer so its closed gate would hold -- and the silenced
+// publisher then aged into compute_pressure_state_stale, which paged every
+// ten minutes for the whole window: twenty-eight hours of noise across one
+// night's image builds, all of it self-inflicted. A reboot mid-drain also
+// restarted the timer and quietly reopened the member.
+//
+// The drain now leaves the timer running and writes a marker beside the gate
+// state instead. The publisher honours the marker on every cycle: it keeps
+// publishing a fresh, closed gate carrying the drain reason, so freshness
+// never lapses, the alert stays quiet, and the drain survives a reboot.
+// Restore removes the marker and republishes from live pressure.
 //
 // A drain never stops a running worker. It closes the gate so no new work is
-// placed, then waits for the jobs already there to finish on their own. If they
-// outlast the deadline the drain reports that it is still occupied and by what;
-// it does not decide to end someone's build.
+// placed, then waits for the jobs already there to finish on their own --
+// except warm instances, which are ready-unregistered by definition, hold
+// nobody's job, and are recycled rather than waited out: one held a reboot
+// hostage for a full forty-five-minute timeout. If real jobs outlast the
+// deadline the drain reports that it is still occupied and by what; it does
+// not decide to end someone's build.
 package memberdrain
 
 import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -28,6 +39,9 @@ import (
 // cluster's containers.
 type Client interface {
 	GetInstances(api.InstanceType) ([]api.Instance, error)
+	// DeleteInstance removes one instance. The drain uses it only for warm
+	// instances, which carry no job by construction.
+	DeleteInstance(name string) error
 }
 
 // Units is the systemd control a drain needs. Stopping the pressure timer is
@@ -37,6 +51,14 @@ type Units interface {
 	Stop(ctx context.Context, unit string) error
 	Start(ctx context.Context, unit string) error
 	IsActive(ctx context.Context, unit string) (bool, error)
+}
+
+// Marker is the durable statement that this member is drained. The pressure
+// publisher reads it on every cycle and keeps the gate closed and fresh while
+// it exists, which is what lets the drain leave the timer running.
+type Marker interface {
+	Set(reason string) error
+	Clear() error
 }
 
 // Gate closes and reopens the member's admission gate through the component
@@ -54,6 +76,7 @@ type Deps struct {
 	Client Client
 	Units  Units
 	Gate   Gate
+	Marker Marker
 	Sleep  func(context.Context, time.Duration) error
 	Now    func() time.Time
 }
@@ -92,6 +115,7 @@ type Result struct {
 	GateRepublished   bool       `json:"gate_republished"`
 	SchedulerInstance string     `json:"scheduler_instance,omitempty"`
 	Occupants         []Occupant `json:"occupants"`
+	RecycledWarm      []string   `json:"recycled_warm,omitempty"`
 	WaitedSecs        int        `json:"waited_seconds"`
 	Drained           bool       `json:"drained"`
 	TimedOut          bool       `json:"timed_out"`
@@ -136,8 +160,8 @@ func Occupancy(client Client, memberName string) ([]Occupant, error) {
 }
 
 func (d Deps) valid() error {
-	if d.Client == nil || d.Units == nil || d.Gate == nil {
-		return fmt.Errorf("drain requires a client, unit control and a gate")
+	if d.Client == nil || d.Units == nil || d.Gate == nil || d.Marker == nil {
+		return fmt.Errorf("drain requires a client, unit control, a gate and a drain marker")
 	}
 	return nil
 }
@@ -218,12 +242,13 @@ func Drain(ctx context.Context, deps Deps, options Options) (Result, error) {
 		return result, nil
 	}
 
-	// Order matters. The timer stops first, because a gate closed while the
-	// publisher is still running is reopened on its next cycle.
-	if err := deps.Units.Stop(ctx, options.TimerUnit); err != nil {
-		return Result{}, fmt.Errorf("stop %s: %w", options.TimerUnit, err)
+	// Order matters. The marker goes down first: from this point every
+	// publisher cycle keeps the gate closed and fresh, so the close below can
+	// never be undone by the next cycle, the staleness alert never fires, and
+	// a reboot mid-drain comes back still drained.
+	if err := deps.Marker.Set(options.Reason); err != nil {
+		return Result{}, fmt.Errorf("set the drain marker on %s: %w", options.MemberName, err)
 	}
-	result.TimerStopped = true
 	scheduler, err := deps.Gate.ForceClose(ctx, options.Reason)
 	if err != nil {
 		return Result{}, fmt.Errorf("close the gate on %s: %w", options.MemberName, err)
@@ -238,6 +263,22 @@ func Drain(ctx context.Context, deps Deps, options Options) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
+		// A warm instance is ready-unregistered by definition: it holds no
+		// job, and the maintainer refills it on an open member. Waiting for
+		// one is waiting for nothing -- one held a reboot hostage for the
+		// full timeout -- so warm occupants are recycled, not waited out.
+		remaining := occupants[:0]
+		for _, occupant := range occupants {
+			if strings.HasPrefix(occupant.Name, "warm-") {
+				if err := deps.Client.DeleteInstance(occupant.Name); err != nil {
+					return Result{}, fmt.Errorf("recycle warm occupant %s: %w", occupant.Name, err)
+				}
+				result.RecycledWarm = append(result.RecycledWarm, occupant.Name)
+				continue
+			}
+			remaining = append(remaining, occupant)
+		}
+		occupants = remaining
 		result.Occupants = occupants
 		result.WaitedSecs = int(deps.now().Sub(started) / time.Second)
 		if len(occupants) == 0 {
@@ -282,12 +323,19 @@ func Restore(ctx context.Context, deps Deps, options Options) (Result, error) {
 	if !options.Apply {
 		return result, nil
 	}
+	// The marker clears first, or the next publisher cycle would immediately
+	// re-close what Reopen just published.
+	if err := deps.Marker.Clear(); err != nil {
+		return Result{}, fmt.Errorf("clear the drain marker on %s: %w", options.MemberName, err)
+	}
 	scheduler, err := deps.Gate.Reopen(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("republish the gate on %s: %w", options.MemberName, err)
 	}
 	result.GateRepublished = true
 	result.SchedulerInstance = scheduler
+	// Marker-era drains leave the timer running; this start also heals a
+	// member drained by the old stop-the-timer flow or by hand.
 	if err := deps.Units.Start(ctx, options.TimerUnit); err != nil {
 		return Result{}, fmt.Errorf("start %s: %w", options.TimerUnit, err)
 	}
