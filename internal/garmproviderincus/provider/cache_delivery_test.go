@@ -406,3 +406,34 @@ func TestCacheShellProgramsParseAndNeverEnableXtrace(t *testing.T) {
 		require.NotContains(t, script, "set -x", name)
 	}
 }
+
+// An assignment the hook cannot use costs the job its cache, never the job.
+// Twenty-two jobs failed at "Set up runner" on 2026-08-30/31 because the hook
+// exited non-zero on an assignment a provider rollout had left unreadable.
+func TestJobStartedHookFailsOpenWhenTheAssignmentIsUnusable(t *testing.T) {
+	directory := t.TempDir()
+	assignmentPath := filepath.Join(directory, "assignment.json")
+	readyPath := filepath.Join(directory, "assignment.ready")
+	consumedPath := filepath.Join(directory, "assignment.consumed")
+	githubEnv := filepath.Join(directory, "github-env")
+	// Wrong mode and wrong shape: two of the checks that used to fail the job.
+	require.NoError(t, os.WriteFile(assignmentPath, []byte("{\"schema_version\":1}"), 0o644))
+	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))
+	require.NoError(t, os.WriteFile(githubEnv, nil, 0o600))
+	hook := strings.NewReplacer(
+		cacheAssignmentPath, assignmentPath,
+		cacheReadyPath, readyPath,
+		cacheConsumedPath, consumedPath,
+	).Replace(cacheJobStartedHook())
+	command := exec.Command("bash", "-c", hook)
+	command.Env = append(os.Environ(), "GITHUB_ENV="+githubEnv)
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	require.Contains(t, string(output), "::warning::")
+	require.Contains(t, string(output), "continuing without cache")
+	environment, err := os.ReadFile(githubEnv)
+	require.NoError(t, err)
+	require.Empty(t, environment)
+	_, err = os.Lstat(consumedPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
