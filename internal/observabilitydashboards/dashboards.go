@@ -34,12 +34,18 @@ type Dashboard struct {
 }
 
 type Panel struct {
-	ID          string `json:"id" yaml:"id"`
-	Title       string `json:"title" yaml:"title"`
-	Kind        string `json:"kind" yaml:"kind"`
-	Query       string `json:"query" yaml:"query"`
-	Unit        string `json:"unit" yaml:"unit"`
-	Description string `json:"description" yaml:"description"`
+	ID    string `json:"id" yaml:"id"`
+	Title string `json:"title" yaml:"title"`
+	Kind  string `json:"kind" yaml:"kind"`
+	Query string `json:"query" yaml:"query"`
+	// QueryLanguage selects the backend query dialect: empty or "promql"
+	// charts a metrics stream; "sql" charts a logs stream and requires
+	// StreamName, because a SQL statement carries no single metric identity
+	// to derive it from.
+	QueryLanguage string `json:"query_language,omitempty" yaml:"query_language,omitempty"`
+	StreamName    string `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
+	Unit          string `json:"unit" yaml:"unit"`
+	Description   string `json:"description" yaml:"description"`
 }
 
 func Load(path string) (Bundle, error) {
@@ -129,6 +135,24 @@ func (p Panel) Validate() error {
 	}
 	if _, ok := map[string]struct{}{"bytes": {}, "bytes_per_second": {}, "count": {}, "percent": {}, "seconds": {}, "state": {}}[p.Unit]; !ok {
 		return fmt.Errorf("unit is invalid")
+	}
+	if p.QueryLanguage != "" && p.QueryLanguage != "promql" && p.QueryLanguage != "sql" {
+		return fmt.Errorf("query language is invalid")
+	}
+	if p.QueryLanguage == "sql" {
+		if !metricPattern.MatchString(p.StreamName) {
+			return fmt.Errorf("sql panel requires an explicit stream_name")
+		}
+		if strings.Contains(p.Query, ";") {
+			return fmt.Errorf("sql panel query must be a single statement")
+		}
+		if !strings.Contains(p.Query, p.StreamName) {
+			return fmt.Errorf("sql panel query does not read its declared stream")
+		}
+		return nil
+	}
+	if p.StreamName != "" {
+		return fmt.Errorf("stream_name is only for sql panels; promql derives it from the query")
 	}
 	if !strings.Contains(p.Query, "gha_fleet_") && !strings.Contains(p.Query, "gha_diagnostic_storage_") &&
 		!strings.Contains(p.Query, "otelcol_exporter_") && !strings.Contains(p.Query, "system_cpu_time") &&

@@ -188,6 +188,45 @@ dashboards:
         query: 100 * max by (host_name) (system_paging_usage{service_namespace="nddev-github-actions",state="used"}) / clamp_min(sum by (host_name) (system_paging_usage{service_namespace="nddev-github-actions"}), 1)
         unit: percent
         description: Fraction of the non-schedulable four-GiB emergency swap consumed on each fleet host.
+  - id: job_lifecycle
+    title: Job lifecycle stream
+    refresh_seconds: 60
+    default_range: 6h
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    panels:
+      - id: completions
+        title: Completed intents
+        kind: timeseries
+        query_language: sql
+        stream_name: gha_fleet_job_lifecycle
+        query: SELECT histogram(_timestamp) AS x_axis_1, count(*) AS y_axis_1 FROM "gha_fleet_job_lifecycle" WHERE state = 'completed' GROUP BY x_axis_1 ORDER BY x_axis_1
+        unit: count
+        description: Intents that reached the terminal map and closed their story.
+      - id: transitions_by_state
+        title: Lifecycle transitions by state
+        kind: timeseries
+        query_language: sql
+        stream_name: gha_fleet_job_lifecycle
+        query: SELECT histogram(_timestamp) AS x_axis_1, count(*) AS y_axis_1, state AS breakdown_1 FROM "gha_fleet_job_lifecycle" GROUP BY x_axis_1, breakdown_1 ORDER BY x_axis_1
+        unit: count
+        description: Every queue transition the exporter said once, per state, over time.
+      - id: vanished_intents
+        title: Vanished intents
+        kind: timeseries
+        query_language: sql
+        stream_name: gha_fleet_job_lifecycle
+        query: SELECT histogram(_timestamp) AS x_axis_1, count(*) AS y_axis_1 FROM "gha_fleet_job_lifecycle" WHERE state = 'vanished' GROUP BY x_axis_1 ORDER BY x_axis_1
+        unit: count
+        description: Intents that left the journal without a terminal record -- the orphan class this fleet has been burned by.
+      - id: waited_seconds_running
+        title: Wait to running, per scale set
+        kind: timeseries
+        query_language: sql
+        stream_name: gha_fleet_job_lifecycle
+        query: SELECT histogram(_timestamp) AS x_axis_1, max(waited_seconds) AS y_axis_1, scale_set AS breakdown_1 FROM "gha_fleet_job_lifecycle" WHERE state = 'running' GROUP BY x_axis_1, breakdown_1 ORDER BY x_axis_1
+        unit: seconds
+        description: How long the slowest job of each scale set had waited when it entered running.
   - id: lifecycle_latency
     title: Job lifecycle latency
     refresh_seconds: 30

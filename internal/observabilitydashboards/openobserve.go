@@ -99,9 +99,20 @@ func RenderOpenObserve(bundle Bundle) ([]OpenObserveDashboard, error) {
 	for _, dashboard := range bundle.Dashboards {
 		panels := make([]OpenObservePanel, 0, len(dashboard.Panels))
 		for index, panel := range dashboard.Panels {
-			metric := metricPattern.FindString(panel.Query)
-			if metric == "" {
-				return nil, fmt.Errorf("dashboard %q panel %q has no metric identity", dashboard.ID, panel.ID)
+			queryType := "promql"
+			streamType := "metrics"
+			stream := ""
+			if panel.QueryLanguage == "sql" {
+				// A SQL panel charts a logs stream; the statement is the whole
+				// query and the stream identity is declared, not derived.
+				queryType = "sql"
+				streamType = "logs"
+				stream = panel.StreamName
+			} else {
+				stream = metricPattern.FindString(panel.Query)
+				if stream == "" {
+					return nil, fmt.Errorf("dashboard %q panel %q has no metric identity", dashboard.ID, panel.ID)
+				}
 			}
 			panelType := "line"
 			if panel.Kind == "stat" {
@@ -112,10 +123,10 @@ func RenderOpenObserve(bundle Bundle) ([]OpenObserveDashboard, error) {
 			panels = append(panels, OpenObservePanel{
 				ID: panel.ID, Type: panelType, Title: panel.Title, Description: panel.Description,
 				Config:    PanelConfig{ShowLegends: panel.Kind == "timeseries", Unit: openObserveUnit(panel.Unit)},
-				QueryType: "promql",
+				QueryType: queryType,
 				Queries: []OpenObserveQuery{{
 					Query: panel.Query, CustomQuery: true,
-					Fields: PanelFields{Stream: metric, StreamType: "metrics", X: []any{}, Y: []any{}, Z: []any{}, Breakdown: []any{},
+					Fields: PanelFields{Stream: stream, StreamType: streamType, X: []any{}, Y: []any{}, Z: []any{}, Breakdown: []any{},
 						Filter: PanelFilter{FilterType: "group", LogicalOperator: "AND", Conditions: []any{}}},
 					Config: QueryConfig{LayerType: "scatter"},
 				}},
