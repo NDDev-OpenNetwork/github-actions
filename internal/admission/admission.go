@@ -18,6 +18,10 @@ const (
 	ReasonIOPressure          Reason = "io-pressure"
 	ReasonRecentOOM           Reason = "recent-oom"
 	ReasonDiagnosticWAL       Reason = "storage-high-watermark"
+	// ReasonPlacementRefused is a per-member truth arriving after fleet-level
+	// admission said yes: the placement scriptlet found no member with room.
+	// It defers exactly like a capacity refusal.
+	ReasonPlacementRefused Reason = "placement-refused"
 )
 
 type HostSnapshot struct {

@@ -126,7 +126,13 @@ func TestFleetHostStateTreatsAnUnreportedPoolAsFull(t *testing.T) {
 	require.Equal(t, 0, state.FreeDiskPercent)
 }
 
-func TestFleetHostStateExcludesClosedOrStaleMemberWithoutMaskingHealthySibling(t *testing.T) {
+// A closed or stale member stops NEW placement (the scriptlet's job) and its
+// pressure sample must not mask a healthy sibling -- but its capacity stays in
+// the ledger, because its residents' allocations do. Excluding the totals
+// while counting fleet-wide allocations made the ledger read 20 GiB
+// over-allocated during a partial-pressure burst while an open member had
+// 14 GiB free, and warm could never build exactly when it mattered.
+func TestFleetHostStateCountsClosedMemberCapacityWithoutItsPressure(t *testing.T) {
 	platform := clusterPlatform()
 	for name, members := range map[string][]api.ClusterMember{
 		"closed member": {
@@ -151,7 +157,10 @@ func TestFleetHostStateExcludesClosedOrStaleMemberWithoutMaskingHealthySibling(t
 			require.NoError(t, err)
 			require.True(t, state.Healthy)
 			require.True(t, state.PressureAvailable)
-			require.Equal(t, 6, state.TotalCPUUnits)
+			// Both online members' capacity is in the ledger; only the open
+			// member's pressure sample reached the snapshot.
+			require.Equal(t, 12, state.TotalCPUUnits)
+			require.Equal(t, 32*1024, state.TotalMemoryMiB)
 		})
 	}
 }
