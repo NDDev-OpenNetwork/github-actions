@@ -1,0 +1,79 @@
+name: evidence-snapshot
+
+# Evidence that today lives only on hosts -- what a worker image actually
+# carries, and what the runner's own diagnostics say -- published as 30-day
+# artifacts, so an agent reads evidence from the run that produced it instead
+# of from a host. The org holds 30-day artifact retention with 50 GB included
+# and under 7 GB used; a daily snapshot per runner class costs a few MB.
+#
+# This is the run-attached half of the diagnostic story: the exporter's
+# bundles stay the deep archive on RustFS, while the runner's own diagnostics
+# travel as run artifacts beside the image record, provably from inside a job.
+
+on:
+  schedule:
+    - cron: '40 4 * * *'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  snapshot:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [nddev-linux-standard, nddev-linux-integration]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Collect image build record and package inventory
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          cp /etc/nddev/image-build.json "$RUNNER_TEMP/evidence/image-build.json"
+          cp /etc/nddev/packages.tsv "$RUNNER_TEMP/evidence/packages.tsv"
+          echo "image build record:"
+          cat "$RUNNER_TEMP/evidence/image-build.json"
+
+      - name: Probe the toolchain surface as the job sees it
+        run: |
+          set -euo pipefail
+          probe() { printf '%s\t' "$1"; shift; "$@" 2>&1 | head -1 || true; }
+          {
+            probe git git --version
+            probe go go version
+            probe node node --version
+            probe python3 python3 --version
+            probe rustc rustc --version
+            probe cargo cargo --version
+            probe actionlint actionlint --version
+            probe shellcheck sh -c 'shellcheck --version | sed -n 2p'
+            probe docker sh -c 'docker --version'
+            probe bwrap bwrap --version
+          } > "$RUNNER_TEMP/evidence/toolchain.tsv"
+          cat "$RUNNER_TEMP/evidence/toolchain.tsv"
+
+      - name: Capture the runner diagnostic log for this run
+        run: |
+          set -euo pipefail
+          # The actions runner writes its own diagnostics beside the runner
+          # root; the most recent worker log is this job's own record.
+          diag="$(ls -1dt /home/runner/actions-runner/_diag 2>/dev/null | head -1 || true)"
+          if [ -n "$diag" ] && [ -d "$diag" ]; then
+            latest="$(ls -1t "$diag"/Worker_* 2>/dev/null | head -1 || true)"
+            if [ -n "$latest" ]; then
+              tail -c 262144 "$latest" > "$RUNNER_TEMP/evidence/runner-worker-diagnostic.log"
+            fi
+            ls -1t "$diag" | head -20 > "$RUNNER_TEMP/evidence/runner-diagnostic-index.txt"
+          else
+            echo "no runner diagnostic directory visible to the job" > "$RUNNER_TEMP/evidence/runner-diagnostic-index.txt"
+          fi
+
+      - name: Publish the evidence artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-evidence-${{ matrix.runner }}
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 30
+          if-no-files-found: error
