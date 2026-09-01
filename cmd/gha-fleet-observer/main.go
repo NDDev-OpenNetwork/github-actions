@@ -199,6 +199,23 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		Queue: func(ctx context.Context) (queueintent.Snapshot, error) {
 			return (queueintent.Reader{Path: providerConfiguration.QueueIntentFile}).ReadActive(ctx)
 		},
+		Members: func(ctx context.Context) ([]fleetobserve.MemberVisibility, error) {
+			incusProvider, err := provider.NewIncusProvider(options.providerConfig, observerControllerID)
+			if err != nil {
+				return nil, err
+			}
+			visibility, err := incusProvider.ClusterMemberVisibility(ctx)
+			if err != nil {
+				return nil, err
+			}
+			members := make([]fleetobserve.MemberVisibility, 0, len(visibility))
+			for _, member := range visibility {
+				members = append(members, fleetobserve.MemberVisibility{
+					Name: member.Name, Online: member.Online, DrainReason: member.DrainReason,
+				})
+			}
+			return members, nil
+		},
 		Instances: func(ctx context.Context) ([]string, error) {
 			incusProvider, err := provider.NewIncusProvider(options.providerConfig, observerControllerID)
 			if err != nil {

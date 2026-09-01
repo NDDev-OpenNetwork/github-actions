@@ -88,6 +88,19 @@ type JournalSource func(context.Context) (providerjournal.Journal, error)
 type ProviderRetrySource func(time.Time) (providerretry.Snapshot, error)
 type QueueIntentSource func(context.Context) (queueintent.Snapshot, error)
 type InstanceSource func(context.Context) ([]string, error)
+
+// MemberVisibility is one cluster member as the collector needs it: name,
+// availability, and the drain reason its gate publishes when it is held out.
+type MemberVisibility struct {
+	Name        string
+	Online      bool
+	DrainReason string
+}
+
+// MemberSource reports every cluster member with its availability, so a
+// partial instance listing can be attributed to a held-out member instead of
+// being read as an inventory gap.
+type MemberSource func(context.Context) ([]MemberVisibility, error)
 type DiagnosticsSource func(time.Time) (workerdiagnostics.SpoolStats, error)
 type DiagnosticExportSource func() (diagnosticexport.Status, error)
 type ServiceSource func(context.Context, string) (string, error)
@@ -99,6 +112,7 @@ type Collector struct {
 	ProviderRetry      ProviderRetrySource
 	Queue              QueueIntentSource
 	Instances          InstanceSource
+	Members            MemberSource
 	Diagnostics        DiagnosticsSource
 	Export             DiagnosticExportSource
 	Service            ServiceSource
@@ -184,6 +198,11 @@ type Snapshot struct {
 	DiagnosticExportSync DiagnosticExportSync         `json:"diagnostic_export_sync"`
 	Services             []ServiceStatus              `json:"services"`
 	CollectionErrors     []string                     `json:"collection_errors"`
+	// HeldOutMembers are offline cluster members whose published gate reason
+	// carries the drain prefix: maintenance, not an incident. While any member
+	// is held out, inventory gap counts are unattributable and move to their
+	// *_unattributable fields rather than paging.
+	HeldOutMembers []string `json:"held_out_members,omitempty"`
 }
 
 type DiagnosticExportSync struct {
@@ -228,6 +247,7 @@ type QueueSummary struct {
 	OldestQueueAgeSeconds            int64            `json:"oldest_queue_age_seconds"`
 	UncoveredRunning                 int              `json:"uncovered_running"`
 	UncoveredRunningBeyondGrace      int              `json:"uncovered_running_beyond_grace"`
+	UncoveredUnattributable          int              `json:"uncovered_unattributable,omitempty"`
 	OldestUncoveredRunningAgeSeconds int64            `json:"oldest_uncovered_running_age_seconds"`
 	RunningWithoutRunnerIdentity     int              `json:"running_without_runner_identity"`
 	UnboundRepository                int              `json:"unbound_repository"`
@@ -264,8 +284,10 @@ type IncusSummary struct {
 	VisibleInstances            int   `json:"visible_instances"`
 	VisibleMaintenanceInstances int   `json:"visible_maintenance_instances"`
 	OrphanInstances             int   `json:"orphan_instances"`
+	OrphanUnattributable        int   `json:"orphan_unattributable,omitempty"`
 	OrphanInstancesWithinGrace  int   `json:"orphan_instances_within_grace"`
 	MissingInstances            int   `json:"missing_instances"`
+	MissingUnattributable       int   `json:"missing_unattributable,omitempty"`
 	MissingDeletingWithinGrace  int   `json:"missing_deleting_within_grace"`
 	MissingCreatedWithinGrace   int   `json:"missing_created_within_grace"`
 	OldestMissingCreatedAgeSecs int64 `json:"oldest_missing_created_within_grace_age_seconds"`
@@ -303,6 +325,8 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	var queueErr error
 	var instances []string
 	var instancesErr error
+	var members []MemberVisibility
+	var membersErr error
 	var diagnostics workerdiagnostics.SpoolStats
 	var diagnosticsErr error
 	var diagnosticExport diagnosticexport.Status
@@ -312,6 +336,9 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	var group sync.WaitGroup
 	sourceCount := 6
 	if c.Export != nil {
+		sourceCount++
+	}
+	if c.Members != nil {
 		sourceCount++
 	}
 	group.Add(sourceCount + len(requiredServices))
@@ -335,6 +362,12 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		defer group.Done()
 		instances, instancesErr = c.Instances(ctx)
 	}()
+	if c.Members != nil {
+		go func() {
+			defer group.Done()
+			members, membersErr = c.Members(ctx)
+		}()
+	}
 	go func() {
 		defer group.Done()
 		diagnostics, diagnosticsErr = c.Diagnostics(now)
@@ -374,6 +407,32 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				}
 			}
 			snapshot.Pools = append(snapshot.Pools, status)
+		}
+	}
+
+	// A cluster listing is only as complete as the members that answered. An
+	// offline member that published a drain reason is maintenance: its
+	// residents are unobservable by design, so gap arithmetic over this sample
+	// cannot attribute blame and must not page. An offline member WITHOUT a
+	// drain reason is an incident and fails the platform loudly.
+	visibilityDegraded := false
+	if c.Members != nil {
+		if membersErr != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("cluster members", membersErr))
+		} else {
+			for _, member := range members {
+				if member.Online {
+					continue
+				}
+				if member.DrainReason != "" {
+					snapshot.HeldOutMembers = append(snapshot.HeldOutMembers, member.Name)
+					visibilityDegraded = true
+					continue
+				}
+				snapshot.CollectionErrors = append(snapshot.CollectionErrors,
+					"incus: cluster member "+member.Name+" is offline without a drain")
+			}
+			sort.Strings(snapshot.HeldOutMembers)
 		}
 	}
 
@@ -468,6 +527,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 						snapshot.Incus.OrphanInstancesWithinGrace++
 						continue
 					}
+					if visibilityDegraded {
+						snapshot.Incus.OrphanUnattributable++
+						continue
+					}
 					snapshot.Incus.OrphanInstances++
 				}
 				for name, lease := range expectedNames {
@@ -477,6 +540,8 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 							snapshot.Incus.MissingDeletingWithinGrace++
 						} else if createdWithinGrace[name] {
 							snapshot.Incus.MissingCreatedWithinGrace++
+						} else if visibilityDegraded {
+							snapshot.Incus.MissingUnattributable++
 						} else {
 							snapshot.Incus.MissingInstances++
 						}
@@ -526,6 +591,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Journal.OldestCreatedWithoutRunningIdentityAgeSeconds = correlation.OldestCreatedWithoutRunningIdentityAgeSeconds
 		snapshot.Queue.UncoveredRunning = correlation.UncoveredRunning
 		snapshot.Queue.UncoveredRunningBeyondGrace = correlation.UncoveredRunningBeyondGrace
+		if visibilityDegraded {
+			snapshot.Queue.UncoveredUnattributable = snapshot.Queue.UncoveredRunningBeyondGrace
+			snapshot.Queue.UncoveredRunningBeyondGrace = 0
+		}
 		snapshot.Queue.OldestUncoveredRunningAgeSeconds = correlation.OldestUncoveredRunningAgeSeconds
 	}
 	sort.Strings(snapshot.CollectionErrors)
