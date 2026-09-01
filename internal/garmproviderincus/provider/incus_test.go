@@ -1536,3 +1536,89 @@ func TestIncusMemberTelemetryIsBoundedAndNonBlocking(t *testing.T) {
 	require.False(t, setIncusMemberAttribute(span, "gha-runner-1\nforged"))
 	require.False(t, setIncusMemberAttribute(span, strings.Repeat("x", 256)))
 }
+
+// A direct-JIT scale set hands the provider the JIT blob on every create, so a
+// cold worker can be started the way a warm claim is: no cloud-config, the
+// assignment pushed to the path unit once the guest is up. Measured before
+// this change, the cloud-init path cost a cold worker 39 s between create and
+// JobStarted; the warm activation path cost 19 s.
+func TestCreateInstanceDirectJITColdInjectsTheAssignmentInsteadOfCloudInit(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	prepareCreateMocks(cli, testImageDigest)
+	op := new(MockOperation)
+	op.On("WaitContext", mock.Anything).Return(nil).Twice()
+	bootstrap := directJITBootstrap(t)
+	encoded := testEncodedDirectJIT(t)
+
+	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
+	cli.On("CreateInstance", mock.MatchedBy(func(args api.InstancesPost) bool {
+		_, hasUserData := args.Config["user.user-data"]
+		return args.Name == "runner-test-instance" && !hasUserData && args.Config[lifecycleKey] == lifecycleEphemeralOneJob
+	})).Return(op, nil).Once()
+	cli.On("UpdateInstanceState", "runner-test-instance", api.InstanceStatePut{Action: "start", Timeout: -1}, "").Return(op, nil).Once()
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	cli.On("CreateInstanceFile", "runner-test-instance", warmAssignmentPath("runner-test-instance"), mock.MatchedBy(func(args incus.InstanceFileArgs) bool {
+		content, err := io.ReadAll(args.Content)
+		return err == nil && args.UID == 0 && args.GID == 0 && args.Mode == 0o700 &&
+			strings.Contains(string(content), encoded) && strings.Contains(string(content), "--jitconfig") &&
+			!strings.Contains(string(content), bootstrap.InstanceToken) && !strings.Contains(string(content), expectedMetadataURL)
+	})).Return(nil).Once()
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
+		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
+		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
+	).Once()
+
+	got, err := provider.CreateInstance(context.Background(), bootstrap)
+	require.NoError(t, err)
+	require.Equal(t, "runner-test-instance", got.ProviderID)
+	require.Equal(t, commonParams.InstanceRunning, got.Status)
+	cli.AssertNotCalled(t, "CreateInstanceFile", "runner-test-instance", cacheAssignmentPath, mock.Anything)
+	cli.AssertExpectations(t)
+}
+
+// The retry after an ambiguous create finds the worker already running its
+// assignment and adopts it; it must not push a second assignment on top of a
+// runner that has started.
+func TestCreateInstanceDirectJITColdRetryAdoptsAStartedWorkerWithoutReinjecting(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
+		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
+		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
+	).Once()
+
+	got, err := provider.CreateInstance(context.Background(), directJITBootstrap(t))
+	require.NoError(t, err)
+	require.Equal(t, "runner-test-instance", got.ProviderID)
+	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	cli.AssertNotCalled(t, "CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything)
+	cli.AssertExpectations(t)
+}
+
+// The other retry shape: Incus has the instance, but the assignment never
+// reached it. The retry delivers it now instead of leaving a worker that will
+// never start until the scale-set timeout reaps it.
+func TestCreateInstanceDirectJITColdRetryDeliversAMissingAssignment(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	encoded := testEncodedDirectJIT(t)
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(nil, nil, os.ErrNotExist).Once()
+	cli.On("CreateInstanceFile", "runner-test-instance", warmAssignmentPath("runner-test-instance"), mock.MatchedBy(func(args incus.InstanceFileArgs) bool {
+		content, err := io.ReadAll(args.Content)
+		return err == nil && strings.Contains(string(content), encoded)
+	})).Return(nil).Once()
+	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
+		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
+		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
+	).Once()
+
+	got, err := provider.CreateInstance(context.Background(), directJITBootstrap(t))
+	require.NoError(t, err)
+	require.Equal(t, "runner-test-instance", got.ProviderID)
+	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	cli.AssertExpectations(t)
+}

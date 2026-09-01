@@ -406,6 +406,7 @@ func TestWarmCreateArgsContainNoJobOrRegistrationIdentity(t *testing.T) {
 	require.Equal(t, warmPoolIDPrefix+"nddev-linux-standard", args.Config[poolIDKey])
 	require.Empty(t, args.Config[repositoryKey])
 	require.Empty(t, args.Config[garmJobNameKey])
-	require.NotContains(t, args.Config["user.user-data"], "token")
-	require.NotContains(t, args.Config["user.user-data"], "runner")
+	// No cloud-config at all: an empty one made the image's cloud-init unit
+	// fail and restart every five seconds for the life of the warm worker.
+	require.NotContains(t, args.Config, "user.user-data")
 }

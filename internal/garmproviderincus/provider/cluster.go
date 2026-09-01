@@ -81,7 +81,23 @@ func clusterHostState(cli InstanceServerInterface, platform platformconfig.Confi
 		}
 		state, _, err := cli.GetClusterMemberState(member.ServerName)
 		if err != nil {
-			return admission.HostSnapshot{}, fmt.Errorf("read cluster member %q state: %w", member.ServerName, err)
+			// A member whose state cannot be read right now is a member new
+			// work is not placed on, not a reason to refuse the whole fleet.
+			// Incus answered "Failed getting storage pool resources: Not
+			// supported" six times a day for one member while the other three
+			// were open, and each answer became a capacity refusal with the
+			// shared backoff behind it. The member keeps its declared share of
+			// the ledger -- its residents' allocations are still counted -- and
+			// the placement scriptlet, which sees the live gate, decides the
+			// rest.
+			online++
+			snapshot.TotalCPUUnits += platform.Incus.ProjectMaxCPUUnits
+			snapshot.TotalMemoryMiB += platform.Incus.ProjectMaxMemoryMiB
+			snapshot.AvailableMemoryMiB += platform.Incus.ProjectMaxMemoryMiB
+			fallback.TotalCPUUnits += platform.Incus.ProjectMaxCPUUnits
+			fallback.TotalMemoryMiB += platform.Incus.ProjectMaxMemoryMiB
+			fallback.AvailableMemoryMiB += platform.Incus.ProjectMaxMemoryMiB
+			continue
 		}
 		online++
 		memberPressure := pressuregate.State{State: pressuregate.StateOpen}

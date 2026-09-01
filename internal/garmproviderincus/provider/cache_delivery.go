@@ -291,6 +291,18 @@ set -Eeuo pipefail
 set +x
 umask 077
 
+# The cache is an accelerator, never a precondition. Any check below that does
+# not hold means this job runs without a compiler cache -- it does not mean the
+# job fails at "Set up runner" before its first step, which is what happened to
+# twenty-two jobs on 2026-08-30/31 when a provider rollout left the assignment
+# unreadable. Nothing here has exported a credential yet when a check fails, so
+# skipping is exactly as safe as refusing.
+fail_open() {
+  printf '::warning::NDDev one-job cache setup skipped at line %s; continuing without cache\n' "${1:-?}" >&2
+  exit 0
+}
+trap 'fail_open "${LINENO}"' ERR
+
 assignment=/home/runner/.gha-cache/provider-assignment.json
 ready=/home/runner/.gha-cache/provider-assignment.ready
 consumed=/home/runner/.gha-cache/provider-assignment.consumed
@@ -692,7 +704,9 @@ printf '%%s' "${CACHE_ASSIGNMENT_B64}" | base64 --decode | sudo tee %q >/dev/nul
 sudo chown root:root %q
 sudo chmod 0400 %q
 sudo install -o root -g root -m 0400 /dev/null %q
-sudo env NDDEV_CACHE_WAIT_SECONDS=0 /bin/bash "${cache_setup}"
+# A cache that cannot be set up costs this job its cache, not its runner: the
+# assignment goes on to start the runner either way.
+sudo env NDDEV_CACHE_WAIT_SECONDS=0 /bin/bash "${cache_setup}" || printf 'one-job cache setup failed; continuing without cache\n' >&2
 rm -f -- "${cache_setup}"
 trap - EXIT
 `, setupB64, cacheB64, cacheAssignmentDirectory, cacheAssignmentPath,

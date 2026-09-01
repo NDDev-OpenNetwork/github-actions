@@ -393,8 +393,13 @@ func (l *Incus) getWarmCreateArgs(ctx context.Context, flavor, name string) (api
 	if err := validateResolvedWorkerImage(image, imagePolicy); err != nil {
 		return api.InstancesPost{}, err
 	}
+	// No user.user-data on purpose. The image's cloud-init unit treats an
+	// absent key as "nothing to apply" and exits; a cloud-config that installs
+	// nothing made it run every stage, find no runner service, fail, and
+	// restart every five seconds for the life of the instance -- measured on
+	// 2026-09-01 at one core per warm worker, with the restart counter past
+	// twenty on a two-minute-old instance.
 	configMap := map[string]string{
-		"user.user-data":    "#cloud-config\npackage_update: false\npackage_upgrade: false\n",
 		osTypeKeyName:       string(commonParams.Linux),
 		osArchKeyNAme:       string(commonParams.Amd64),
 		controllerIDKeyName: l.controllerID,

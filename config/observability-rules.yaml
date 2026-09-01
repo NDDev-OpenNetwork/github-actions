@@ -381,7 +381,7 @@ rules:
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: Unreclaimable kernel slab exceeds two GiB on a fleet host, by memcg-attributed measurement.
-    action: This watches the root cgroup's attributed slab, not the drifting global counter (github-actions#264 -- the counter overstated truth by ~1 GiB under container churn). A real breach means live kernel objects; preserve slab, audit and AppArmor evidence, then let gha-slab-heal drain and reboot the member.
+    action: This watches the attributed slab of the root cgroup, not the drifting global counter (github-actions#264 -- the counter overstated truth by ~1 GiB under container churn). A real breach means live kernel objects; preserve slab, audit and AppArmor evidence, then let gha-slab-heal drain and reboot the member.
     recovery: Every fleet host remains below two GiB attributed unreclaimable slab after workload churn.
   - id: kernel_workqueue_hog
     severity: ticket

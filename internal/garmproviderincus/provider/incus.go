@@ -1225,6 +1225,130 @@ func (l *Incus) activateWarmInstance(
 	return l.projectGARMInstanceIdentity(ctx, instance, ret)
 }
 
+// startColdDirectJIT hands a freshly launched worker its one-job assignment
+// the way a warm claim receives one, instead of leaving it to cloud-init.
+//
+// Measured on 2026-09-01 over six hours of GARM logs: a cold worker spent a
+// median 39 seconds between the create completing and JobStarted, and inside
+// the guest that was four cloud-init stages, update-ca-certificates with its
+// java triggers and the metadata installer's five round trips -- while a warm
+// claim, activated through the assignment path unit, reached JobStarted in a
+// median 19 seconds. The image already carries the runner, its user, its
+// groups and the warm agent; the cloud-config had nothing left to install and
+// only cost the time. With no user.user-data the image's cloud-init unit exits
+// as soon as it reads the empty key, and the assignment starts the runner the
+// moment the guest network is up.
+func (l *Incus) startColdDirectJIT(
+	ctx context.Context,
+	instanceName string,
+	bootstrap commonParams.BootstrapInstance,
+	encodedJIT string,
+) (commonParams.ProviderInstance, error) {
+	cli, err := l.getCLI(ctx)
+	if err != nil {
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching client")
+	}
+	// The address arrives after systemd-tmpfiles has created the assignment
+	// directory and the guest agent answers, so waiting for it is waiting for
+	// the file push to be accepted.
+	ret, err := l.waitInstanceHasIP(ctx, instanceName)
+	if err != nil {
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "waiting for cold worker network")
+	}
+	cacheAssignment, claimStore, cacheEnabled, err := l.renderCacheClaim(ctx, instanceName, bootstrap)
+	if err != nil {
+		return commonParams.ProviderInstance{}, err
+	}
+	claimCommitted := claimStore != nil
+	defer func() {
+		if claimCommitted {
+			_ = claimStore.Remove(context.Background(), instanceName)
+		}
+	}()
+	defer clear(cacheAssignment)
+	assignment := renderDirectJITWarmAssignment(encodedJIT)
+	if cacheEnabled {
+		assignment = mergeCacheIntoWarmAssignment(assignment, cacheAssignment)
+		if len(assignment) == 0 {
+			return commonParams.ProviderInstance{}, fmt.Errorf("render one-job cold cache assignment")
+		}
+	}
+	defer clear(assignment)
+	if err := l.injectAssignment(ctx, cli, instanceName, warmAssignmentPath(bootstrap.Name), assignment); err != nil {
+		return commonParams.ProviderInstance{}, err
+	}
+	claimCommitted = false
+	if err := l.admission.MarkCreated(ctx, instanceName); err != nil {
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "recording created instance")
+	}
+	if err := l.waitDirectJITAssignmentStarted(ctx, cli, instanceName, bootstrap.Flavor); err != nil {
+		return commonParams.ProviderInstance{}, err
+	}
+	return ret, nil
+}
+
+// injectAssignment pushes the one-job assignment where the warm agent's path
+// unit watches, retrying until the guest agent accepts it. The first address
+// can appear a moment before the agent is ready to take a file, and the same
+// bound the cold cache delivery uses covers a slow Docker-capable boot.
+func (l *Incus) injectAssignment(
+	ctx context.Context,
+	cli InstanceServerInterface,
+	instanceName, path string,
+	content []byte,
+) error {
+	deadline := time.Now().Add(cacheInjectionTimeout)
+	for {
+		err := cli.CreateInstanceFile(instanceName, path, incus.InstanceFileArgs{
+			Content: bytes.NewReader(content), UID: 0, GID: 0, Mode: 0o700, Type: "file", WriteMode: "overwrite",
+		})
+		if err == nil {
+			return nil
+		}
+		instance, _, inspectErr := cli.GetInstanceFull(instanceName)
+		if inspectErr == nil && instance.State != nil && instance.State.Status != "Running" {
+			return fmt.Errorf("inject one-job assignment: instance stopped during canceled create")
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("inject one-job assignment: guest agent did not accept the file within %s: %w", cacheInjectionTimeout, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("inject one-job assignment: %w", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// adoptColdDirectJIT is the retry of startColdDirectJIT. A create that timed
+// out after Incus already had the instance comes back here; the assignment is
+// either running -- the worker is adopted as it stands -- or was never
+// delivered, and is delivered now.
+func (l *Incus) adoptColdDirectJIT(
+	ctx context.Context,
+	bootstrap commonParams.BootstrapInstance,
+	encodedJIT string,
+) (commonParams.ProviderInstance, error) {
+	cli, err := l.getCLI(ctx)
+	if err != nil {
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching client")
+	}
+	content, _, err := cli.GetInstanceFile(bootstrap.Name, directJITPhasePath)
+	switch {
+	case err == nil:
+		_ = content.Close()
+		ret, err := l.waitInstanceHasIP(ctx, bootstrap.Name)
+		if err != nil {
+			return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching existing instance")
+		}
+		return ret, nil
+	case isNotFoundError(err):
+		return l.startColdDirectJIT(ctx, bootstrap.Name, bootstrap, encodedJIT)
+	default:
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "inspecting direct JIT phase evidence")
+	}
+}
+
 func (l *Incus) validateRunnerTool(tool commonParams.RunnerApplicationDownload) error {
 	version := strings.TrimPrefix(l.platform.ControlPlane.RunnerVersion, "v")
 	if version == "" || version == l.platform.ControlPlane.RunnerVersion {
@@ -1415,6 +1539,9 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 				return commonParams.ProviderInstance{}, errors.Wrap(err, "restarting existing instance")
 			}
 		}
+		if extraSpecs.EncodedJITConfig != "" {
+			return l.adoptColdDirectJIT(ctx, bootstrapParams, extraSpecs.EncodedJITConfig)
+		}
 		present, err := l.coldCacheDeliveryPresent(ctx, bootstrapParams.Name, bootstrapParams)
 		if err != nil {
 			return commonParams.ProviderInstance{}, err
@@ -1447,6 +1574,15 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	args, err := l.getCreateInstanceArgs(ctx, bootstrapParams, extraSpecs)
 	if err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching create args")
+	}
+	directJIT := extraSpecs.EncodedJITConfig != ""
+	if directJIT {
+		// A direct-JIT cold worker is handed its one-job assignment through
+		// the same path unit a warm claim uses, so cloud-init has nothing to
+		// install. Leaving the cloud-config out makes the image's cloud-init
+		// unit exit at once instead of spending the boot on four stages, a
+		// certificate rebuild and the metadata installer's round trips.
+		delete(args.Config, "user.user-data")
 	}
 	admissionResult, err := l.admission.Admit(ctx, l.cli, bootstrapParams)
 	if err != nil {
@@ -1495,6 +1631,17 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "creating instance")
 	}
 	span.AddEvent("incus.launch_completed")
+	if directJIT {
+		ret, err := l.startColdDirectJIT(ctx, args.Name, bootstrapParams, extraSpecs.EncodedJITConfig)
+		if err != nil {
+			cleanupContext, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			cleanupErr := l.DeleteInstance(cleanupContext, args.Name)
+			cancel()
+			return commonParams.ProviderInstance{}, errors.Wrapf(err, "direct JIT start failed; cleanup result: %v", cleanupErr)
+		}
+		span.AddEvent("instance.ready")
+		return ret, nil
+	}
 	if err := l.injectColdCacheAssignment(ctx, args.Name, bootstrapParams); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		cleanupErr := l.DeleteInstance(cleanupContext, args.Name)

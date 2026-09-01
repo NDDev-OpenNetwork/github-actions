@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -190,4 +191,32 @@ func TestFleetHostStateAllowsTwoPhaseUpgradeBeforePressurePolicyIsEnabled(t *tes
 	require.NoError(t, err)
 	require.True(t, state.Healthy)
 	require.Equal(t, 6, state.TotalCPUUnits)
+}
+
+// One member's state read failing is that member held out of placement, not
+// the fleet refused. Incus answered "Failed getting storage pool resources:
+// Not supported" for single members several times a day, and every answer had
+// been a capacity refusal that armed the shared backoff behind it.
+func TestFleetHostStateHoldsOutAMemberWhoseStateCannotBeRead(t *testing.T) {
+	cli := &MockIncusServer{}
+	cli.On("GetServer").Return(clusteredServer(), "", nil)
+	cli.On("GetClusterMembers").Return([]api.ClusterMember{
+		pressureMember("example-runner-3", "Online", pressuregate.StateOpen),
+		pressureMember("example-runner-4", "Online", pressuregate.StateOpen),
+	}, nil)
+	cli.On("GetClusterMemberState", "example-runner-3").Return(memberState(16, 10, 1, 200, 100), "", nil)
+	cli.On("GetClusterMemberState", "example-runner-4").Return(
+		(*api.ClusterMemberState)(nil), "", fmt.Errorf("Failed getting storage pool resources \"gha-lvm\": Not supported"))
+
+	platform := clusterPlatform()
+	platform.Incus.ProjectMaxMemoryMiB = 15192
+	state, err := fleetHostState(context.Background(), cli, platform, testPool(), platform.Pressure)
+	require.NoError(t, err)
+	require.True(t, state.Healthy)
+	// Both members keep their declared share of the ledger; the unreadable one
+	// contributes its configured totals rather than a measurement it could not
+	// give, and no pressure sample.
+	require.Equal(t, 12, state.TotalCPUUnits)
+	require.Equal(t, 16*1024+15192, state.TotalMemoryMiB)
+	require.Equal(t, float64(1), state.CPUSomeAvg10)
 }
