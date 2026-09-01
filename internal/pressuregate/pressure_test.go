@@ -46,3 +46,33 @@ func TestParseMetadataFailsClosedOnStaleOrMalformedState(t *testing.T) {
 		t.Fatal("unknown member pressure state was accepted")
 	}
 }
+
+func TestDrainMarkerRoundTrip(t *testing.T) {
+	t.Parallel()
+	statePath := t.TempDir() + "/pressure-gate.json"
+
+	marker, err := ReadDrainMarker(statePath)
+	if err != nil || marker != nil {
+		t.Fatalf("expected no marker on a fresh member, got %#v err=%v", marker, err)
+	}
+	if err := WriteDrainMarker(statePath, "", time.Unix(0, 0)); err == nil {
+		t.Fatal("a marker without a reason must be refused")
+	}
+	if err := WriteDrainMarker(statePath, "image build b22", time.Unix(1, 0).UTC()); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	marker, err = ReadDrainMarker(statePath)
+	if err != nil || marker == nil || marker.Reason != "image build b22" {
+		t.Fatalf("expected the marker back, got %#v err=%v", marker, err)
+	}
+	if err := ClearDrainMarker(statePath); err != nil {
+		t.Fatalf("clear marker: %v", err)
+	}
+	if err := ClearDrainMarker(statePath); err != nil {
+		t.Fatalf("clearing an absent marker must stay idempotent: %v", err)
+	}
+	marker, err = ReadDrainMarker(statePath)
+	if err != nil || marker != nil {
+		t.Fatalf("expected the marker gone, got %#v err=%v", marker, err)
+	}
+}

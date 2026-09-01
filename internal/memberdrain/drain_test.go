@@ -12,6 +12,41 @@ import (
 type fakeClient struct {
 	batches [][]api.Instance
 	calls   int
+	deleted []string
+}
+
+func (f *fakeClient) DeleteInstance(name string) error {
+	f.deleted = append(f.deleted, name)
+	return nil
+}
+
+type fakeMarker struct {
+	reason  string
+	set     int
+	cleared int
+	events  *[]string
+	setErr  error
+}
+
+func (m *fakeMarker) Set(reason string) error {
+	if m.setErr != nil {
+		return m.setErr
+	}
+	m.reason = reason
+	m.set++
+	if m.events != nil {
+		*m.events = append(*m.events, "marker-set")
+	}
+	return nil
+}
+
+func (m *fakeMarker) Clear() error {
+	m.reason = ""
+	m.cleared++
+	if m.events != nil {
+		*m.events = append(*m.events, "marker-clear")
+	}
+	return nil
 }
 
 func (f *fakeClient) GetInstances(api.InstanceType) ([]api.Instance, error) {
@@ -88,13 +123,16 @@ func TestOccupancyCountsOnlyThisMemberAndIgnoresStopped(t *testing.T) {
 	}
 }
 
-func TestDrainStopsTheTimerBeforeClosingTheGate(t *testing.T) {
-	// The publisher reasserts the gate every eleven seconds, so a gate closed
-	// while it is still running is reopened on the next cycle. Order is the
-	// whole correctness of this operation.
+func TestDrainSetsTheMarkerBeforeClosingTheGateAndLeavesTheTimerAlone(t *testing.T) {
+	// The publisher reasserts the gate every eleven seconds and now honours
+	// the marker, so the marker must exist before the close: from that moment
+	// no cycle can reopen the member, and every cycle stays fresh -- which is
+	// what keeps compute_pressure_state_stale quiet for the whole window.
 	var events []string
 	client := &fakeClient{batches: [][]api.Instance{{}}}
+	marker := &fakeMarker{events: &events}
 	deps := Deps{
+		Marker: marker,
 		Client: client,
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
@@ -106,11 +144,56 @@ func TestDrainStopsTheTimerBeforeClosingTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if len(events) != 2 || events[0] != "timer-stop" || events[1] != "gate-close" {
-		t.Fatalf("expected the timer to stop before the gate closed, got %v", events)
+	if len(events) != 2 || events[0] != "marker-set" || events[1] != "gate-close" {
+		t.Fatalf("expected marker-set then gate-close and no timer events, got %v", events)
 	}
-	if !result.Drained || !result.TimerStopped || !result.GateClosed {
+	if marker.reason != "kernel slab reboot" {
+		t.Fatalf("marker carries %q", marker.reason)
+	}
+	if !result.Drained || result.TimerStopped || !result.GateClosed {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestDrainRecyclesWarmOccupantsInsteadOfWaitingForThem(t *testing.T) {
+	// A warm instance holds no job by definition. One held a reboot hostage
+	// for the full forty-five-minute timeout; recycling it costs nothing and
+	// the maintainer refills on an open member.
+	var events []string
+	client := &fakeClient{batches: [][]api.Instance{
+		{
+			instance("warm-nddev-priority-standard-4235eff3bcff", "gha-runner-3", "Running"),
+			instance("worker-a", "gha-runner-3", "Running"),
+		},
+		{},
+	}}
+	clock := time.Unix(0, 0).UTC()
+	deps := Deps{
+		Marker: &fakeMarker{},
+		Client: client,
+		Units:  &fakeUnits{events: &events},
+		Gate:   &fakeGate{events: &events},
+		Now:    func() time.Time { return clock },
+		Sleep: func(_ context.Context, d time.Duration) error {
+			clock = clock.Add(d)
+			return nil
+		},
+	}
+	result, err := Drain(context.Background(), deps, Options{
+		MemberName: "gha-runner-3", Reason: "slab reboot", Apply: true,
+		Poll: 5 * time.Second, Timeout: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(client.deleted) != 1 || client.deleted[0] != "warm-nddev-priority-standard-4235eff3bcff" {
+		t.Fatalf("expected exactly the warm occupant recycled, got %v", client.deleted)
+	}
+	if len(result.RecycledWarm) != 1 {
+		t.Fatalf("recycled warm not reported: %#v", result)
+	}
+	if !result.Drained {
+		t.Fatalf("expected the drain to complete once the real worker left: %#v", result)
 	}
 }
 
@@ -124,6 +207,7 @@ func TestDrainWaitsForRunningWorkToFinish(t *testing.T) {
 	clock := time.Unix(0, 0).UTC()
 	slept := 0
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: client,
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
@@ -159,6 +243,7 @@ func TestDrainTimesOutWithoutEndingAnybodysJob(t *testing.T) {
 	}}
 	clock := time.Unix(0, 0).UTC()
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: client,
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
@@ -196,6 +281,7 @@ func TestDrainWithoutApplyChangesNothing(t *testing.T) {
 		{instance("worker-a", "gha-runner-3", "Running")},
 	}}
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: client,
 		Units:  &fakeUnits{events: &events, active: true},
 		Gate:   &fakeGate{events: &events},
@@ -220,6 +306,7 @@ func TestDrainWithoutApplyChangesNothing(t *testing.T) {
 func TestDrainRequiresAReason(t *testing.T) {
 	var events []string
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: &fakeClient{batches: [][]api.Instance{{}}},
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
@@ -229,24 +316,25 @@ func TestDrainRequiresAReason(t *testing.T) {
 	}
 }
 
-func TestDrainReportsAFailureToStopTheTimerRatherThanClosingAnyway(t *testing.T) {
+func TestDrainReportsAFailureToSetTheMarkerRatherThanClosingAnyway(t *testing.T) {
 	var events []string
 	deps := Deps{
+		Marker: &fakeMarker{events: &events, setErr: errors.New("read-only filesystem")},
 		Client: &fakeClient{batches: [][]api.Instance{{}}},
-		Units:  &fakeUnits{events: &events, stopErr: errors.New("unit not found")},
+		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
 	}
 	_, err := Drain(context.Background(), deps, Options{
 		MemberName: "gha-runner-3", Reason: "slab reboot", Apply: true,
 	})
 	if err == nil {
-		t.Fatal("expected the drain to fail when the timer cannot be stopped")
+		t.Fatal("expected the drain to fail when the marker cannot be written")
 	}
-	// Closing the gate with the publisher still running would read as a drain
-	// and be undone within eleven seconds.
+	// Closing the gate without the marker would be undone by the publisher
+	// within one cycle, which reads as a drain and is not one.
 	for _, event := range events {
 		if event == "gate-close" {
-			t.Fatal("the gate must not be closed when the timer is still running")
+			t.Fatal("the gate must not close without the marker down")
 		}
 	}
 }
@@ -254,6 +342,7 @@ func TestDrainReportsAFailureToStopTheTimerRatherThanClosingAnyway(t *testing.T)
 func TestRestoreRepublishesBeforeStartingTheTimer(t *testing.T) {
 	var events []string
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: &fakeClient{batches: [][]api.Instance{{}}},
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},
@@ -278,6 +367,7 @@ func TestRestoreRepublishesBeforeStartingTheTimer(t *testing.T) {
 func TestPollLongerThanTheTimeoutIsRefused(t *testing.T) {
 	var events []string
 	deps := Deps{
+		Marker: &fakeMarker{},
 		Client: &fakeClient{batches: [][]api.Instance{{}}},
 		Units:  &fakeUnits{events: &events},
 		Gate:   &fakeGate{events: &events},

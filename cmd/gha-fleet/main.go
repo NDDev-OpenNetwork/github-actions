@@ -52,6 +52,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/telemetrymanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/zotcredentials"
 	incusclient "github.com/lxc/incus/v7/client"
+	"github.com/lxc/incus/v7/shared/api"
 )
 
 var (
@@ -1483,6 +1484,19 @@ func runPublishPressure(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	now := time.Now().UTC()
+	// A drained member keeps publishing: the marker turns every cycle into a
+	// fresh force-closed state carrying the drain reason, so the staleness
+	// alert stays quiet through the window and a reboot comes back drained.
+	if *forceClose == "" {
+		marker, markerErr := pressuregate.ReadDrainMarker(*statePath)
+		if markerErr != nil {
+			fmt.Fprintf(stderr, "gha-fleet: %v\n", markerErr)
+			return 1
+		}
+		if marker != nil {
+			*forceClose = "drained: " + marker.Reason
+		}
+	}
 	sample := pressuregate.Sample{ObservedAt: now}
 	if *forceClose == "" {
 		host, collectErr := hostprobe.Collect(context.Background())
@@ -1549,6 +1563,34 @@ func (systemdUnits) IsActive(ctx context.Context, unit string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("systemctl is-active %s: %v: %s", unit, err, state)
+}
+
+// drainMarker persists the drained state beside the gate file, where the
+// publisher reads it on every cycle.
+type drainMarker struct{ statePath string }
+
+func (m drainMarker) Set(reason string) error {
+	return pressuregate.WriteDrainMarker(m.statePath, reason, time.Now().UTC())
+}
+
+func (m drainMarker) Clear() error {
+	return pressuregate.ClearDrainMarker(m.statePath)
+}
+
+// drainClient narrows the Incus client to what a drain may do: list, and
+// delete the jobless warm instances it recycles.
+type drainClient struct{ incus incusclient.InstanceServer }
+
+func (c drainClient) GetInstances(kind api.InstanceType) ([]api.Instance, error) {
+	return c.incus.GetInstances(kind)
+}
+
+func (c drainClient) DeleteInstance(name string) error {
+	op, err := c.incus.DeleteInstance(name)
+	if err != nil {
+		return err
+	}
+	return op.Wait()
 }
 
 // pressureGate closes and reopens the member's gate through the publisher that
@@ -1648,12 +1690,13 @@ func runDrainMember(args []string, stdout, stderr io.Writer) int {
 	// Cluster members are not project-scoped; workers are. The gate is read and
 	// written on the unscoped connection, the occupancy on the worker project.
 	deps := memberdrain.Deps{
-		Client: client.UseProject(cfg.Incus.Project),
+		Client: drainClient{client.UseProject(cfg.Incus.Project)},
 		Units:  systemdUnits{},
 		Gate: pressureGate{
 			client: client, memberName: cfg.Incus.Cluster.MemberName,
 			statePath: *statePath, policy: cfg.Pressure,
 		},
+		Marker: drainMarker{statePath: *statePath},
 	}
 	options := memberdrain.Options{
 		MemberName: cfg.Incus.Cluster.MemberName, Reason: *reason,

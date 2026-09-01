@@ -3,7 +3,10 @@
 package pressuregate
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 )
@@ -263,4 +266,72 @@ func ParseMetadata(values map[string]string, policy Policy, now time.Time) (Stat
 		return State{}, Sample{}, err
 	}
 	return state, sample, nil
+}
+
+// DrainMarker is the durable statement that a member is drained. It lives
+// beside the gate state, the drain writes it, restore removes it, and the
+// publisher honours it on every cycle by publishing a fresh closed gate with
+// this reason -- which is what lets a drain leave the pressure timer running,
+// keeps the staleness alert quiet through maintenance windows, and survives a
+// reboot mid-drain.
+type DrainMarker struct {
+	Reason string    `json:"reason"`
+	Since  time.Time `json:"since"`
+}
+
+// DrainMarkerPath derives the marker location from the gate state path, so
+// every reader and writer agrees without another flag.
+func DrainMarkerPath(statePath string) string {
+	return statePath + ".drain"
+}
+
+// ReadDrainMarker returns the marker if one exists. No marker is (nil, nil):
+// the ordinary, undrained state of a member.
+func ReadDrainMarker(statePath string) (*DrainMarker, error) {
+	raw, err := os.ReadFile(DrainMarkerPath(statePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read drain marker: %w", err)
+	}
+	var marker DrainMarker
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		return nil, fmt.Errorf("decode drain marker: %w", err)
+	}
+	if marker.Reason == "" {
+		return nil, fmt.Errorf("drain marker carries no reason")
+	}
+	return &marker, nil
+}
+
+// WriteDrainMarker records the drain durably before the gate closes, so no
+// publisher cycle can observe a closed gate without knowing why.
+func WriteDrainMarker(statePath, reason string, now time.Time) error {
+	if reason == "" {
+		return fmt.Errorf("a drain marker requires a reason")
+	}
+	raw, err := json.Marshal(DrainMarker{Reason: reason, Since: now.UTC()})
+	if err != nil {
+		return fmt.Errorf("encode drain marker: %w", err)
+	}
+	path := DrainMarkerPath(statePath)
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write drain marker: %w", err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		return fmt.Errorf("publish drain marker: %w", err)
+	}
+	return nil
+}
+
+// ClearDrainMarker removes the marker; a member that was never drained is not
+// an error, so restore stays idempotent.
+func ClearDrainMarker(statePath string) error {
+	err := os.Remove(DrainMarkerPath(statePath))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear drain marker: %w", err)
+	}
+	return nil
 }
