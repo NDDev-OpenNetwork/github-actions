@@ -2,6 +2,7 @@ package observabilityrules
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 )
 
@@ -9,6 +10,7 @@ type OpenObserveBundle struct {
 	SchemaVersion int                `json:"schema_version"`
 	Organization  string             `json:"organization"`
 	Destination   string             `json:"destination"`
+	Notification  *Notification      `json:"notification,omitempty"`
 	Alerts        []OpenObserveAlert `json:"alerts"`
 }
 
@@ -68,6 +70,7 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 		SchemaVersion: 1,
 		Organization:  bundle.Organization,
 		Destination:   destination,
+		Notification:  bundle.Notification,
 		Alerts:        make([]OpenObserveAlert, 0, len(bundle.Rules)),
 	}
 	for _, rule := range bundle.Rules {
@@ -116,6 +119,15 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 				PromQLCondition: &OpenObserveValueCondition{
 					Column: "value", Operator: rule.Operator, Value: rule.Threshold,
 				},
+				// Multi-alert turns each returned series into its own
+				// notification carrying that series' labels. Without it the
+				// backend renders one message from the first row, which is
+				// worse than naming nobody: it names one host arbitrarily.
+				//
+				// Derived from the expression rather than declared beside it.
+				// A second field would be one more thing to keep in sync, and
+				// the expression already says whether a subject survives.
+				PromQLMultiAlert: namesASubject(promQL),
 			}
 			// OpenObserve defines threshold as a PromQL series-coverage gate,
 			// not a consecutive-evaluation counter. Sustained time semantics
@@ -151,6 +163,28 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 	}
 	sort.Slice(result.Alerts, func(i, j int) bool { return result.Alerts[i].Name < result.Alerts[j].Name })
 	return result, nil
+}
+
+// PromQL aggregation operators, which drop every label unless the expression
+// keeps some with `by`. Range functions such as `max_over_time` are not in this
+// set: they are applied per series and preserve labels.
+var aggregationOperator = regexp.MustCompile(
+	`\b(sum|min|max|avg|count|count_values|group|stddev|stdvar|topk|bottomk|quantile)\s*\(`,
+)
+
+var keepsLabels = regexp.MustCompile(`\bby\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*`)
+
+// namesASubject reports whether the expression returns one series per subject
+// rather than a single collapsed number. An aggregation with no `by` clause
+// collapses the fleet into one value, so there is nothing to name and one
+// notification is correct. Anything else -- an aggregation that keeps a label,
+// or a selector that was never aggregated -- carries the labels that say which
+// host, scale set or error class the alert is about.
+func namesASubject(promQL string) bool {
+	if keepsLabels.MatchString(promQL) {
+		return true
+	}
+	return !aggregationOperator.MatchString(promQL)
 }
 
 func sustainedPromQL(rule Rule) (string, error) {

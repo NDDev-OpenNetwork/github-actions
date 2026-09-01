@@ -299,8 +299,22 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 	if strings.Contains(burn.Expression, "or vector(") {
 		t.Errorf("the ticket relies on an or-fallthrough this backend does not evaluate: %q", burn.Expression)
 	}
-	if !strings.Contains(burn.Expression, "* (max(") {
-		t.Errorf("the ticket does not gate its own value to zero above the page threshold: %q", burn.Expression)
+	// The gate is a bool-modified product of the rule's own series with itself,
+	// so above the page threshold the ticket evaluates to zero rather than to
+	// an empty result. Checked structurally rather than by pinning the literal
+	// "* (max(": the aggregation now keeps `by (scale_set)` so the message can
+	// say which scale set is waiting, and a textual pin turned that into a
+	// failure about a form instead of about the invariant.
+	factor, gate, split := strings.Cut(burn.Expression, " * (")
+	if !split || !strings.HasSuffix(strings.TrimSpace(gate), ")") {
+		t.Fatalf("the ticket is not a bool-modified product: %q", burn.Expression)
+	}
+	masked, _, hasBound := strings.Cut(gate, " < bool ")
+	if !hasBound {
+		t.Fatalf("the ticket product has no bool bound: %q", burn.Expression)
+	}
+	if strings.TrimSpace(factor) != strings.TrimSpace(masked) {
+		t.Errorf("the ticket gates a different series than it reports: %q against %q", factor, masked)
 	}
 }
 

@@ -1,6 +1,7 @@
 package observabilityrules
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -21,7 +22,44 @@ type Bundle struct {
 	SchemaVersion int    `json:"schema_version" yaml:"schema_version"`
 	Backend       string `json:"backend" yaml:"backend"`
 	Organization  string `json:"organization" yaml:"organization"`
-	Rules         []Rule `json:"rules" yaml:"rules"`
+	// Notification is the message body the backend renders when a rule fires.
+	// It is optional here and supplied by an overlay, because the body is
+	// destination-shaped: for Telegram it carries the chat id, which is
+	// corporate topology and may not live in a public module. The engine
+	// defines the contract; the estate supplies the envelope.
+	//
+	// It exists at all because the live template was created by hand and never
+	// tracked, so it kept saying `Condition: 1 >= 1` -- a message with no
+	// subject, no observed value and no link -- while every rule was already
+	// shipping its action, runbook and severity to the backend as context
+	// attributes that nothing rendered.
+	Notification *Notification `json:"notification,omitempty" yaml:"notification,omitempty"`
+	Rules        []Rule        `json:"rules" yaml:"rules"`
+}
+
+type Notification struct {
+	Template string `json:"template" yaml:"template"`
+	Body     string `json:"body" yaml:"body"`
+}
+
+func (n Notification) Validate() error {
+	if !idPattern.MatchString(n.Template) {
+		return fmt.Errorf("notification template identity is invalid")
+	}
+	if len(n.Body) < 32 || len(n.Body) > 4096 {
+		return fmt.Errorf("notification body length is invalid")
+	}
+	// The body is posted verbatim as the request payload. A body that is not
+	// valid JSON is rejected by the destination for every alert, silently, so
+	// it is checked here rather than discovered as an alert that never arrives.
+	if !json.Valid([]byte(n.Body)) {
+		return fmt.Errorf("notification body is not valid JSON")
+	}
+	// A message that cannot say which alert fired is the failure this replaced.
+	if !strings.Contains(n.Body, "{alert_name}") {
+		return fmt.Errorf("notification body must name the alert")
+	}
+	return nil
 }
 
 type Rule struct {
@@ -119,10 +157,19 @@ func (b Bundle) Merge(overlay Bundle) (Bundle, error) {
 	for _, rule := range b.Rules {
 		seen[rule.ID] = struct{}{}
 	}
+	notification := b.Notification
+	if overlay.Notification != nil {
+		// Same rule as an id collision: an overlay adds, it never redefines.
+		if notification != nil {
+			return Bundle{}, fmt.Errorf("overlay notification collides with the base notification")
+		}
+		notification = overlay.Notification
+	}
 	merged := Bundle{
 		SchemaVersion: b.SchemaVersion,
 		Backend:       b.Backend,
 		Organization:  b.Organization,
+		Notification:  notification,
 		Rules:         append(append([]Rule{}, b.Rules...), overlay.Rules...),
 	}
 	for _, rule := range overlay.Rules {
@@ -144,6 +191,11 @@ func (b Bundle) Validate() error {
 	}
 	if len(b.Rules) < 1 || len(b.Rules) > 64 {
 		return fmt.Errorf("observability bundle rule count is invalid")
+	}
+	if b.Notification != nil {
+		if err := b.Notification.Validate(); err != nil {
+			return fmt.Errorf("notification: %w", err)
+		}
 	}
 	ids := make([]string, 0, len(b.Rules))
 	seen := make(map[string]struct{}, len(b.Rules))

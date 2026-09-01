@@ -10,8 +10,19 @@ remote-write path or second metric store is part of the product.
 
 `config/observability-rules.yaml` is the canonical rule source. Each rule names
 one real OpenObserve metric stream for API ownership and keeps its PromQL
-expression separate from the comparison operator and threshold. Render the
-exact v0.92 API payload with:
+expression separate from the comparison operator and threshold.
+
+**A rule expression keeps the label that identifies its subject.** `max by
+(host_name) (...)`, not `max(...)`; `by (scale_set)` for the queue rules and
+`by (error_class)` for provider retries. The renderer reads the expression and
+turns each returned series into its own notification carrying that series'
+labels, so the message can say *which* host, scale set or error class. An
+expression that collapses the fleet into one number is correct only when the
+number is the point — a ratio, a count of live observers, a sum across
+different metrics — and there are five such rules. The rest name a subject, and
+`TestShippedRulesCarryTheirSubject` fails if that stops being true.
+
+Render the exact v0.92 API payload with:
 
 ```bash
 gha-fleet render-openobserve-alerts \
