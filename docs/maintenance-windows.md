@@ -61,7 +61,15 @@ socket every ~11 seconds. Two consequences, both observed:
 ## The slab healer
 
 `gha-slab-heal.timer` (hourly, per member) runs `gha-fleet slab-heal --apply`:
-heal only above the alert's own SUnreclaim budget, only with an open gate
+heal only above the alert's own SUnreclaim budget — measured as the root
+cgroup's **memcg-attributed** `slab_unreclaimable` when cgroup v2 exposes
+it, because the global `/proc/meminfo` counter drifts under container churn
+(a member showed 1041 MiB there against 44 MiB of attributed truth on
+2026-09-01, the gap unattributable to any live cache and immune to
+drop_caches and slab shrink; github-actions#264). Both views ship as host
+gauges (`…slab_unreclaimable_counter_bytes` / `…_attributed_bytes`) and the
+`kernel_slab_unreclaimable` alert watches the attributed one. Then: only
+with an open gate
 (a closed gate belongs to its operator), only when every other member is
 open, only on a jobless member, only outside a twelve-hour cooldown. The heal
 drains through the marker, records the cooldown, and reboots only after the

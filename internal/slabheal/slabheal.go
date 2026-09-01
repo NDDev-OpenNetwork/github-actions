@@ -63,6 +63,39 @@ func Decide(facts Facts) Decision {
 	return Decision{Heal: true, Reason: fmt.Sprintf("SUnreclaim %d exceeds the %d budget on a quiet open member", facts.SUnreclaimBytes, facts.ThresholdBytes)}
 }
 
+// PreferAttributed picks the measurement the guard should act on. The
+// global meminfo counter drifts under container churn (measured 1041 MiB
+// against a 44 MiB memcg-attributed truth on 2026-09-01, the gap
+// unattributable to any live cache), so when the root cgroup exposes
+// slab_unreclaimable that attributed value wins; the counter remains the
+// fallback for hosts without cgroup v2 memory accounting.
+func PreferAttributed(attributed uint64, attributedOK bool, counter uint64) (uint64, string) {
+	if attributedOK {
+		return attributed, "memcg-attributed"
+	}
+	return counter, "meminfo-counter"
+}
+
+// ParseAttributedSlabUnreclaimable reads slab_unreclaimable (bytes) from
+// cgroup v2 memory.stat content.
+func ParseAttributedSlabUnreclaimable(reader io.Reader) (uint64, error) {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 2 && fields[0] == "slab_unreclaimable" {
+			value, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("malformed slab_unreclaimable value %q", fields[1])
+			}
+			return value, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("memory.stat has no slab_unreclaimable line")
+}
+
 // ParseSUnreclaim reads SUnreclaim from /proc/meminfo content.
 func ParseSUnreclaim(reader io.Reader) (uint64, error) {
 	scanner := bufio.NewScanner(reader)

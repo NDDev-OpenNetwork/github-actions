@@ -1816,12 +1816,20 @@ func runSlabHeal(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
 		return 1
 	}
-	sunreclaim, err := slabheal.ParseSUnreclaim(meminfo)
+	counter, err := slabheal.ParseSUnreclaim(meminfo)
 	meminfo.Close()
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: slab-heal: %v\n", err)
 		return 1
 	}
+	attributed, attributedOK := uint64(0), false
+	if stat, statErr := os.Open("/sys/fs/cgroup/memory.stat"); statErr == nil {
+		if value, parseErr := slabheal.ParseAttributedSlabUnreclaimable(stat); parseErr == nil {
+			attributed, attributedOK = value, true
+		}
+		stat.Close()
+	}
+	sunreclaim, slabSource := slabheal.PreferAttributed(attributed, attributedOK, counter)
 	members, err := client.GetClusterMembers()
 	if err != nil {
 		fmt.Fprintf(stderr, "gha-fleet: slab-heal: read cluster members: %v\n", err)
@@ -1870,7 +1878,7 @@ func runSlabHeal(args []string, stdout, stderr io.Writer) int {
 			"reason": decision.Reason, "sunreclaim_bytes": sunreclaim,
 		})
 	}
-	reason := fmt.Sprintf("%sSUnreclaim %.1f GiB over the %.1f GiB budget", slabheal.HealReasonPrefix, float64(sunreclaim)/(1<<30), float64(*thresholdBytes)/(1<<30))
+	reason := fmt.Sprintf("%sSUnreclaim %.1f GiB (%s) over the %.1f GiB budget", slabheal.HealReasonPrefix, float64(sunreclaim)/(1<<30), slabSource, float64(*thresholdBytes)/(1<<30))
 	result, err := memberdrain.Drain(ctx, deps, memberdrain.Options{
 		MemberName: cfg.Incus.Cluster.MemberName, Reason: reason,
 		TimerUnit: *timerUnit, Timeout: *timeout, Poll: *poll, Apply: true,

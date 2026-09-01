@@ -24,13 +24,34 @@ type Compliance struct {
 	StandardUpdatesAvailable    int
 	ESMSecurityUpdatesAvailable int
 	PackageInventoryAgeSeconds  float64
+	// Two views of unreclaimable slab, exported side by side because the
+	// global /proc/meminfo counter drifts: on 2026-09-01 a member reported
+	// 1041 MiB there while the memcg-attributed truth was 44 MiB, the gap
+	// unattributable to any live cache and immune to drop_caches and slab
+	// shrink -- a kernel accounting leak under container churn, not memory.
+	// -1 means the reading was unavailable.
+	SlabUnreclaimableCounterBytes    float64
+	SlabUnreclaimableAttributedBytes float64
 }
 
 func CollectCompliance(root string, now time.Time) Compliance {
 	if root == "" {
 		root = "/"
 	}
-	result := Compliance{PackageInventoryAgeSeconds: -1, SRSOStatus: "unknown"}
+	result := Compliance{
+		PackageInventoryAgeSeconds: -1, SRSOStatus: "unknown",
+		SlabUnreclaimableCounterBytes: -1, SlabUnreclaimableAttributedBytes: -1,
+	}
+	if meminfo, err := os.ReadFile(filepath.Join(root, "proc", "meminfo")); err == nil {
+		if value, ok := memoryField(string(meminfo), "SUnreclaim:", 1024); ok {
+			result.SlabUnreclaimableCounterBytes = value
+		}
+	}
+	if stat, err := os.ReadFile(filepath.Join(root, "sys", "fs", "cgroup", "memory.stat")); err == nil {
+		if value, ok := memoryField(string(stat), "slab_unreclaimable", 1); ok {
+			result.SlabUnreclaimableAttributedBytes = value
+		}
+	}
 	result.RebootRequired = regularFileExists(filepath.Join(root, "var", "run", "reboot-required"))
 
 	kernel, kernelErr := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"))
@@ -85,9 +106,28 @@ func RenderCompliance(state Compliance) string {
 	gauge("gha_fleet_host_standard_updates_available", "Standard Ubuntu package updates currently available.", float64(state.StandardUpdatesAvailable))
 	gauge("gha_fleet_host_esm_security_updates_available", "Additional security updates available only through Ubuntu ESM Apps.", float64(state.ESMSecurityUpdatesAvailable))
 	gauge("gha_fleet_host_package_inventory_age_seconds", "Age of the update-notifier package inventory, or -1 when unavailable.", state.PackageInventoryAgeSeconds)
+	gauge("gha_fleet_host_slab_unreclaimable_counter_bytes", "Unreclaimable slab as the drifting global /proc/meminfo counter reports it, or -1 when unavailable.", state.SlabUnreclaimableCounterBytes)
+	gauge("gha_fleet_host_slab_unreclaimable_attributed_bytes", "Unreclaimable slab as the root cgroup memory.stat attributes it -- the truthful view, or -1 when unavailable.", state.SlabUnreclaimableAttributedBytes)
 	fmt.Fprintf(&output, "# HELP gha_fleet_host_kernel_info Running host kernel identity.\n# TYPE gha_fleet_host_kernel_info gauge\ngha_fleet_host_kernel_info{release=%q} 1\n", escapeLabel(state.KernelRelease))
 	fmt.Fprintf(&output, "# HELP gha_fleet_host_srso_status Speculative return stack overflow status reported by the running kernel.\n# TYPE gha_fleet_host_srso_status gauge\ngha_fleet_host_srso_status{status=%q} 1\n", escapeLabel(state.SRSOStatus))
 	return output.String()
+}
+
+// memoryField finds "<key> <number>" in meminfo/memory.stat content and
+// scales it to bytes (meminfo counts KiB, memory.stat counts bytes).
+func memoryField(content, key string, scale float64) (float64, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != key {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			return 0, false
+		}
+		return value * scale, true
+	}
+	return 0, false
 }
 
 func classifySRSO(value string) string {

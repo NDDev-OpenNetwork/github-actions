@@ -364,7 +364,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: system_memory_usage
-    expression: max(system_memory_usage{service_namespace="nddev-github-actions",state="slab_unreclaimable"})
+    expression: max(gha_fleet_host_slab_unreclaimable_attributed_bytes)
     operator: ">"
     threshold: 2147483648
     evaluation_seconds: 300
@@ -380,9 +380,9 @@ rules:
     enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: Unreclaimable kernel slab exceeds two GiB on a fleet host.
-    action: Preserve slab, audit and AppArmor evidence; close member admission and roll to the fixed kernel after jobs drain.
-    recovery: Every fleet host remains below two GiB unreclaimable slab after workload churn.
+    summary: Unreclaimable kernel slab exceeds two GiB on a fleet host, by memcg-attributed measurement.
+    action: This watches the root cgroup's attributed slab, not the drifting global counter (github-actions#264 -- the counter overstated truth by ~1 GiB under container churn). A real breach means live kernel objects; preserve slab, audit and AppArmor evidence, then let gha-slab-heal drain and reboot the member.
+    recovery: Every fleet host remains below two GiB attributed unreclaimable slab after workload churn.
   - id: kernel_workqueue_hog
     severity: ticket
     query_language: promql

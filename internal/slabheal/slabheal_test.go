@@ -52,3 +52,33 @@ func TestParseSUnreclaim(t *testing.T) {
 		t.Fatal("missing SUnreclaim line was accepted")
 	}
 }
+
+func TestParseAttributedSlabUnreclaimable(t *testing.T) {
+	t.Parallel()
+	value, err := ParseAttributedSlabUnreclaimable(strings.NewReader(
+		"anon 135168\nslab_reclaimable 766643200\nslab_unreclaimable 46323712\nslab 812966912\n",
+	))
+	if err != nil || value != 46323712 {
+		t.Fatalf("value=%d err=%v", value, err)
+	}
+	if _, err := ParseAttributedSlabUnreclaimable(strings.NewReader("anon 1\n")); err == nil {
+		t.Fatal("missing slab_unreclaimable line must error")
+	}
+	if _, err := ParseAttributedSlabUnreclaimable(strings.NewReader("slab_unreclaimable x\n")); err == nil {
+		t.Fatal("malformed value must error")
+	}
+}
+
+// The guard must act on the memcg-attributed truth when the kernel exposes
+// it: the global counter overstated a member by ~1 GiB on 2026-09-01.
+func TestPreferAttributedPicksTruthOverTheDriftingCounter(t *testing.T) {
+	t.Parallel()
+	value, source := PreferAttributed(46323712, true, 1091696640)
+	if value != 46323712 || source != "memcg-attributed" {
+		t.Fatalf("value=%d source=%s", value, source)
+	}
+	value, source = PreferAttributed(0, false, 1091696640)
+	if value != 1091696640 || source != "meminfo-counter" {
+		t.Fatalf("fallback value=%d source=%s", value, source)
+	}
+}
