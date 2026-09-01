@@ -105,6 +105,19 @@ func clusterHostState(cli InstanceServerInterface, platform platformconfig.Confi
 			fallback.FreeDiskPercent = memberDisk
 		}
 		if pressureErr != nil || memberPressure.State != pressuregate.StateOpen {
+			// A closed gate stops NEW placement on this member; it does not
+			// shrink the fleet's capacity ledger. Its residents keep their
+			// allocations counted (allocations carry no member identity), so
+			// excluding the member's totals made the ledger asymmetric: under
+			// a partial-pressure burst the fleet read as 20 GiB over-allocated
+			// while an open member had 14 GiB free, and warm could never build
+			// exactly when it was most valuable. Totals count every online
+			// member; the pressure samples below stay open-member-only because
+			// they are the live stop, and the placement scriptlet still
+			// enforces the closed gate per member.
+			snapshot.TotalCPUUnits += platform.Incus.ProjectMaxCPUUnits
+			snapshot.TotalMemoryMiB += memberMemoryMiB
+			snapshot.AvailableMemoryMiB += memberMemoryMiB
 			continue
 		}
 		eligible++

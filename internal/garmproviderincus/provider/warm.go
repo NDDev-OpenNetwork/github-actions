@@ -279,6 +279,13 @@ func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, con
 		return "", false, nil, err
 	}
 	if err = l.launchInstance(ctx, args); err != nil {
+		if isPlacementRefusal(err) {
+			// The scriptlet is the per-member truth and fleet-level admission
+			// is the ledger; when they disagree under load, the member that
+			// had ledger room lacked live room. That is a capacity deferral,
+			// not a failed reconcile.
+			return "", false, &admission.Decision{Admitted: false, Reason: admission.ReasonPlacementRefused, Pool: flavor}, nil
+		}
 		return "", false, nil, errors.Wrap(err, "launching warm instance")
 	}
 	created = true
@@ -303,7 +310,26 @@ func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, con
 }
 
 func warmInstanceRetiredDuringCreate(err error) bool {
-	return isNotFoundError(err)
+	if isNotFoundError(err) {
+		return true
+	}
+	// The network and readiness waits wrap their retries, and a claim or
+	// preemption can delete the instance mid-wait: the not-found cause then
+	// hides inside "attempt count exceeded: fetching instance: ...". A warm
+	// instance that vanished during create was consumed by useful concurrent
+	// work, whatever the wrapper says.
+	return err != nil && strings.Contains(err.Error(), "Instance not found")
+}
+
+// isPlacementRefusal recognizes the scriptlet's per-member capacity refusal
+// inside a create error.
+func isPlacementRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "Failed instance placement scriptlet") ||
+		strings.Contains(message, "no fleet member has room")
 }
 
 func (l *Incus) waitWarmReady(ctx context.Context, name, flavor string, pollInterval time.Duration) error {
@@ -406,6 +432,13 @@ func (l *Incus) getWarmCreateArgs(ctx context.Context, flavor, name string) (api
 
 func (l *Incus) promoteWarmReady(ctx context.Context, name, flavor string) (bool, error) {
 	instance, etag, err := l.cli.GetInstanceFull(name)
+	if err != nil && !isNotFoundError(err) {
+		// A booting instance can answer one poll with a transient parse-level
+		// error from the state endpoint ("Invalid PID"). One bounded retry
+		// separates that blink from a real failure.
+		time.Sleep(2 * time.Second)
+		instance, etag, err = l.cli.GetInstanceFull(name)
+	}
 	if err != nil {
 		return false, errors.Wrap(err, "fetching preparing warm instance")
 	}
