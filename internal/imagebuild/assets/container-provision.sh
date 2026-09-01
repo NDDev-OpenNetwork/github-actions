@@ -34,15 +34,22 @@ for attempt in $(seq 1 30); do
 done
 curl --fail --silent --unix-socket /dev/lxd/sock http://localhost/1.0 >/dev/null
 user_data="$(curl --silent --unix-socket /dev/lxd/sock http://localhost/1.0/config/user.user-data || true)"
+# No cloud-config means nothing to apply: a direct-JIT one-job worker and a
+# warm worker are started by the assignment the warm agent watches for, and
+# the runner is already on the image. Running the four cloud-init stages
+# anyway cost every such boot about eight seconds of CPU it did not have
+# (measured on a live worker, 2026-09-01), and a warm worker paid it again
+# every five seconds because the unit then failed on the runner service it
+# had no reason to expect.
+if [[ "${user_data}" == "not found" ]]; then
+  exit 0
+fi
 cloud-init clean --logs
 cloud-init init --local
 cloud-init init
 cloud-init modules --mode=config
 cloud-init modules --mode=final
 if ! compgen -G '/etc/systemd/system/actions.runner.*.service' >/dev/null; then
-  if [[ "${user_data}" == "not found" ]]; then
-    exit 0
-  fi
   echo "cloud-init completed without installing the one-job runner service" >&2
   exit 1
 fi
