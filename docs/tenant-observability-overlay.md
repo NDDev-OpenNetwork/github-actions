@@ -55,7 +55,11 @@ behind this rule.
 
 ### anton_healthcheck_problem
 
-Healthcheck lines in `anton_logs` (requests to `/health`) stopped returning
-`200 OK`. The tenant application answered its own healthcheck with an error,
-or the container logging them is restarting. Check the tenant application's
-containers; healthchecks returning `200 OK` again clears the condition.
+A healthcheck request line in `anton_logs` answered with a 4xx or 5xx. The
+stream carries two producers with different access-log formats — the backend
+writes `... HTTP/1.1" 200 OK`, nginx writes `... HTTP/2.0" 200 109` — so the
+predicate matches the status code after the HTTP-version quote, which both
+formats share. (The first version tested for the absence of `200 OK` and
+false-fired on a healthy nginx 200; the current form was proven on live data
+in both directions before deployment.) Check the tenant application's
+containers; healthchecks answering 2xx again clears the condition.
