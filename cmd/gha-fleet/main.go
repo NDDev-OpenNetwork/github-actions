@@ -38,6 +38,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplan"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/incusreconcile"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/joblifecycle"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/memberdrain"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilitydashboards"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/observabilityrules"
@@ -115,6 +116,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRenderOpenObserveAlerts(args[1:], stdout, stderr)
 	case "reconcile-openobserve-alerts":
 		return runReconcileOpenObserveAlerts(args[1:], stdout, stderr)
+	case "export-job-lifecycle":
+		return runExportJobLifecycle(args[1:], stdout, stderr)
 	case "reconcile-zot-credentials":
 		return runReconcileZotCredentials(args[1:], stdout, stderr)
 	case "reconcile-rustfs-cache":
@@ -1118,6 +1121,77 @@ func runValidateCache(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runExportJobLifecycle samples the queue journal and says every transition
+// once into the gha_fleet_job_lifecycle stream. Watermarks advance only after
+// a successful delivery, so a failed export retries the same records.
+func runExportJobLifecycle(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("export-job-lifecycle", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	journalPath := flags.String("journal", "", "exact queue intents journal path")
+	statePath := flags.String("state-path", "/var/lib/gha-fleet/job-lifecycle-export.json", "private export watermark state")
+	endpoint := flags.String("endpoint", "", "OpenObserve HTTP(S) origin")
+	usernameFile := flags.String("username-file", "", "absolute file containing only the OpenObserve username")
+	passwordFile := flags.String("password-file", "", "absolute file containing only the OpenObserve password")
+	apply := flags.Bool("apply", false, "deliver the records and advance the watermarks")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *journalPath == "" {
+		fmt.Fprintln(stderr, "gha-fleet: export-job-lifecycle requires --journal and no positional arguments")
+		return 2
+	}
+	journal, err := joblifecycle.ReadJournal(*journalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	marks, err := joblifecycle.ReadWatermarks(*statePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	records, next := joblifecycle.Diff(marks, journal, time.Now().UTC())
+	if !*apply {
+		return writeJSONOrFail(stdout, stderr, map[string]any{
+			"schema_version": 1, "stream": joblifecycle.StreamName,
+			"pending_records": records, "applied": false,
+		})
+	}
+	if *endpoint == "" || *usernameFile == "" || *passwordFile == "" {
+		fmt.Fprintln(stderr, "gha-fleet: export-job-lifecycle --apply requires --endpoint, --username-file, and --password-file")
+		return 2
+	}
+	username, err := readOpenObserveCredential(*usernameFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve username: %v\n", err)
+		return 1
+	}
+	password, err := readOpenObserveCredential(*passwordFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: read OpenObserve password: %v\n", err)
+		return 1
+	}
+	exporter, err := joblifecycle.NewExporter(*endpoint, username, password)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := exporter.Export(ctx, records); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	if err := joblifecycle.WriteWatermarks(*statePath, next); err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	return writeJSONOrFail(stdout, stderr, map[string]any{
+		"schema_version": 1, "stream": joblifecycle.StreamName,
+		"exported_records": len(records), "applied": true,
+	})
+}
+
 func runReconcileZotCredentials(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("reconcile-zot-credentials", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -2108,5 +2182,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|render|admit|preflight|publish-pressure|drain-member|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|export-job-lifecycle|render|admit|preflight|publish-pressure|drain-member|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
 }
