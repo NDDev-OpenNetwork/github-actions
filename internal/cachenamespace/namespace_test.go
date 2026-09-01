@@ -101,3 +101,16 @@ func TestCounterpartIsNeverTheClassItself(t *testing.T) {
 		t.Fatal("an unknown class was given a counterpart")
 	}
 }
+
+func TestBuildcacheRepositoryCarriesTheTrustClass(t *testing.T) {
+	got, err := BuildcacheRepositoryFor("example-org/example-actions", Trusted)
+	if err != nil || got != "buildcache/example-org/example-actions/trusted" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+	if _, err := BuildcacheRepositoryFor("example-org/example-actions", TrustClass("nope")); err == nil {
+		t.Fatal("unknown trust class was accepted")
+	}
+	if _, err := BuildcacheRepositoryFor("no-slash", Trusted); err == nil {
+		t.Fatal("malformed repository was accepted")
+	}
+}

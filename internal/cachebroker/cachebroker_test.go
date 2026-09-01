@@ -631,3 +631,119 @@ func TestLogTextCannotForgeALogLine(t *testing.T) {
 		t.Fatal("logText altered an ordinary value")
 	}
 }
+
+func TestClaimDeliversBuildcacheCredentialWhenProvisioned(t *testing.T) {
+	directory := t.TempDir()
+	write := func(name, value string) string {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte(value+"\n"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	ca := write("ca.pem", "-----BEGIN CERTIFICATE-----\nZXhhbXBsZQ==\n-----END CERTIFICATE-----")
+	access := write("access", "AKIA0123456789ABCDEF")
+	secret := write("secret", strings.Repeat("a", 64))
+	buildcacheUser := write("bc-user", "gha-zot-example-org-example-actions-buildcache-trusted")
+	buildcachePass := write("bc-pass", strings.Repeat("b", 64))
+	config := Config{SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", Bucket: "github-actions-cache", CAFile: ca, JournalFile: filepath.Join(directory, "claims.json"), JournalLock: filepath.Join(directory, "claims.lock"),
+		BuildcacheRegistry: "https://192.0.2.1:5001",
+		Repositories: []Repository{{Name: "example-org/example-actions", Roles: []Identity{
+			{Role: "trusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/trusted", AccessKeyFile: access, SecretKeyFile: secret, BuildcacheUsernameFile: buildcacheUser, BuildcachePasswordFile: buildcachePass},
+			{Role: "untrusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/untrusted", AccessKeyFile: access, SecretKeyFile: secret},
+			{Role: "release-reader", Mode: "read-only", Prefix: "example-org/example-actions/trust/promoted", AccessKeyFile: access, SecretKeyFile: secret},
+		}}}}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	store := Store{Path: config.JournalFile, LockPath: config.JournalLock}
+	token := bytes.Repeat([]byte{7}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "runner-buildcache", "example-standard", "trusted-writer", token); err != nil {
+		t.Fatal(err)
+	}
+	requestBody, _ := json.Marshal(ClaimRequest{InstanceName: "runner-buildcache", RunnerName: "runner-buildcache", Repository: "example-org/example-actions", Token: base64.RawURLEncoding.EncodeToString(token)})
+	handler := Handler{Config: config, Store: store, Logger: slog.New(slog.NewJSONHandler(io.Discard, nil))}
+	request := httptest.NewRequest(http.MethodPost, "https://gateway.example"+ClaimPath, bytes.NewReader(requestBody))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var delivery Delivery
+	if err := json.Unmarshal(response.Body.Bytes(), &delivery); err != nil {
+		t.Fatal(err)
+	}
+	if delivery.Buildcache == nil {
+		t.Fatal("provisioned trusted-writer claim carries no buildcache credential")
+	}
+	// The layer cache lands in the same trust class the object cache uses.
+	if delivery.Buildcache.Registry != "https://192.0.2.1:5001" ||
+		delivery.Buildcache.Repository != "buildcache/example-org/example-actions/trusted" ||
+		delivery.Buildcache.Username != "gha-zot-example-org-example-actions-buildcache-trusted" ||
+		delivery.Buildcache.PasswordB64 == "" {
+		t.Fatalf("buildcache delivery=%+v", delivery.Buildcache)
+	}
+
+	// A role without the credential pair delivers exactly what it did before.
+	token2 := bytes.Repeat([]byte{8}, ClaimTokenBytes)
+	if err := store.Add(context.Background(), "runner-plain", "example-standard", "untrusted-writer", token2); err != nil {
+		t.Fatal(err)
+	}
+	requestBody, _ = json.Marshal(ClaimRequest{InstanceName: "runner-plain", RunnerName: "runner-plain", Repository: "example-org/example-actions", Token: base64.RawURLEncoding.EncodeToString(token2)})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://gateway.example"+ClaimPath, bytes.NewReader(requestBody)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("plain status=%d", response.Code)
+	}
+	var plain Delivery
+	if err := json.Unmarshal(response.Body.Bytes(), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.Buildcache != nil {
+		t.Fatal("unprovisioned role must not receive a buildcache credential")
+	}
+}
+
+func TestBuildcacheConfigRefusesHalfPairsAndMissingRegistry(t *testing.T) {
+	directory := t.TempDir()
+	write := func(name, value string) string {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte(value+"\n"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	ca := write("ca.pem", "example")
+	access := write("access", "AKIA0123456789ABCDEF")
+	secret := write("secret", strings.Repeat("a", 64))
+	buildcacheUser := write("bc-user", "user")
+	buildcachePass := write("bc-pass", "pass")
+	base := func() Config {
+		return Config{SchemaVersion: 1, ListenAddress: "192.0.2.2:9444", Endpoint: "https://192.0.2.1:9002", Region: "us-east-1", Bucket: "github-actions-cache", CAFile: ca, JournalFile: filepath.Join(directory, "claims.json"), JournalLock: filepath.Join(directory, "claims.lock"),
+			BuildcacheRegistry: "https://192.0.2.1:5001",
+			Repositories: []Repository{{Name: "example-org/example-actions", Roles: []Identity{
+				{Role: "trusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/trusted", AccessKeyFile: access, SecretKeyFile: secret, BuildcacheUsernameFile: buildcacheUser, BuildcachePasswordFile: buildcachePass},
+				{Role: "untrusted-writer", Mode: "read-write", Prefix: "example-org/example-actions/trust/untrusted", AccessKeyFile: access, SecretKeyFile: secret},
+				{Role: "release-reader", Mode: "read-only", Prefix: "example-org/example-actions/trust/promoted", AccessKeyFile: access, SecretKeyFile: secret},
+			}}}}
+	}
+	valid := base()
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	half := base()
+	half.Repositories[0].Roles[0].BuildcachePasswordFile = ""
+	if err := half.Validate(); err == nil {
+		t.Fatal("half a buildcache credential pair was accepted")
+	}
+	orphan := base()
+	orphan.BuildcacheRegistry = ""
+	if err := orphan.Validate(); err == nil {
+		t.Fatal("buildcache credentials without a registry were accepted")
+	}
+	badOrigin := base()
+	badOrigin.BuildcacheRegistry = "https://192.0.2.1:5001/path"
+	if err := badOrigin.Validate(); err == nil {
+		t.Fatal("a registry origin with a path was accepted")
+	}
+}
