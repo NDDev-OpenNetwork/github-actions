@@ -25,6 +25,42 @@ The union is governed, not free-form:
 - the merged bundle re-validates as one document, so the 64-rule budget and
   ordering hold for the union.
 
+## The notification template
+
+An overlay may also carry `notification`, the message body the backend renders
+when any rule fires:
+
+```yaml
+notification:
+  template: fleet_oncall_telegram
+  body: '{"chat_id":"...","text":"..."}'
+```
+
+It lives here rather than in the public bundle because the body is
+destination-shaped: for Telegram it carries the chat id, which is corporate
+topology and may not reach a public module. The engine owns the contract, the
+estate owns the envelope. The same rule as ids applies — an overlay adds a
+template, it never redefines one, and two bundles that both declare it refuse
+the load.
+
+The body is posted verbatim, so it is checked before it can reach the wire: it
+must be valid JSON, between 32 and 4096 bytes, and must contain `{alert_name}`.
+A body that is not valid JSON is rejected by the destination for every alert,
+silently — the failure looks like an alert that never arrives.
+
+`reconcile-openobserve-alerts` plans and applies it with the rules: an absent or
+different live template reports `notification_drift` and leaves the plan
+`drifted`, and `--apply` writes the template *before* the alerts, so a rule that
+fires between the two writes renders the message the bundle owns.
+
+Variables the backend substitutes: the built-ins `{alert_name}`,
+`{alert_agg_value}`, `{alert_operator}`, `{alert_threshold}`, `{alert_count}`,
+`{alert_start_time}`, `{alert_end_time}`, `{alert_url}`, `{alert_id}`,
+`{alert_type}`, `{stream_name}`, `{org_name}`; every key the rule ships in
+`context_attributes` (`action`, `owner`, `recovery`, `runbook`, `severity`);
+and, for a rule whose expression keeps labels, that series' own labels —
+`{host_name}`, `{scale_set}`, `{error_class}`.
+
 ## SQL rules
 
 Tenant streams are logs, not metrics, so overlay rules may use

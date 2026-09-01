@@ -117,7 +117,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_pressure_observer_up
-    expression: min(gha_fleet_pressure_observer_up)
+    expression: min by (host_name) (gha_fleet_pressure_observer_up)
     operator: "<"
     threshold: 1
     evaluation_seconds: 30
@@ -133,7 +133,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: system_filesystem_usage
-    expression: min(sum by(host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state="free"}) / sum by(host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state=~"free|used"}))
+    expression: sum by (host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state="free"}) / sum by (host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state=~"free|used"})
     operator: "<"
     threshold: 0.2
     evaluation_seconds: 300
@@ -149,7 +149,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_diagnostic_export_consecutive_failures
-    expression: max(gha_fleet_diagnostic_export_consecutive_failures)
+    expression: max by (host_name) (gha_fleet_diagnostic_export_consecutive_failures)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -165,7 +165,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_diagnostic_storage_expiration_eligible_objects
-    expression: max(gha_diagnostic_storage_expiration_eligible_objects)
+    expression: max by (host_name) (gha_diagnostic_storage_expiration_eligible_objects)
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
@@ -181,7 +181,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_platform_healthy
-    expression: max(gha_fleet_platform_healthy)
+    expression: max by (host_name) (gha_fleet_platform_healthy)
     operator: "<"
     threshold: 1
     evaluation_seconds: 30
@@ -202,7 +202,7 @@ rules:
     # suppresses them instead of paging. This rule is the guard on that
     # suppression -- a hold that lasts half an hour is either a forgotten
     # drain or a member that failed to come back, and someone must look.
-    expression: max(gha_fleet_visibility_held_out_members)
+    expression: max by (host_name) (gha_fleet_visibility_held_out_members)
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
@@ -256,7 +256,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_host_oom_kills_total
-    expression: max(increase(gha_fleet_host_oom_kills_total[5m]))
+    expression: max by (host_name) (increase(gha_fleet_host_oom_kills_total[5m]))
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -272,7 +272,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_package_inventory_age_seconds
-    expression: max(gha_fleet_host_package_inventory_age_seconds)
+    expression: max by (host_name) (gha_fleet_host_package_inventory_age_seconds)
     operator: ">"
     threshold: 129600
     evaluation_seconds: 300
@@ -292,7 +292,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_reboot_required
-    expression: max(gha_fleet_host_reboot_required)
+    expression: max by (host_name) (gha_fleet_host_reboot_required)
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
@@ -312,7 +312,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_standard_updates_available
-    expression: max(gha_fleet_host_standard_updates_available)
+    expression: max by (host_name) (gha_fleet_host_standard_updates_available)
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
@@ -364,7 +364,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: system_memory_usage
-    expression: max(gha_fleet_host_slab_unreclaimable_attributed_bytes)
+    expression: max by (host_name) (gha_fleet_host_slab_unreclaimable_attributed_bytes)
     operator: ">"
     threshold: 2147483648
     evaluation_seconds: 300
@@ -414,7 +414,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
-    expression: max(gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"})
+    expression: max by (host_name) (gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"})
     operator: ">"
     threshold: 300
     evaluation_seconds: 30
@@ -430,7 +430,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_provider_created_without_running_identity_oldest_age_seconds
-    expression: max(gha_fleet_provider_created_without_running_identity_oldest_age_seconds)
+    expression: max by (host_name) (gha_fleet_provider_created_without_running_identity_oldest_age_seconds)
     operator: ">"
     # Fifteen minutes, above the routine tail rather than inside it. Sampled on
     # the live fleet under load, six samples fifty seconds apart: 13 to 21
@@ -494,7 +494,7 @@ rules:
     # nddev-linux-standard was at 14; a max over everything reports one number
     # and names no pool.
     stream_name: gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set
-    expression: max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set)
+    expression: max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set)
     operator: ">"
     # Thirty minutes, not five. Five was the old ceiling's neighbourhood and is
     # ordinary under load: measured p50 waits ran 7 to 16 minutes across pools
@@ -513,7 +513,7 @@ rules:
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_psi_stall_percent
-    expression: max(gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window_seconds="10"})
+    expression: max by (host_name) (gha_fleet_host_psi_stall_percent{resource="memory",mode="some",window_seconds="10"})
     operator: ">"
     threshold: 5
     evaluation_seconds: 300
@@ -529,7 +529,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_provider_retry_deferred_records_by_error_class
-    expression: sum(gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"})
+    expression: sum by (error_class) (gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"})
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -545,7 +545,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_provider_terminal_circuits
-    expression: max(gha_fleet_provider_terminal_circuits)
+    expression: max by (host_name) (gha_fleet_provider_terminal_circuits)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -576,7 +576,7 @@ rules:
     # empty left side. `X * (X < bool 300)` returns 200 for 200 and 0 for 400,
     # which is the intent, and it is never empty, so the sustained subquery
     # always receives a matrix.
-    expression: max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max(gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
+    expression: max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
     operator: ">"
     threshold: 600
     evaluation_seconds: 300
@@ -592,7 +592,7 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_snapshot_stale
-    expression: max(gha_fleet_snapshot_stale)
+    expression: max by (host_name) (gha_fleet_snapshot_stale)
     operator: ">"
     threshold: 0
     evaluation_seconds: 30

@@ -26,13 +26,22 @@ type ReconcileAction struct {
 }
 
 type ReconcilePlan struct {
-	SchemaVersion      int               `json:"schema_version"`
-	State              string            `json:"state"`
-	Organization       string            `json:"organization"`
-	Destination        string            `json:"destination"`
-	DestinationPresent bool              `json:"destination_present"`
-	MissingStreams     []string          `json:"missing_streams"`
-	Actions            []ReconcileAction `json:"actions"`
+	SchemaVersion      int    `json:"schema_version"`
+	State              string `json:"state"`
+	Organization       string `json:"organization"`
+	Destination        string `json:"destination"`
+	DestinationPresent bool   `json:"destination_present"`
+	// NotificationDrift is the template the bundle owns and the backend does
+	// not have, or has with a different body. Empty when the bundle declares no
+	// template or the live body already matches.
+	NotificationDrift string            `json:"notification_drift,omitempty"`
+	MissingStreams    []string          `json:"missing_streams"`
+	Actions           []ReconcileAction `json:"actions"`
+}
+
+type templateSummary struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
 }
 
 type OpenObserveClient struct {
@@ -137,6 +146,25 @@ func (c *OpenObserveClient) Plan(ctx context.Context, desired OpenObserveBundle)
 			plan.DestinationPresent = true
 		}
 	}
+	if desired.Notification != nil {
+		var templates []templateSummary
+		if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/%s/alerts/templates", url.PathEscape(desired.Organization)), nil, &templates); err != nil {
+			return ReconcilePlan{}, err
+		}
+		found := false
+		for _, template := range templates {
+			if template.Name != desired.Notification.Template {
+				continue
+			}
+			found = true
+			if template.Body != desired.Notification.Body {
+				plan.NotificationDrift = "body"
+			}
+		}
+		if !found {
+			plan.NotificationDrift = "absent"
+		}
+	}
 	// Streams are namespaced by type, and the bundle can now hold both: promql
 	// rules watch metrics streams, sql rules watch logs streams. Ask for each
 	// type the desired alerts actually use, so a logs-backed alert is not
@@ -167,6 +195,9 @@ func (c *OpenObserveClient) Plan(ctx context.Context, desired OpenObserveBundle)
 	if !plan.DestinationPresent || len(plan.MissingStreams) != 0 {
 		plan.State = "blocked"
 		return plan, nil
+	}
+	if plan.NotificationDrift != "" {
+		plan.State = "drifted"
 	}
 
 	var existing alertList
@@ -240,6 +271,22 @@ func (c *OpenObserveClient) Apply(ctx context.Context, desired OpenObserveBundle
 	}
 	if plan.State == "blocked" {
 		return plan, errors.New("OpenObserve reconciliation is blocked by destination or stream prerequisites")
+	}
+	// The template first: an alert that fires between the two writes should
+	// render the message the bundle owns, not the one it is replacing.
+	if plan.NotificationDrift != "" {
+		method := http.MethodPut
+		resource := fmt.Sprintf("/api/%s/alerts/templates/%s", url.PathEscape(desired.Organization), url.PathEscape(desired.Notification.Template))
+		if plan.NotificationDrift == "absent" {
+			method = http.MethodPost
+			resource = fmt.Sprintf("/api/%s/alerts/templates", url.PathEscape(desired.Organization))
+		}
+		body := map[string]any{
+			"name": desired.Notification.Template, "body": desired.Notification.Body, "isDefault": false,
+		}
+		if err := c.request(ctx, method, resource, body, nil); err != nil {
+			return ReconcilePlan{}, err
+		}
 	}
 	for _, action := range plan.Actions {
 		var method, resource string
