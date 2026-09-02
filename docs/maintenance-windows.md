@@ -80,9 +80,16 @@ operator's drain is never touched.
 ## The thin pool and the loop file
 
 One disk per server is the standing decision. The pool's discards mode is
-`passdown`, `fstrim.timer` is armed on every member, and worker churn keeps
-the loop file at its true size — no shrink ritual exists or is needed. If a
-member's file drifts far above the pool's `data_percent`, the measured
-recovery is a drain window with the temporary-thin-volume sweep recorded in
-the estate's `one-disk-fleet-rollout.json`. LVM metadata archiving is off
-(`archive = 0`): reproducible builds are the rollback story, not file copies.
+`nopassdown`: thin extents are reused inside the pool, but discard traffic is
+not forwarded through the loop file while jobs run. Live `passdown` made one
+worker wait about eight seconds in `jbd2_log_wait_commit`; keeping discards
+local removed that latency. The loop file is sparse but size-bounded, so host
+space may approach its configured logical ceiling even while `data_percent`
+is low. Capacity alerts must therefore read both values rather than treating
+the apparent file size as live tenant data.
+
+There is no online shrink ritual. Reclaiming loop-file blocks is a maintenance
+window: drain the member, prove it has no job or warm occupants, then use the
+reviewed storage procedure while the other members serve the fleet. LVM
+metadata archiving is off (`archive = 0`): reproducible builds are the rollback
+story, not file copies.
