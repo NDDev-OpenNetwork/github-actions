@@ -446,7 +446,7 @@ func (r Runner) inspectRemote(
 			return "", fmt.Errorf("decode %s RustFS policy: %w", credential.identity.Role, err)
 		}
 		if policy.PolicyName != credential.identity.Policy ||
-			!jsonEquivalent(policy.Policy, policyDocument(config.Bucket, credential.identity)) {
+			!policyEquivalent(policy.Policy, policyDocument(config.Bucket, credential.identity)) {
 			return "provisioning", nil
 		}
 	}
@@ -638,6 +638,64 @@ func (r Runner) verifyEffectivePolicy(
 		if err != nil || (response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK) {
 			return fmt.Errorf("clean %s probe: %w", credential.identity.Role, requestFailure(err, response))
 		}
+		if credential.identity.ActionsCachePrefix != "" {
+			if err := r.verifyActionsCacheBoundary(ctx, root, config, credential); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// verifyActionsCacheBoundary proves the actions cache prefix the way the
+// trust roots are proved: the writer puts, reads and lists under its own
+// prefix, is refused an unscoped listing and a listing of its trust root,
+// cannot write beside the prefix, and cannot delete.
+func (r Runner) verifyActionsCacheBoundary(
+	ctx context.Context,
+	root Credential,
+	config Config,
+	credential managedCredential,
+) error {
+	role := credential.identity.Role
+	prefix := credential.identity.ActionsCachePrefix
+	requestPath := "/" + config.Bucket + "/" + prefix + "/_reconcile/" + strings.ToLower(credential.accessKey) + ".txt"
+	payload := []byte("nddev-rustfs-cache-boundary-v1\n")
+	user := Credential{AccessKey: credential.accessKey, SecretKey: credential.secretKey}
+	response, err := r.Requester.Do(ctx, user, http.MethodPut, requestPath, "application/octet-stream", payload)
+	if err != nil || response.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s actions cache write failed: %w", role, requestFailure(err, response))
+	}
+	response, err = r.Requester.Do(ctx, user, http.MethodGet, requestPath, "", nil)
+	if err != nil || response.StatusCode != http.StatusOK || string(response.Body) != string(payload) {
+		return fmt.Errorf("%s actions cache read failed: %w", role, requestFailure(err, response))
+	}
+	listPath := "/" + config.Bucket + "?list-type=2"
+	response, err = r.Requester.Do(ctx, user, http.MethodGet, listPath+"&prefix="+url.QueryEscape(prefix+"/_reconcile/"), "", nil)
+	if err != nil || response.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s actions cache listing failed: %w", role, requestFailure(err, response))
+	}
+	for _, denied := range []struct{ name, path string }{
+		{"unscoped", listPath},
+		{"trust root", listPath + "&prefix=" + url.QueryEscape(credential.identity.Prefix+"/")},
+	} {
+		response, err = r.Requester.Do(ctx, user, http.MethodGet, denied.path, "", nil)
+		if err != nil || response.StatusCode != http.StatusForbidden {
+			return fmt.Errorf("%s %s listing was not denied: %w", role, denied.name, requestFailure(err, response))
+		}
+	}
+	besidePath := "/" + config.Bucket + "/" + prefix + "-denied/_reconcile/denied-" + strings.ToLower(credential.accessKey)
+	response, err = r.Requester.Do(ctx, user, http.MethodPut, besidePath, "application/octet-stream", payload)
+	if err != nil || response.StatusCode != http.StatusForbidden {
+		return fmt.Errorf("%s write beside the actions cache prefix was not denied: %w", role, requestFailure(err, response))
+	}
+	response, err = r.Requester.Do(ctx, user, http.MethodDelete, requestPath, "", nil)
+	if err != nil || response.StatusCode != http.StatusForbidden {
+		return fmt.Errorf("%s actions cache delete was not denied: %w", role, requestFailure(err, response))
+	}
+	response, err = r.Requester.Do(ctx, root, http.MethodDelete, requestPath, "", nil)
+	if err != nil || (response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK) {
+		return fmt.Errorf("clean %s actions cache probe: %w", role, requestFailure(err, response))
 	}
 	return nil
 }
@@ -661,11 +719,13 @@ func policyDocument(bucket string, identity Identity) []byte {
 	if identity.ActionsCachePrefix != "" {
 		// runs-on/cache lists the prefix to resolve restore-keys, then reads
 		// and writes objects under it; the listing is bounded to that prefix.
+		// The condition value is a bare string because that is the form the
+		// store keeps whatever it is given; see policyEquivalent.
 		statements = append(statements,
 			map[string]any{
 				"Effect": "Allow", "Action": []string{"s3:ListBucket"},
 				"Resource":  []string{"arn:aws:s3:::" + bucket},
-				"Condition": map[string]any{"StringLike": map[string]any{"s3:prefix": []string{identity.ActionsCachePrefix + "/*"}}},
+				"Condition": map[string]any{"StringLike": map[string]any{"s3:prefix": identity.ActionsCachePrefix + "/*"}},
 			},
 			map[string]any{
 				"Effect": "Allow", "Action": actions,
@@ -762,6 +822,61 @@ func jsonEquivalent(left, right []byte) bool {
 	leftJSON, _ := json.Marshal(leftValue)
 	rightJSON, _ := json.Marshal(rightValue)
 	return string(leftJSON) == string(rightJSON)
+}
+
+// policyEquivalent compares a stored policy with the one the reconcile
+// intends. RustFS keeps a one-element condition value as the bare string
+// (`"s3:prefix": "cache/o/r/*"`) whichever form it was given, so both
+// documents are read in that form before they are compared; nothing outside
+// a statement's Condition is normalised.
+func policyEquivalent(stored, expected []byte) bool {
+	var storedValue, expectedValue any
+	if json.Unmarshal(stored, &storedValue) != nil || json.Unmarshal(expected, &expectedValue) != nil {
+		return false
+	}
+	storedJSON, _ := json.Marshal(canonicalConditionValues(storedValue))
+	expectedJSON, _ := json.Marshal(canonicalConditionValues(expectedValue))
+	return string(storedJSON) == string(expectedJSON)
+}
+
+func canonicalConditionValues(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, nested := range typed {
+			if key == "Condition" {
+				typed[key] = canonicalOperators(nested)
+				continue
+			}
+			typed[key] = canonicalConditionValues(nested)
+		}
+		return typed
+	case []any:
+		for index, nested := range typed {
+			typed[index] = canonicalConditionValues(nested)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func canonicalOperators(condition any) any {
+	operators, ok := condition.(map[string]any)
+	if !ok {
+		return condition
+	}
+	for _, keys := range operators {
+		keyValues, ok := keys.(map[string]any)
+		if !ok {
+			continue
+		}
+		for key, values := range keyValues {
+			if list, ok := values.([]any); ok && len(list) == 1 {
+				keyValues[key] = list[0]
+			}
+		}
+	}
+	return operators
 }
 
 func regularFileExists(path string) (bool, error) {

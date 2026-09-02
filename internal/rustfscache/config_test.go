@@ -188,7 +188,8 @@ func testConfig(t *testing.T, directory string) Config {
 		ClaimJournalFile:     filepath.Join(directory, "cache-claims.json"),
 		ClaimJournalLockFile: filepath.Join(directory, "cache-claims.lock"),
 		Identities: []Identity{
-			{Role: "trusted-writer", Policy: "gha-cache-github-actions-trusted", Prefix: "example-org/example-actions/trust/trusted", Mode: "read-write", RetentionDays: 30},
+			{Role: "trusted-writer", Policy: "gha-cache-github-actions-trusted", Prefix: "example-org/example-actions/trust/trusted", Mode: "read-write", RetentionDays: 30,
+				ActionsCachePrefix: "cache/example-org/example-actions"},
 			{Role: "untrusted-writer", Policy: "gha-cache-github-actions-untrusted", Prefix: "example-org/example-actions/trust/untrusted", Mode: "read-write", RetentionDays: 7},
 			{Role: "promoter", Policy: "gha-cache-github-actions-promoter", Prefix: "example-org/example-actions/trust/promoted", Mode: "read-write", RetentionDays: 90},
 			{Role: "release-reader", Policy: "gha-cache-github-actions-release", Prefix: "example-org/example-actions/trust/promoted", Mode: "read-only", RetentionDays: 90},

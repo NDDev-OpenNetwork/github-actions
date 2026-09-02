@@ -60,8 +60,9 @@ func TestRunnerCreatesAndVerifiesTrustSeparatedIdentities(t *testing.T) {
 	if !remote.bucket || remote.quota != config.QuotaBytes {
 		t.Fatalf("bucket=%v quota=%d", remote.bucket, remote.quota)
 	}
-	if got := strings.Count(string(remote.lifecycle), "<Rule>"); got != 3 {
-		t.Fatalf("lifecycle rule count = %d: %s", got, remote.lifecycle)
+	if got := strings.Count(string(remote.lifecycle), "<Rule>"); got != 4 ||
+		!strings.Contains(string(remote.lifecycle), "<ID>actions-cache-expiry</ID><Filter><Prefix>cache/example-org/example-actions/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days>") {
+		t.Fatalf("lifecycle must expire the three trust roots and the actions cache prefix: %s", remote.lifecycle)
 	}
 	if len(remote.objects) != 0 {
 		t.Fatalf("effective-policy probes left %d objects", len(remote.objects))
@@ -381,7 +382,7 @@ func (f *fakeRustFS) Do(
 			encoded, _ := json.Marshal(policyInfo{PolicyName: envelopeName, Policy: append([]byte(nil), policy...)})
 			return Response{StatusCode: http.StatusOK, Body: encoded}, true
 		case method == http.MethodPut && parsed.Path == "/rustfs/admin/v3/add-canned-policy":
-			f.policies[parsed.Query().Get("name")] = append([]byte(nil), body...)
+			f.policies[parsed.Query().Get("name")] = storedLikeRustFS(body)
 			return status(http.StatusOK), true
 		case method == http.MethodPut && parsed.Path == "/rustfs/admin/v3/add-user":
 			var request struct {
@@ -472,6 +473,20 @@ func (f *fakeRustFS) Do(
 		}
 		return status(http.StatusForbidden), nil
 	}
+	if parsed.Path == bucketPath && parsed.Query().Get("list-type") == "2" && method == http.MethodGet {
+		if root {
+			return Response{StatusCode: http.StatusOK, Body: []byte("<ListBucketResult/>")}, nil
+		}
+		user, exists := f.users[credential.AccessKey]
+		identity, managed := f.identitiesByKey[credential.AccessKey]
+		authenticated := exists && managed && user.status == "enabled" && user.secret == string(credential.SecretKey) && user.policy == identity.Policy
+		// The store grants a listing only through the ListBucket statement,
+		// whose condition bounds it to the actions cache prefix.
+		if authenticated && identity.ActionsCachePrefix != "" && strings.HasPrefix(parsed.Query().Get("prefix"), identity.ActionsCachePrefix+"/") {
+			return Response{StatusCode: http.StatusOK, Body: []byte("<ListBucketResult/>")}, nil
+		}
+		return status(http.StatusForbidden), nil
+	}
 	if !strings.HasPrefix(parsed.Path, bucketPath+"/") {
 		return status(http.StatusNotFound), nil
 	}
@@ -482,7 +497,8 @@ func (f *fakeRustFS) Do(
 	user, exists := f.users[credential.AccessKey]
 	identity, managed := f.identitiesByKey[credential.AccessKey]
 	authenticated := exists && managed && user.status == "enabled" && user.secret == string(credential.SecretKey) && user.policy == identity.Policy
-	insidePrefix := strings.HasPrefix(key, identity.Prefix+"/")
+	insidePrefix := strings.HasPrefix(key, identity.Prefix+"/") ||
+		(identity.ActionsCachePrefix != "" && strings.HasPrefix(key, identity.ActionsCachePrefix+"/"))
 	canRead := authenticated && insidePrefix
 	canWrite := canRead && identity.Mode == "read-write"
 	return f.objectRequest(method, key, body, canRead, canWrite, false), nil
@@ -520,6 +536,33 @@ func status(code int) Response {
 	return Response{StatusCode: code, Body: []byte(fmt.Sprintf("status-%d", code))}
 }
 
+// storedLikeRustFS keeps a policy the way RustFS was observed to keep it
+// (v1.0.0-alpha, 2026-09-02): a one-element condition value comes back as
+// the bare string, so a reconcile that compares the list it sent never
+// converges unless it reads the stored form.
+func storedLikeRustFS(body []byte) []byte {
+	var document struct {
+		Version   string           `json:"Version"`
+		Statement []map[string]any `json:"Statement"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		panic(err)
+	}
+	for _, statement := range document.Statement {
+		condition, _ := statement["Condition"].(map[string]any)
+		for _, operator := range condition {
+			keyValues, _ := operator.(map[string]any)
+			for key, value := range keyValues {
+				if list, ok := value.([]any); ok && len(list) == 1 {
+					keyValues[key] = list[0]
+				}
+			}
+		}
+	}
+	stored, _ := json.Marshal(document)
+	return stored
+}
+
 // A trusted writer with an actions cache prefix is granted the listing and the
 // objects under it, bounded to that prefix, and the bucket expires the prefix
 // with the trusted writer's retention.
@@ -528,7 +571,7 @@ func TestPolicyAndLifecycleCarryTheActionsCachePrefix(t *testing.T) {
 		Mode: "read-write", RetentionDays: 30, ActionsCachePrefix: "cache/example-org/example-actions"}
 	policy := string(policyDocument("example-actions-cache", identity))
 	for _, want := range []string{
-		`"s3:ListBucket"`, `"s3:prefix":["cache/example-org/example-actions/*"]`,
+		`"s3:ListBucket"`, `"s3:prefix":"cache/example-org/example-actions/*"`,
 		`"arn:aws:s3:::example-actions-cache/cache/example-org/example-actions/*"`,
 		`"arn:aws:s3:::example-actions-cache/example-org/example-actions/trust/trusted/*"`,
 	} {
@@ -548,5 +591,25 @@ func TestPolicyAndLifecycleCarryTheActionsCachePrefix(t *testing.T) {
 	}
 	if !lifecycleEquivalent(lifecycle, config) {
 		t.Fatal("the lifecycle document must be equivalent to its own config")
+	}
+}
+
+// The store keeps a one-element condition value as a string; the comparison
+// reads both documents in that form and normalises nothing else, so a
+// one-element Resource list is still a list.
+func TestPolicyEquivalentReadsTheStoreCanonicalForm(t *testing.T) {
+	list := []byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::b"],"Condition":{"StringLike":{"s3:prefix":["cache/o/r/*"]}}}]}`)
+	bare := []byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::b"],"Condition":{"StringLike":{"s3:prefix":"cache/o/r/*"}}}]}`)
+	other := []byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::b"],"Condition":{"StringLike":{"s3:prefix":"cache/o/other/*"}}}]}`)
+	if !policyEquivalent(bare, list) || !policyEquivalent(list, bare) || !policyEquivalent(bare, bare) {
+		t.Fatal("a bare condition value and its one-element list must compare equal")
+	}
+	if policyEquivalent(other, list) || !jsonEquivalent(bare, bare) || jsonEquivalent(bare, list) {
+		t.Fatal("a different prefix must not compare equal, and the plain comparison must stay strict")
+	}
+	resourceList := []byte(`{"Statement":[{"Resource":["arn:aws:s3:::b"]}]}`)
+	resourceBare := []byte(`{"Statement":[{"Resource":"arn:aws:s3:::b"}]}`)
+	if policyEquivalent(resourceList, resourceBare) {
+		t.Fatal("only condition values are read in the canonical form")
 	}
 }
