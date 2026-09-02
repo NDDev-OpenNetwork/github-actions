@@ -93,9 +93,28 @@ func RenderOpenObserve(bundle Bundle, destination string, enable bool) (OpenObse
 		periodMinutes := max((rule.HoldSecs+59)/60, frequencyMinutes)
 		streamType := "metrics"
 		var query OpenObserveQuery
+		// AlignTime false: every alert keeps its own schedule instead of being
+		// snapped to the wall clock.
+		//
+		// OpenObserve aligns an alert's next run to the previous interval
+		// boundary for its frequency (TriggerCondition::get_aligned_next_trigger_time),
+		// so with alignment on, every one-minute rule evaluates at :00 and every
+		// ten-minute rule at :00, :10, :20 -- thirty-four alerts issuing their
+		// searches and persisting their group states in the same millisecond.
+		// Measured on 2026-09-02: the searches queued behind each other until
+		// some exceeded the PromQL load-data timeout (that is what raised
+		// alert_evaluation_failed), and the state writes queued behind the
+		// single SQLite writer until they were refused --
+		// "could not persist group states ...: database is locked", 2386 times
+		// in one day. A scheduler that cannot persist that it already notified
+		// notifies again on the next tick, which is why the channel repeated
+		// the same page every ten minutes for hours.
+		//
+		// Nothing in these rules depends on clock alignment: every expression
+		// takes its own range relative to evaluation time.
 		trigger := OpenObserveTrigger{
 			Period: periodMinutes, Frequency: frequencyMinutes, FrequencyType: "minutes",
-			Silence: silence, Timezone: "UTC", AlignTime: true,
+			Silence: silence, Timezone: "UTC", AlignTime: false,
 		}
 		switch rule.QueryLanguage {
 		case "sql":
