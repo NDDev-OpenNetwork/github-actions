@@ -1074,3 +1074,43 @@ func TestFailedWarmReconcilerMakesQueueHostUnhealthy(t *testing.T) {
 		}
 	}
 }
+
+// The fleet must be able to see the wait it is judged by: from the moment
+// GitHub queued the job to the moment its runner started. Every other wait
+// metric stops when the provider assigns the intent, so on 2026-09-02 the
+// queued gauge peaked at 597 s while jobs waited up to 906 s.
+func TestCompletedWaitMeasuresQueuedToRunning(t *testing.T) {
+	now := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
+	intents := []queueintent.Intent{
+		{Key: "a", ScaleSetName: "nddev-linux-standard", State: queueintent.StateRunning,
+			FirstQueuedAt: now.Add(-5 * time.Minute), StateEnteredAt: now.Add(-2 * time.Minute), QueueTime: now.Add(-3 * time.Minute)},
+		{Key: "b", ScaleSetName: "nddev-linux-standard", State: queueintent.StateRunning,
+			FirstQueuedAt: now.Add(-11 * time.Minute), StateEnteredAt: now.Add(-1 * time.Minute), QueueTime: now.Add(-3 * time.Minute)},
+		// Started long ago: outside the window, so it does not describe the fleet now.
+		{Key: "c", ScaleSetName: "nddev-linux-standard", State: queueintent.StateRunning,
+			FirstQueuedAt: now.Add(-90 * time.Minute), StateEnteredAt: now.Add(-60 * time.Minute), QueueTime: now.Add(-70 * time.Minute)},
+		// Still queued: it has no completed wait yet.
+		{Key: "d", ScaleSetName: "nddev-linux-standard", State: queueintent.StateQueued,
+			FirstQueuedAt: now.Add(-40 * time.Minute), QueueTime: now.Add(-2 * time.Minute)},
+	}
+	summary, err := summarizeQueue(queueintent.Snapshot{Active: intents}, testPlatform(t), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.StartedWaitSamples != 2 {
+		t.Fatalf("samples = %d, want the two that started inside the window", summary.StartedWaitSamples)
+	}
+	if summary.StartedWaitMaxSeconds != 600 {
+		t.Fatalf("max = %d, want the ten-minute wait", summary.StartedWaitMaxSeconds)
+	}
+	if summary.StartedWaitMedianSeconds != 390 {
+		t.Fatalf("median = %d, want the midpoint of the 180 s and 600 s waits", summary.StartedWaitMedianSeconds)
+	}
+	if summary.StartedWaitP90ByScaleSet["nddev-linux-standard"] == 0 {
+		t.Fatal("the per-scale-set percentile is empty")
+	}
+	// The still-queued intent keeps feeding the open-ended gauge, unchanged.
+	if summary.OldestQueuedWaitSeconds != 2400 {
+		t.Fatalf("oldest queued wait = %d, want the forty minutes of the waiting intent", summary.OldestQueuedWaitSeconds)
+	}
+}

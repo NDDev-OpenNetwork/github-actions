@@ -318,6 +318,17 @@ type QueueSummary struct {
 	// can never fire.
 	OldestQueuedWaitSeconds           int64            `json:"oldest_queued_wait_seconds"`
 	OldestQueuedWaitSecondsByScaleSet map[string]int64 `json:"oldest_queued_wait_seconds_by_scale_set"`
+	// StartedWait* is the wait a developer actually felt: from the moment
+	// GitHub first queued the intent to the moment its runner reported
+	// running, measured over the intents that started within the last
+	// completedWaitWindow. Every other wait metric here stops at assignment,
+	// so no rule could see the second half of the wait -- on 2026-09-02 jobs
+	// waited up to 906 s while the queued gauge peaked at 597 s.
+	StartedWaitSamples       int              `json:"started_wait_samples"`
+	StartedWaitMedianSeconds int64            `json:"started_wait_median_seconds"`
+	StartedWaitP90Seconds    int64            `json:"started_wait_p90_seconds"`
+	StartedWaitMaxSeconds    int64            `json:"started_wait_max_seconds"`
+	StartedWaitP90ByScaleSet map[string]int64 `json:"started_wait_p90_seconds_by_scale_set"`
 	// QueuedWithoutFirstStamp is how many waiting intents have no immutable
 	// stamp, so their wait is measured from the rewritten QueueTime and is a
 	// lower bound. Without this a rollout window looks calm for the same reason
@@ -802,10 +813,13 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		TerminalNextExpirySeconds:         snapshot.TerminalNextExpirySeconds,
 		ByState:                           make(map[string]int),
 		OldestStateAgeSeconds:             make(map[string]int64),
+		StartedWaitP90ByScaleSet:          make(map[string]int64),
 		ByPriority:                        make(map[int]int),
 		ByScaleSet:                        make(map[string]int),
 		OldestQueuedWaitSecondsByScaleSet: make(map[string]int64),
 	}
+	startedWaits := make([]int64, 0)
+	startedWaitsByScaleSet := make(map[string][]int64)
 	for scaleSet := range knownScaleSets {
 		summary.ByScaleSet[scaleSet] = 0
 		summary.OldestQueuedWaitSecondsByScaleSet[scaleSet] = 0
@@ -865,6 +879,16 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		if age > summary.OldestQueueAgeSeconds {
 			summary.OldestQueueAgeSeconds = age
 		}
+		if intent.State == queueintent.StateRunning && !intent.StateEnteredAt.IsZero() &&
+			now.Sub(intent.StateEnteredAt) <= completedWaitWindow {
+			// The whole wait, closed: first queued -> running. Only intents
+			// that started inside the window count, so the number moves with
+			// the fleet instead of averaging the day.
+			if wait := int64(intent.StateEnteredAt.Sub(intent.WaitSince()).Seconds()); wait >= 0 {
+				startedWaits = append(startedWaits, wait)
+				startedWaitsByScaleSet[intent.ScaleSetName] = append(startedWaitsByScaleSet[intent.ScaleSetName], wait)
+			}
+		}
 		if intent.State == queueintent.StateQueued {
 			// From the immutable first-seen stamp, not QueueTime: reconciliation
 			// moves QueueTime forward on an intent that is still waiting, so a
@@ -881,7 +905,43 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			}
 		}
 	}
+	summary.StartedWaitSamples = len(startedWaits)
+	summary.StartedWaitMedianSeconds = quantileSeconds(startedWaits, 0.5)
+	summary.StartedWaitP90Seconds = quantileSeconds(startedWaits, 0.9)
+	if len(startedWaits) > 0 {
+		sort.Slice(startedWaits, func(left, right int) bool { return startedWaits[left] < startedWaits[right] })
+		summary.StartedWaitMaxSeconds = startedWaits[len(startedWaits)-1]
+	}
+	for scaleSet := range knownScaleSets {
+		summary.StartedWaitP90ByScaleSet[scaleSet] = quantileSeconds(startedWaitsByScaleSet[scaleSet], 0.9)
+	}
 	return summary, nil
+}
+
+// completedWaitWindow bounds how recently an intent must have started running
+// for its wait to count. Short enough that the number describes the fleet now,
+// long enough that a quiet minute does not empty it.
+const completedWaitWindow = 15 * time.Minute
+
+// quantileSeconds is the linear-interpolated quantile of a sample, and zero
+// for an empty one: no jobs started is not a long wait.
+func quantileSeconds(values []int64, quantile float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	ordered := append([]int64(nil), values...)
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left] < ordered[right] })
+	if len(ordered) == 1 {
+		return ordered[0]
+	}
+	position := float64(len(ordered)-1) * quantile
+	lower := int(position)
+	upper := lower + 1
+	if upper >= len(ordered) {
+		return ordered[len(ordered)-1]
+	}
+	fraction := position - float64(lower)
+	return ordered[lower] + int64(float64(ordered[upper]-ordered[lower])*fraction)
 }
 
 func validateDiagnosticExport(

@@ -169,6 +169,15 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", "Longest wait since GitHub queued a still-queued intent, per configured scale set.")
 	for _, scaleSet := range scaleSets {
 		metric(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.OldestQueuedWaitSecondsByScaleSet[scaleSet]))
+
+		gauge(&output, "gha_fleet_queue_started_wait_samples", "Jobs whose runner started within the completed-wait window.", float64(snapshot.Queue.StartedWaitSamples))
+		gauge(&output, "gha_fleet_queue_started_wait_median_seconds", "Median wait, first queued to runner running, over jobs that started in the window.", float64(snapshot.Queue.StartedWaitMedianSeconds))
+		gauge(&output, "gha_fleet_queue_started_wait_p90_seconds", "Ninetieth-percentile wait, first queued to runner running, over jobs that started in the window.", float64(snapshot.Queue.StartedWaitP90Seconds))
+		gauge(&output, "gha_fleet_queue_started_wait_max_seconds", "Longest wait, first queued to runner running, over jobs that started in the window.", float64(snapshot.Queue.StartedWaitMaxSeconds))
+		labeledGaugeHeader(&output, "gha_fleet_queue_started_wait_p90_seconds_by_scale_set", "Ninetieth-percentile completed wait per scale set.")
+		for _, scaleSet := range scaleSets {
+			metric(&output, "gha_fleet_queue_started_wait_p90_seconds_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.StartedWaitP90ByScaleSet[scaleSet]))
+		}
 	}
 	gauge(&output, "gha_fleet_incus_visible_instances", "Instances visible in the restricted Incus project.", float64(snapshot.Incus.VisibleInstances))
 	gauge(&output, "gha_fleet_incus_visible_maintenance_instances", "Visible exact image builder or smoke instances; observable maintenance capacity, never GitHub job runners.", float64(snapshot.Incus.VisibleMaintenanceInstances))

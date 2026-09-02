@@ -613,6 +613,29 @@ rules:
   # rule's own summary names: "between the two-minute objective and the
   # five-minute page". Held ten minutes it fires once on a day like that one,
   # which is what a slow-burn ticket should cost.
+  # The wait a developer feels, closed: first queued to runner running, over
+  # the jobs that started in the last fifteen minutes. Every other wait rule
+  # here reads a gauge that stops when the provider assigns the intent, so on
+  # 2026-09-02 the queued gauge peaked at 597 s on three scale sets while jobs
+  # waited up to 906 s. This is the number the fleet is judged by, so it is
+  # the one that carries the objective: a ticket when the ninetieth percentile
+  # of completed waits stays above five minutes for ten.
+  - id: queue_started_wait_slow_burn
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_queue_started_wait_p90_seconds_by_scale_set
+    expression: max by (scale_set) (gha_fleet_queue_started_wait_p90_seconds_by_scale_set)
+    operator: ">"
+    threshold: 300
+    evaluation_seconds: 300
+    hold_seconds: 600
+    destination_ref: fleet_oncall
+    enabled: true
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Jobs that started recently waited longer than the five-minute objective.
+    action: Read the queued and assigned phases separately -- queue_wait_slow_burn and lifecycle_assigned_stall name which half of the wait grew -- before adding capacity.
+    recovery: The ninetieth percentile of completed waits holds under five minutes for the hold window.
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql

@@ -11,8 +11,8 @@ func TestRepositoryBundleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Rules) != 30 {
-		t.Fatalf("rules = %d, want 30", len(bundle.Rules))
+	if len(bundle.Rules) != 31 {
+		t.Fatalf("rules = %d, want 31", len(bundle.Rules))
 	}
 }
 
