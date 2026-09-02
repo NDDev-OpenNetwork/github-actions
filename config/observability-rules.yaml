@@ -581,6 +581,25 @@ rules:
     summary: A durable provider-create circuit is blocking an entire scale set.
     action: Preserve the retry journal, fix and verify the provider cause, then use exact CAS recovery while GARM is stopped.
     recovery: Terminal circuit count remains zero and a fresh job reaches provider create and runner online.
+  # Measured against a full day of the real metric (2026-09-02, a day with one
+  # project's dispatched release CI bursting the priority pools): the rule as
+  # written -- above 600 s held for fifteen minutes -- would have fired zero
+  # times on every scale set, while jobs waited up to 906 s. The queued wait
+  # simply does not stay above ten minutes for a quarter of an hour; the
+  # provider assigns the intent first, and the rest of the wait belongs to
+  # lifecycle_assigned_stall. A ticket that cannot fire is not a quiet fleet,
+  # it is an unwatched one.
+  #
+  # Episodes in that same day, by (threshold, minutes held): (300, 5) = 18,
+  # (300, 10) = 1, (420, 5) = 4, (450, 5) = 3, (540, 5) = 2, (600, 5) = 0,
+  # and zero for anything held the fifteen minutes this rule asked for.
+  #
+  # A ticket must hold at least ten minutes -- that is the rule package's own
+  # policy for the class, and it is right -- so the threshold has to come down
+  # to where a ten-minute hold can reach. 300 s is also the boundary this
+  # rule's own summary names: "between the two-minute objective and the
+  # five-minute page". Held ten minutes it fires once on a day like that one,
+  # which is what a slow-burn ticket should cost.
   - id: queue_wait_slow_burn
     severity: ticket
     query_language: promql
@@ -602,9 +621,9 @@ rules:
     # always receives a matrix.
     expression: max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
     operator: ">"
-    threshold: 600
+    threshold: 300
     evaluation_seconds: 300
-    hold_seconds: 900
+    hold_seconds: 600
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-performance
