@@ -73,14 +73,51 @@ func ServiceNames() []string {
 	return append([]string(nil), computeHostServices...)
 }
 
+// servicesHostTimerUnits are the services host's timer-driven reconcilers and
+// their timers. Each service is a oneshot that is inactive between firings;
+// "failed" is the state that must make the host unhealthy, and a timer that
+// is not active means the reconciler will never run again. None of them was
+// watched on 2026-09-02, when the four warm-pool reconcilers failed twice
+// (02:36Z and 03:01Z, a few minutes each) and paged nobody.
+var servicesHostTimerUnits = []string{
+	"gha-maintenance-lease-reconcile.service", "gha-maintenance-lease-reconcile.timer",
+	"gha-scheduler-recovery.service", "gha-scheduler-recovery.timer",
+	"gha-vanished-job-recovery.service", "gha-vanished-job-recovery.timer",
+	"gha-state-backup.service", "gha-state-backup.timer",
+	"gha-garm-liveness-watchdog.timer",
+}
+
 func serviceNamesForConfig(platform config.Config) []string {
 	if !platform.Incus.Cluster.Enabled {
-		return []string{
+		names := []string{
 			"garm", "gha-fleet-gateway", "gha-cache-broker", "gha-diagnostic-exporter.service",
 			"gha-diagnostic-exporter.timer", "gha-services-rustfs-route.timer", "otelcol-fleet",
 		}
+		names = append(names, servicesHostTimerUnits...)
+		// One warm reconciler per pool that keeps a warm depth; a pool with no
+		// warm target has no timer and must not be demanded.
+		for _, pool := range platform.Pools {
+			if pool.Warm.TargetReady > 0 {
+				names = append(names, "gha-warm-pool@"+pool.Name+".service", "gha-warm-pool@"+pool.Name+".timer")
+			}
+		}
+		return names
 	}
 	return ServiceNames()
+}
+
+// timerDrivenService reports whether a unit is a oneshot that a timer starts:
+// normally inactive, healthy in every state but failed.
+func timerDrivenService(name string) bool {
+	if name == "gha-diagnostic-exporter.service" || strings.HasPrefix(name, "gha-warm-pool@") && strings.HasSuffix(name, ".service") {
+		return true
+	}
+	for _, unit := range servicesHostTimerUnits {
+		if unit == name && strings.HasSuffix(name, ".service") {
+			return true
+		}
+	}
+	return false
 }
 
 type HostSource func(context.Context) (hostprobe.Snapshot, error)
@@ -899,7 +936,7 @@ func validateDiagnosticExport(
 }
 
 func serviceHealthy(name, state string) bool {
-	if name == "gha-diagnostic-exporter.service" {
+	if timerDrivenService(name) {
 		// A successful oneshot is normally inactive between timer firings. Failed
 		// is the state that must make services-host health false.
 		return state == "active" || state == "activating" || state == "deactivating" || state == "inactive"

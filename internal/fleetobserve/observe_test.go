@@ -148,7 +148,13 @@ func TestQueueHostOwnsCentralDiagnosticExporterHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := collector.Collect(context.Background())
-	if !snapshot.Healthy || len(snapshot.Services) != 7 {
+	warmPools := 0
+	for _, pool := range queueConfig.Pools {
+		if pool.Warm.TargetReady > 0 {
+			warmPools++
+		}
+	}
+	if !snapshot.Healthy || len(snapshot.Services) != 7+len(servicesHostTimerUnits)+2*warmPools {
 		t.Fatalf("queue host snapshot = %#v", snapshot)
 	}
 	seen := make(map[string]bool, len(snapshot.Services))
@@ -1010,5 +1016,61 @@ func TestWarmInstancesAreNotUnboundWorkers(t *testing.T) {
 	if correlation.CreatedWithoutRunningIdentity != 1 {
 		t.Fatalf("CreatedWithoutRunningIdentity = %d, want 1: the warm lease is not an unbound worker",
 			correlation.CreatedWithoutRunningIdentity)
+	}
+}
+
+// The warm reconcilers failed twice on 2026-09-02 and paged nobody: the
+// services host demands one reconciler service and timer per pool that keeps
+// a warm depth, and a failed reconciler makes the host unhealthy while an
+// idle one between firings does not.
+func TestFailedWarmReconcilerMakesQueueHostUnhealthy(t *testing.T) {
+	collector := healthyCollector(t)
+	queueConfig, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The public example keeps no warm depth (that is estate policy), so give
+	// one pool a depth here and demand its reconciler.
+	warmPool := queueConfig.Pools[0].Name
+	queueConfig.Pools[0].Warm.TargetReady = 1
+	queueConfig.Pools[0].Warm.MaxReady = 1
+	collector.Config = queueConfig
+	idle := func(_ context.Context, name string) (string, error) {
+		if timerDrivenService(name) {
+			return "inactive", nil
+		}
+		return "active", nil
+	}
+	collector.Service = idle
+	if snapshot := collector.Collect(context.Background()); !snapshot.Healthy {
+		t.Fatalf("idle reconcilers reported unhealthy: %#v", snapshot.Services)
+	}
+	collector.Service = func(ctx context.Context, name string) (string, error) {
+		if name == "gha-warm-pool@"+warmPool+".service" {
+			return "failed", nil
+		}
+		return idle(ctx, name)
+	}
+	if snapshot := collector.Collect(context.Background()); snapshot.Healthy {
+		t.Fatalf("failed warm reconciler reported healthy: %#v", snapshot.Services)
+	}
+	collector.Service = func(ctx context.Context, name string) (string, error) {
+		if name == "gha-warm-pool@"+warmPool+".timer" {
+			return "inactive", nil
+		}
+		return idle(ctx, name)
+	}
+	if snapshot := collector.Collect(context.Background()); snapshot.Healthy {
+		t.Fatalf("stopped warm timer reported healthy: %#v", snapshot.Services)
+	}
+	for _, name := range serviceNamesForConfig(queueConfig) {
+		if strings.HasPrefix(name, "gha-warm-pool@") {
+			pool := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(name, "gha-warm-pool@"), ".service"), ".timer")
+			for _, candidate := range queueConfig.Pools {
+				if candidate.Name == pool && candidate.Warm.TargetReady == 0 {
+					t.Fatalf("a pool without warm depth is demanded a reconciler: %s", name)
+				}
+			}
+		}
 	}
 }
