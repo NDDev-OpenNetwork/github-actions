@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -154,10 +155,18 @@ func (m Manifest) Validate() error {
 	if !hex64.MatchString(m.Build.BinarySHA256) {
 		return fmt.Errorf("build.binary_sha256: %q is not a sha256", m.Build.BinarySHA256)
 	}
-	if m.Build.GoVersion != "go1.26.6" || m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
+	// CI rebuilds the release with the go.mod toolchain and validates it with
+	// a binary built by that same toolchain, so the toolchain stamped here
+	// must be the one running this check: a manifest naming another cannot
+	// have been reproduced from this tree. A literal here went stale the day
+	// go.mod moved and every later release restated it.
+	if m.Build.GoVersion != runtime.Version() {
+		return fmt.Errorf("build.go_version: release names %s but this toolchain is %s", m.Build.GoVersion, runtime.Version())
+	}
+	if m.Build.CGOEnabled || m.Build.TargetOS != "linux" ||
 		m.Build.TargetArch != "amd64" || !m.Build.Trimpath || !m.Build.EmptyBuildID ||
 		m.Build.VCSMetadata != "disabled" || m.Build.ReproducibleRebuilds < 2 {
-		return fmt.Errorf("build: release requires go1.26.6, CGO disabled, linux/amd64, trimpath, empty build ID, disabled implicit VCS metadata and two rebuilds")
+		return fmt.Errorf("build: release requires CGO disabled, linux/amd64, trimpath, empty build ID, disabled implicit VCS metadata and two rebuilds")
 	}
 	return nil
 }

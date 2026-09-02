@@ -2,6 +2,7 @@ package providerrelease
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,7 @@ func TestValidateRejectsAnIdentityNothingCouldRelyOn(t *testing.T) {
 		{"CGO enabled", func(m *Manifest) { m.Build.CGOEnabled = true }, "CGO disabled"},
 		{"implicit VCS metadata", func(m *Manifest) { m.Build.VCSMetadata = "embedded" }, "build: release requires"},
 		{"one rebuild", func(m *Manifest) { m.Build.ReproducibleRebuilds = 1 }, "build: release requires"},
+		{"another toolchain", func(m *Manifest) { m.Build.GoVersion = "go1.26.6" }, "build.go_version: release names go1.26.6 but this toolchain is " + runtime.Version()},
 	} {
 		mutated := base
 		testCase.mutate(&mutated)
