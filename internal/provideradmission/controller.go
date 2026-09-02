@@ -460,12 +460,30 @@ func (c Controller) Release(ctx context.Context, instanceName string) error {
 			if candidate.PreemptedBy != instanceName {
 				continue
 			}
-			if candidate.State == providerjournal.StateDeleting {
-				return fmt.Errorf("cannot release preemption target %q while victim %q teardown is active", instanceName, name)
-			}
+			// A victim that is not yet being torn down is given back: the
+			// preemption did not happen, so it keeps its state and its lease
+			// is extended.
+			//
+			// A victim already in teardown cannot be given back -- once
+			// Deleting, the reconciler keeps it Deleting -- but the release
+			// must still succeed. Only its back-reference is dropped, and in
+			// this same journal write, so no lease ever references a target
+			// that has been removed (the journal refuses that). The victim's
+			// own lease stays and is still charged to the host until its
+			// delete completes, so nothing is admitted against memory that
+			// has not been freed.
+			//
+			// This used to fail closed instead. The release is called on the
+			// delete path, so GARM saw the delete itself fail and retried it:
+			// on 2026-09-02 between 10:13Z and 11:12Z, under one project's
+			// dispatched CI, 50 of the hour's 205 provider errors were that
+			// refusal, one per retry, until each victim's teardown finished.
+			// Nothing was lost, and nothing was learned from the noise.
 			candidate.PreemptedBy = ""
-			candidate.UpdatedAt = c.now()
-			candidate.ExpiresAt = candidate.UpdatedAt.Add(c.LeaseTTL)
+			if candidate.State != providerjournal.StateDeleting {
+				candidate.UpdatedAt = c.now()
+				candidate.ExpiresAt = candidate.UpdatedAt.Add(c.LeaseTTL)
+			}
 			journal.Leases[name] = candidate
 		}
 		delete(journal.Leases, instanceName)

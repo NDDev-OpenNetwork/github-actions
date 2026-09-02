@@ -300,7 +300,13 @@ func TestExpiredTargetRestoresPreparingVictimRegardlessOfLexicalOrder(t *testing
 	}
 }
 
-func TestReleaseFailsClosedAfterVictimTeardownStarts(t *testing.T) {
+// A release while the victim is being torn down must succeed: the release is
+// on the delete path, and refusing it made GARM retry the delete and log an
+// error per retry. The victim keeps its lease -- still charged to the host,
+// so nothing is admitted against memory that has not been freed -- and only
+// its back-reference is dropped, in the same write, so the journal never
+// holds a reference to a removed target.
+func TestReleaseSucceedsWhileTheVictimIsStillTearingDown(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 	controller := testController(t, &now)
 	warm := warmAllocation("warm-standard-a")
@@ -311,17 +317,33 @@ func TestReleaseFailsClosedAfterVictimTeardownStarts(t *testing.T) {
 	if err := controller.MarkDeleting(context.Background(), warm.InstanceName); err != nil {
 		t.Fatal(err)
 	}
-	err = controller.Release(context.Background(), "runner-integration")
-	if err == nil || !strings.Contains(err.Error(), "teardown is active") {
-		t.Fatalf("release error=%v", err)
+	before, err := controller.Store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	journal, readErr := controller.Store.Read(context.Background())
-	if readErr != nil {
-		t.Fatal(readErr)
+	victimBefore := before.Leases[warm.InstanceName]
+	if err := controller.Release(context.Background(), "runner-integration"); err != nil {
+		t.Fatalf("release during victim teardown: %v", err)
 	}
-	if journal.Leases[warm.InstanceName].State != providerjournal.StateDeleting ||
-		journal.Leases[warm.InstanceName].PreemptedBy != "runner-integration" {
-		t.Fatalf("failed release mutated teardown ownership: %#v", journal)
+	journal, err := controller.Store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Leases["runner-integration"]; exists {
+		t.Fatalf("the released target survived: %#v", journal)
+	}
+	victim := journal.Leases[warm.InstanceName]
+	if victim.State != providerjournal.StateDeleting || victim.PreemptedBy != "" {
+		t.Fatalf("the victim must stay in teardown with no back-reference: %#v", journal)
+	}
+	if victim.MemoryMiB != victimBefore.MemoryMiB || victim.VCPU != victimBefore.VCPU {
+		t.Fatalf("the victim must stay charged to the host: %#v", victim)
+	}
+	if !victim.ExpiresAt.Equal(victimBefore.ExpiresAt) {
+		t.Fatalf("a lease already in teardown must not be extended: %v -> %v", victimBefore.ExpiresAt, victim.ExpiresAt)
+	}
+	if err := journal.Validate(); err != nil {
+		t.Fatalf("journal invariant broken by the release: %v", err)
 	}
 }
 
