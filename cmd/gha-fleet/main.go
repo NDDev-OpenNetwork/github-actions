@@ -28,6 +28,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetcontract"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmbootstrap"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmderivative"
+	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/githubappbootstrap"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostcapacity"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostdeps"
@@ -95,6 +96,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidateCache(args[1:], stdout, stderr)
 	case "validate-cache-broker":
 		return runValidateCacheBroker(args[1:], stdout, stderr)
+	case "validate-provider-config":
+		return runValidateProviderConfig(args[1:], stdout, stderr)
 	case "validate-telemetry":
 		return runValidateTelemetry(args[1:], stdout, stderr)
 	case "validate-rustfs-cache":
@@ -805,6 +808,42 @@ func runValidateRustFSCache(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+// runValidateProviderConfig loads the provider's toml exactly as the provider,
+// the observer and the warm-pool reconciler load it, on the host that will
+// read it, so a rollout can refuse a config before installing it. The .116
+// wave installed a toml with two previous identities and learned it from a
+// crash-looping observer and four refused creates.
+func runValidateProviderConfig(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("validate-provider-config", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "/etc/garm/provider-incus.toml", "provider configuration path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "gha-fleet: validate-provider-config accepts no positional arguments")
+		return 2
+	}
+	cfg, err := providerconfig.NewConfig(*path)
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: %v\n", err)
+		return 1
+	}
+	report := map[string]any{
+		"valid":                        true,
+		"path":                         *path,
+		"current_provider_identity":    cfg.CurrentProviderIdentity,
+		"previous_provider_identities": cfg.PreviousProviderIdentities,
+	}
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "gha-fleet: encode report: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(encoded))
 	return 0
 }
 
@@ -2364,5 +2403,5 @@ func runCapacity(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|export-job-lifecycle|render|admit|preflight|publish-pressure|drain-member|slab-heal|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
+	fmt.Fprintln(writer, "usage: gha-fleet <validate|validate-cache|validate-cache-broker|validate-provider-config|validate-telemetry|validate-rustfs-cache|validate-diagnostic-exporter|validate-diagnostic-storage|validate-tenant-registry|validate-queue-admission|validate-observability-rules|validate-observability-dashboards|render-openobserve-alerts|render-openobserve-dashboards|reconcile-openobserve-alerts|reconcile-openobserve-dashboards|export-job-lifecycle|render|admit|preflight|publish-pressure|drain-member|slab-heal|reconcile-incus|reconcile-image|bootstrap-github-app|verify-github-app|reconcile-garm|reconcile-zot-credentials|reconcile-rustfs-cache|reconcile-diagnostic-storage|render-garm-build|provider-release|fleet-contract|capacity|recover-provider-retry|recover-provider-job-retry|version> [options]")
 }

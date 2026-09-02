@@ -238,3 +238,42 @@ func TestWriteImagePreflightRejectionIncludesPhase(t *testing.T) {
 		}
 	}
 }
+
+// The rollout validates the provider toml with the gha-fleet it just built,
+// on the host that will read it, before installing it: a rollback list
+// longer than N-1 is refused with the validator's own words, and the command
+// takes no positional arguments.
+func TestValidateProviderConfigRefusesTwoPreviousIdentities(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "provider-incus.toml")
+	if err := os.WriteFile(path, []byte(`current_provider_identity = { version = "v0.1.5-nddev.116", commit = "c8f5f8633ea3012fdf1cf12ef0c2195e23cc0c20" }
+
+[[previous_provider_identities]]
+version = "v0.1.5-nddev.115"
+commit = "1208ef1a627309c3ed67663a86493e3cdc6dc30d"
+
+[[previous_provider_identities]]
+version = "v0.1.5-nddev.113"
+commit = "a4cd4345bf5eeef92264260ede79ddad8e8c41ec"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"validate-provider-config", "--config", path}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code %d, stdout %s stderr %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "error validating config") || stdout.Len() != 0 {
+		t.Fatalf("a refused config must be named on stderr only: stdout %q stderr %q", stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"validate-provider-config", "--config", path, "extra"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("positional argument accepted: exit %d", code)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"validate-provider-config", "--config", filepath.Join(t.TempDir(), "missing.toml")}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "error decoding config") {
+		t.Fatalf("a missing config must fail as a decode error: exit %d stderr %q", code, stderr.String())
+	}
+}
