@@ -509,3 +509,32 @@ func TestJobStartedHookLogsIntoTheBuildcacheAndKeepsGitHubCacheForUntrusted(t *t
 func TestCacheSetupHandsNodeTheFleetCA(t *testing.T) {
 	require.Contains(t, string(renderCacheSetupScript()), "NODE_EXTRA_CA_CERTS=%s")
 }
+
+// Anonymous git from the fleet's shared addresses is throttled under a
+// burst; the setup installs a github.com credential helper that answers
+// with the job token a step exports and stays silent otherwise, and it adds
+// the helper to the runner's baked git config instead of replacing it.
+func TestCacheSetupInstallsTheGitHubTokenCredentialHelper(t *testing.T) {
+	script := string(renderCacheSetupScript())
+	require.Contains(t, script, `credential_helper="/home/runner/.gha-cache/github-token-credential"`)
+	require.Contains(t, script, `git config --file /home/runner/.gitconfig "credential.https://github.com.helper" "${credential_helper}"`)
+	start := strings.Index(script, "<<'HELPER'\n")
+	end := strings.Index(script, "\nHELPER\n")
+	require.True(t, start > 0 && end > start, "helper body not rendered")
+	helper := filepath.Join(t.TempDir(), "github-token-credential")
+	require.NoError(t, os.WriteFile(helper, []byte(script[start+len("<<'HELPER'\n"):end+1]), 0o755))
+	run := func(action, input string, env ...string) string {
+		command := exec.Command("bash", helper, action)
+		command.Stdin = strings.NewReader(input)
+		command.Env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		return string(output)
+	}
+	github := "protocol=https\nhost=github.com\n\n"
+	require.Equal(t, "username=x-access-token\npassword=ghs_step\n", run("get", github, "GH_TOKEN=ghs_step"))
+	require.Equal(t, "username=x-access-token\npassword=ghs_job\n", run("get", github, "GITHUB_TOKEN=ghs_job"))
+	require.Equal(t, "", run("get", github), "a step that exports no token stays anonymous")
+	require.Equal(t, "", run("get", "protocol=https\nhost=gitlab.com\n\n", "GH_TOKEN=ghs_step"), "the token is for github.com only")
+	require.Equal(t, "", run("store", github, "GH_TOKEN=ghs_step"), "only get answers")
+}
