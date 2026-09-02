@@ -1387,22 +1387,48 @@ func (l *Incus) adoptColdDirectJIT(
 	}
 }
 
+// runnerToolFilename is the exact shape of an official linux-x64 runner
+// release asset. Anything else -- another architecture, another project, a
+// rewritten host -- is refused.
+var runnerToolFilename = regexp.MustCompile(`^actions-runner-linux-x64-(\d+\.\d+\.\d+)\.tar\.gz$`)
+
+// validateRunnerTool checks the runner package GitHub advertises for this
+// job. It does NOT require that package to be the version the fleet pins.
+//
+// The fleet does not download it. Every path the fleet uses -- the warm
+// claim and the direct-JIT cold create -- runs the runner baked into the
+// worker image, and neither passes the cloud-config this metadata would
+// have fed (provider .108). The version that runs is pinned where it is
+// installed: the image manifest names the archive and its digest, the build
+// verifies both and the smoke asserts the installed runner.
+//
+// Requiring GitHub's advertised version to equal the pinned one made the
+// fleet's create depend on GitHub's release schedule. On 2026-09-02 GitHub
+// moved every organisation to 2.337.0 while the image baked 2.336.0, and
+// within ten minutes 25 of 77 creates failed with "filename ... does not
+// match pinned ...", a share that would have reached every create as the
+// warm pools drained. A supply-chain guard must constrain what runs, not
+// what an upstream advertises.
+//
+// What stays: the asset must be an official actions/runner linux-x64
+// release tarball whose download URL is the github.com release URL for that
+// same filename, so a substituted host or a renamed asset is still refused.
 func (l *Incus) validateRunnerTool(tool commonParams.RunnerApplicationDownload) error {
-	version := strings.TrimPrefix(l.platform.ControlPlane.RunnerVersion, "v")
-	if version == "" || version == l.platform.ControlPlane.RunnerVersion {
+	if strings.TrimPrefix(l.platform.ControlPlane.RunnerVersion, "v") == l.platform.ControlPlane.RunnerVersion {
 		return fmt.Errorf("platform runner version must have a v prefix")
 	}
-	expectedFilename := fmt.Sprintf("actions-runner-linux-x64-%s.tar.gz", version)
+	filename := tool.GetFilename()
+	match := runnerToolFilename.FindStringSubmatch(filename)
+	if match == nil {
+		return fmt.Errorf("filename %q is not an official linux-x64 runner release asset", filename)
+	}
 	expectedURL := fmt.Sprintf(
 		"https://github.com/actions/runner/releases/download/v%s/%s",
-		version,
-		expectedFilename,
+		match[1],
+		filename,
 	)
-	if tool.GetFilename() != expectedFilename {
-		return fmt.Errorf("filename %q does not match pinned %q", tool.GetFilename(), expectedFilename)
-	}
 	if tool.GetDownloadURL() != expectedURL {
-		return fmt.Errorf("download URL %q does not match pinned official URL", tool.GetDownloadURL())
+		return fmt.Errorf("download URL %q does not match the official release URL for %q", tool.GetDownloadURL(), filename)
 	}
 	return nil
 }

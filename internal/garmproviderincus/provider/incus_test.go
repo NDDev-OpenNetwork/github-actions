@@ -943,18 +943,41 @@ func TestGetCreateInstanceArgsInjectsOnlyTrustedRunnerCacheBootstrap(t *testing.
 	require.Contains(t, string(specs.PreInstallScripts["01-nddev-runner-groups.sh"]), "usermod --groups sudo runner")
 }
 
-func TestRunnerToolMetadataMustMatchPinnedImageVersion(t *testing.T) {
+// The runner that runs is the one baked into the image, and the image
+// manifest pins it. This guard constrains the package GitHub advertises to
+// an official actions/runner linux-x64 release whose URL matches its own
+// filename -- and deliberately not to the fleet's pinned version, because
+// requiring that made every create depend on GitHub's release schedule: on
+// 2026-09-02 GitHub moved every organisation to 2.337.0 and 25 of 77 creates
+// failed in ten minutes while the image ran 2.336.0 perfectly well.
+func TestRunnerToolMetadataMustBeAnOfficialReleaseAsset(t *testing.T) {
 	provider := newTestProvider(new(MockIncusServer))
 	valid := testTools()[0]
 	require.NoError(t, provider.validateRunnerTool(valid))
 
-	wrongFilename := valid
-	wrongFilename.Filename = ptr("actions-runner-linux-x64-2.337.0.tar.gz")
-	require.ErrorContains(t, provider.validateRunnerTool(wrongFilename), "does not match pinned")
+	newerThanPinned := valid
+	newerThanPinned.Filename = ptr("actions-runner-linux-x64-2.337.0.tar.gz")
+	newerThanPinned.DownloadURL = ptr("https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz")
+	require.NoError(t, provider.validateRunnerTool(newerThanPinned), "a newer advertised runner is not a reason to refuse the job")
 
-	wrongURL := valid
-	wrongURL.DownloadURL = ptr("https://example.invalid/actions-runner-linux-x64-2.336.0.tar.gz")
-	require.ErrorContains(t, provider.validateRunnerTool(wrongURL), "does not match pinned official URL")
+	mismatched := valid
+	mismatched.Filename = ptr("actions-runner-linux-x64-2.337.0.tar.gz")
+	require.ErrorContains(t, provider.validateRunnerTool(mismatched), "does not match the official release URL")
+
+	substitutedHost := valid
+	substitutedHost.DownloadURL = ptr("https://example.invalid/actions-runner-linux-x64-2.336.0.tar.gz")
+	require.ErrorContains(t, provider.validateRunnerTool(substitutedHost), "does not match the official release URL")
+
+	for _, name := range []string{
+		"actions-runner-linux-arm64-2.336.0.tar.gz",
+		"actions-runner-osx-x64-2.336.0.tar.gz",
+		"totally-not-a-runner-2.336.0.tar.gz",
+		"actions-runner-linux-x64-2.336.0.tar.gz.sig",
+	} {
+		wrong := valid
+		wrong.Filename = ptr(name)
+		require.ErrorContains(t, provider.validateRunnerTool(wrong), "not an official linux-x64 runner release asset", name)
+	}
 }
 
 func TestCanonicalRepositoryIdentity(t *testing.T) {
