@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -385,8 +386,6 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 		}{
 			{trustKey, pool.Trust},
 			{scaleSetKey, pool.ScaleSetName},
-			{networkPolicyKey, pool.Capabilities.NetworkPolicy},
-			{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 		}
 		for _, check := range poolChecks {
 			if actual := instance.ExpandedConfig[check.key]; actual != check.expected {
@@ -396,6 +395,31 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 					check.key,
 					actual,
 					check.expected,
+				)
+			}
+		}
+		// A pool's network policy and cache write scope can move while its
+		// instances live. The record on an instance is the contract it was
+		// created under: on an executing one-job worker that is history and
+		// stays admissible, on a warm instance it is currency and the warm
+		// reconciler recycles it. Holding both equal to the pool's current
+		// value stalled every warm reconcile on 2026-09-02 -- including the
+		// one that could have recycled the outdated warm instances -- until
+		// the records were corrected by hand. What is still refused is a
+		// value no pool could ever have declared.
+		for _, capability := range []struct {
+			key     string
+			allowed []string
+		}{
+			{networkPolicyKey, []string{"github-cache-only", "public-internet", "release-allowlist"}},
+			{cacheWriteScopeKey, []string{"none", "isolated", "trusted"}},
+		} {
+			if actual := instance.ExpandedConfig[capability.key]; !slices.Contains(capability.allowed, actual) {
+				return nil, fmt.Errorf(
+					"instance %q has %s=%q, which no pool declares",
+					instance.Name,
+					capability.key,
+					actual,
 				)
 			}
 		}

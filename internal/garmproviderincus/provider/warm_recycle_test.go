@@ -101,3 +101,24 @@ func TestReconcileWarmAppliesTheRecycleForStaleIdentity(t *testing.T) {
 		})
 	}
 }
+
+// A pool capability moved under a warm instance -- the priority pools took
+// cache_write_scope trusted on 2026-09-02 -- and the instance prepared under
+// the old value is outdated, not a boundary violation: recycled, not a
+// reconcile that stalls on the one instance only a reconcile could remove.
+func TestReconcileWarmRecyclesAnInstanceWhosePoolCapabilityMoved(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	setWarmTarget(provider, "nddev-linux-standard", 1)
+	moved := warmInstance("warm-standard-moved")
+	moved.Config[cacheWriteScopeKey] = "none"
+	moved.ExpandedConfig[cacheWriteScopeKey] = "none"
+	cli.On("GetInstancesFull", api.InstanceTypeAny).
+		Return([]api.InstanceFull{*moved}, nil).Once()
+
+	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"warm-standard-moved"}, result.RecycledStale)
+	require.Equal(t, 0, result.ReadyBefore)
+	cli.AssertNotCalled(t, "DeleteInstance", mock.Anything)
+}
