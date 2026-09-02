@@ -2,7 +2,7 @@ schema_version: 1
 
 image:
   type: container
-  alias: nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b15
+  alias: nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b16
   current_alias: nddev-ubuntu-24.04-amd64-container-docker-current
   previous_alias: nddev-ubuntu-24.04-amd64-container-docker-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801
@@ -126,6 +126,15 @@ guest:
   variant: integration
   browser: chromium
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
+  # The fleet cache CA (CN NDDev-GHA-Cache-CA, valid to 2036-08-07) signs every
+  # member's registry mirror. The estate installs it on every host as the
+  # cache trust anchor; the build reads it there, proves this digest and
+  # subject, and bakes it into the image's trust store before Docker first
+  # starts, because dockerd reads its trust once, at start, from that store.
+  registry_mirror_ca:
+    path: /etc/gha-fleet/trust/rustfs-ca.pem
+    sha256: 65e525af0b567b71c970d9659f655307d63c6a2539f63423a20c64ade26b5676
+    subject: CN=NDDev-GHA-Cache-CA
   path_binaries:
     - name: actionlint
       version: v1.7.12

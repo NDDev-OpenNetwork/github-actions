@@ -122,6 +122,10 @@ func TestTheOnlyDifferenceIsTheDeclaredDelta(t *testing.T) {
 		"Variant":             true,
 		"DockerActionBaseRef": true,
 		"Browser":             true,
+		// Only the docker-capable image talks to the members' registry mirror,
+		// so only it bakes the CA that signs the mirror; the standard image
+		// must not carry it (validation refuses it there).
+		"RegistryMirrorCA": true,
 	}
 	for index := 0; index < guest.NumField(); index++ {
 		name := guest.Field(index).Name

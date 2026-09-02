@@ -116,6 +116,10 @@ guest:
   builder_disk_gib: 30
   variant: integration
   docker_action_base_ref: nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1
+  registry_mirror_ca:
+    path: /etc/gha-fleet/trust/rustfs-ca.pem
+    sha256: 65e525af0b567b71c970d9659f655307d63c6a2539f63423a20c64ade26b5676
+    subject: CN=NDDev-GHA-Cache-CA
   path_binaries:
     - name: actionlint
       version: v1.7.12

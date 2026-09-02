@@ -35,6 +35,9 @@ type Plan struct {
 	Variant             string                      `json:"variant"`
 	DockerActionBaseRef string                      `json:"docker_action_base_ref,omitempty"`
 	Browser             string                      `json:"browser,omitempty"`
+	// RegistryMirrorCA is copied from the manifest so the build, the smoke and
+	// the published image all carry the same pinned certificate identity.
+	RegistryMirrorCA *imagemanifest.RegistryMirrorCA `json:"registry_mirror_ca,omitempty"`
 }
 
 func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (Plan, error) {
@@ -135,5 +138,6 @@ func Build(cfg config.Config, manifest imagemanifest.Manifest, profile string) (
 		Variant:             manifest.Guest.EffectiveVariant(),
 		DockerActionBaseRef: manifest.Guest.DockerActionBaseRef,
 		Browser:             manifest.Guest.Browser,
+		RegistryMirrorCA:    manifest.Guest.RegistryMirrorCA,
 	}, nil
 }

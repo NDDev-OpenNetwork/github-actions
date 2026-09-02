@@ -66,6 +66,10 @@ type Orchestrator struct {
 // localClusterMember reports which cluster member this command is running on,
 // or an empty string on a standalone server. It caches, because every caller
 // below needs the same answer and it cannot change mid-build.
+// registryMirrorCAGuestPath is where the verified CA waits inside the builder
+// until docker-provision.sh moves it into the trust store and removes it.
+const registryMirrorCAGuestPath = "/var/tmp/gha-registry-mirror-ca.crt"
+
 func (o *Orchestrator) localClusterMember(ctx context.Context) (string, error) {
 	if o.clusterMember != "" {
 		return o.clusterMember, nil
@@ -356,6 +360,12 @@ func validateArtifactPaths(plan imageplan.Plan, artifacts Artifacts) error {
 		actual["browser-smoke"] = artifacts.BrowserSmoke
 	} else if artifacts.BrowserSmoke != "" {
 		return fmt.Errorf("unexpected browser smoke artifact was fetched")
+	}
+	if plan.RegistryMirrorCA != nil {
+		wanted["registry-mirror-ca"] = registryMirrorCAArtifact
+		actual["registry-mirror-ca"] = artifacts.RegistryMirrorCA
+	} else if artifacts.RegistryMirrorCA != "" {
+		return fmt.Errorf("unexpected registry mirror CA artifact was fetched")
 	}
 	for _, toolchain := range plan.Toolchains {
 		path, ok := artifacts.Toolchains[toolchain.Name]
@@ -649,11 +659,21 @@ exit 1`); err != nil {
 		}
 	}
 	if plan.Variant == "integration" {
+		if plan.RegistryMirrorCA == nil {
+			return "", "", fmt.Errorf("docker-capable plan carries no registry mirror CA")
+		}
+		mirrorCADestination := plan.BuilderName + registryMirrorCAGuestPath
+		if _, err = o.Runner.Run(ctx, o.incus(plan.Project, "file", "push", artifacts.RegistryMirrorCA, mirrorCADestination, "--mode", "0600")...); err != nil {
+			return "", "", fmt.Errorf("push verified registry mirror CA: %w", err)
+		}
 		dockerProvision, _ := scripts.ReadFile("assets/docker-provision.sh")
 		if _, err = o.runGuest(ctx, plan.Project, plan.BuilderName, map[string]string{
-			"GHA_DOCKER_ACTION_BASE_REF": plan.DockerActionBaseRef,
-			"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
-			"GHA_BROWSER":                plan.Browser,
+			"GHA_DOCKER_ACTION_BASE_REF":     plan.DockerActionBaseRef,
+			"GHA_DOCKER_STORAGE_DRIVER":      dockerStorageDriver(plan),
+			"GHA_BROWSER":                    plan.Browser,
+			"GHA_REGISTRY_MIRROR_CA":         registryMirrorCAGuestPath,
+			"GHA_REGISTRY_MIRROR_CA_SHA256":  plan.RegistryMirrorCA.SHA256,
+			"GHA_REGISTRY_MIRROR_CA_SUBJECT": plan.RegistryMirrorCA.Subject,
 		}, string(dockerProvision)); err != nil {
 			return "", "", fmt.Errorf("provision Docker integration image: %w", err)
 		}
@@ -701,6 +721,11 @@ exit 1`); err != nil {
 		properties = append(properties,
 			"user.nddev.docker-action-base="+plan.DockerActionBaseRef,
 		)
+		if plan.RegistryMirrorCA != nil {
+			properties = append(properties,
+				"user.nddev.registry-mirror-ca.sha256="+plan.RegistryMirrorCA.SHA256,
+			)
+		}
 	}
 	if plan.Browser != "" {
 		properties = append(properties,
@@ -837,6 +862,9 @@ func (o Orchestrator) smoke(ctx context.Context, plan imageplan.Plan, fingerprin
 		"GHA_DOCKER_STORAGE_DRIVER":  dockerStorageDriver(plan),
 		"GHA_BROWSER":                plan.Browser,
 		"GHA_PROVIDES":               strings.Join(plan.Provides, " "),
+	}
+	if plan.RegistryMirrorCA != nil {
+		smokeEnvironment["GHA_REGISTRY_MIRROR_CA_SHA256"] = plan.RegistryMirrorCA.SHA256
 	}
 	if plan.Browser != "" {
 		smokeEnvironment["GHA_BROWSER_SMOKE_VERSION"] = plan.BrowserSmoke.Version

@@ -16,6 +16,7 @@ var (
 	packageVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+:~_-]{0,127}$`)
 	imageRefPattern       = regexp.MustCompile(`^nddev/gha-action-base:busybox-[0-9][a-z0-9.-]{2,95}$`)
 	sha256Pattern         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	subjectPattern        = regexp.MustCompile(`^CN=[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
 	fingerprintPattern    = regexp.MustCompile(`^[0-9A-F]{40}$`)
 	releaseIDPattern      = regexp.MustCompile(`^[0-9]{8}$`)
 	versionPattern        = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -259,6 +260,15 @@ func (m Manifest) Validate() error {
 	} else if m.Guest.DockerActionBaseRef != "" {
 		add("guest.docker_action_base_ref", "must be empty for the standard image")
 	}
+	if variant == "integration" {
+		if m.Guest.RegistryMirrorCA == nil {
+			add("guest.registry_mirror_ca", "is required for the docker-capable image: dockerd trusts the members' registry mirror only through the image's own trust store")
+		} else {
+			validateRegistryMirrorCA(add, *m.Guest.RegistryMirrorCA)
+		}
+	} else if m.Guest.RegistryMirrorCA != nil {
+		add("guest.registry_mirror_ca", "belongs to the docker-capable image only")
+	}
 	if m.Guest.Browser != "" && m.Guest.Browser != "chromium" {
 		add("guest.browser", "must be empty or chromium")
 	}
@@ -416,6 +426,20 @@ func validateRunnerURL(add func(string, string), runner Runner) {
 	wanted := "/actions/runner/releases/download/" + runner.Version + "/" + runner.Archive
 	if parsed.Path != wanted {
 		add("runner.download_url", "must exactly match the pinned actions/runner release asset")
+	}
+}
+
+// validateRegistryMirrorCA holds the mirror CA to a file under the fleet's
+// trust directory, a pinned digest and an exact subject, so the certificate
+// the image ships is the one the estate reviewed and no other.
+func validateRegistryMirrorCA(add func(string, string), ca RegistryMirrorCA) {
+	if !strings.HasPrefix(ca.Path, "/etc/gha-fleet/trust/") || strings.Contains(ca.Path, "..") ||
+		path.Clean(ca.Path) != ca.Path || !strings.HasSuffix(ca.Path, ".pem") {
+		add("guest.registry_mirror_ca.path", "must be a .pem file under /etc/gha-fleet/trust/")
+	}
+	validateSHA(add, "guest.registry_mirror_ca.sha256", ca.SHA256)
+	if !subjectPattern.MatchString(ca.Subject) {
+		add("guest.registry_mirror_ca.subject", "must be an exact CN=<name> subject")
 	}
 }
 
