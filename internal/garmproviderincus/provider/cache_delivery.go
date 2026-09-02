@@ -31,7 +31,11 @@ const (
 	cacheConsumedPath        = cacheAssignmentDirectory + "/provider-assignment.consumed"
 	cacheHookPath            = cacheAssignmentDirectory + "/job-start.sh"
 	cacheCAPath              = cacheAssignmentDirectory + "/rustfs-ca.pem"
-	cacheCABundlePath        = cacheAssignmentDirectory + "/rustfs-ca-bundle.pem"
+	// cacheGitCredentialHelperPath is the git credential helper the setup
+	// installs for github.com: it answers with the job token a step exports
+	// (GH_TOKEN or GITHUB_TOKEN) and stays silent otherwise.
+	cacheGitCredentialHelperPath = cacheAssignmentDirectory + "/github-token-credential"
+	cacheCABundlePath            = cacheAssignmentDirectory + "/rustfs-ca-bundle.pem"
 	// The Docker-capable image is larger and brings its daemon up before the
 	// guest agent settles, so on rotational storage a cold create was measured
 	// at 77s end to end and lost the race with a 75s window. This still sits
@@ -279,6 +283,37 @@ install -d -o runner -g runner -m 0755 "${runner_root}"
 } >"${runner_root}/.env"
 chown runner:runner "${runner_root}/.env"
 chmod 0600 "${runner_root}/.env"
+# Anonymous git to github.com leaves the fleet from four shared addresses,
+# and GitHub throttles anonymous git per address under a burst: on
+# 2026-09-02 between 09:25Z and 09:40Z two projects lost jobs to "could not
+# read Username for 'https://github.com'" (a public clone and cargo's
+# advisory-db fetch). A step that exports its job token as GH_TOKEN or
+# GITHUB_TOKEN now hands it to every git call through this helper, so git's
+# identity is the token and not the member's address; a step that exports
+# nothing stays anonymous, exactly as before. git only asks the helper after
+# a 401, so an anonymous request that succeeds costs nothing.
+credential_helper=%q
+cat >"${credential_helper}" <<'HELPER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "${1:-}" == "get" ]] || exit 0
+token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+[[ -n "${token}" ]] || exit 0
+host=""
+while IFS= read -r line; do
+  [[ -z "${line}" ]] && break
+  case "${line}" in host=*) host="${line#host=}" ;; esac
+done
+[[ "${host}" == "github.com" ]] || exit 0
+printf 'username=x-access-token\npassword=%%s\n' "${token}"
+HELPER
+chown root:root "${credential_helper}"
+chmod 0755 "${credential_helper}"
+# The image bakes the runner's global git config (safe.directory entries), so
+# the helper is added to it, never written over it.
+git config --file /home/runner/.gitconfig "credential.https://github.com.helper" "${credential_helper}"
+chown runner:runner /home/runner/.gitconfig
+chmod 0644 /home/runner/.gitconfig
 chown runner:runner "${assignment}"
 chmod 0400 "${assignment}"
 chown runner:runner %q
@@ -286,6 +321,7 @@ chmod 0700 %q
 `, cacheAssignmentPath, cacheReadyPath, cacheHookPath, cacheCAPath,
 		cacheAssignmentDirectory, cacheCABundlePath, hook,
 		cacheCABundlePath, cacheCABundlePath, cacheCABundlePath,
+		cacheGitCredentialHelperPath,
 		cacheAssignmentDirectory, cacheAssignmentDirectory),
 		cacheRoleClausePlaceholder, cacheRoleJQClause()))
 }

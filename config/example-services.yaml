@@ -27,7 +27,7 @@ control_plane:
   manager_version: v0.2.1-nddev.88
   scheduling_mode: scale-set
   provider: incus
-  provider_version: v0.1.5-nddev.117
+  provider_version: v0.1.5-nddev.118
   provider_interface: v0.1.0
   worker_kind: incus-container
   runner: actions/runner
