@@ -63,6 +63,24 @@ func BuildcacheRepositoryFor(repository string, class TrustClass) (string, error
 	return strings.Join([]string{"buildcache", parts[0], parts[1], string(class)}, "/"), nil
 }
 
+// ActionsCachePrefixFor is where a drop-in replacement for actions/cache
+// (runs-on/cache) writes a repository's objects: cache/<owner>/<repo>/...,
+// the layout that action hard-codes. It is granted to the trusted writer
+// only -- an untrusted build keeps GitHub's own cache, so nothing it writes
+// can be restored by a trusted one -- and it lives beside the trust roots,
+// not under them, because the action cannot be told a prefix.
+func ActionsCachePrefixFor(repository string) (string, error) {
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || !validSegment(parts[0]) || !validSegment(parts[1]) {
+		return "", fmt.Errorf("cache repository %q must be organization/repository", repository)
+	}
+	return strings.Join([]string{actionsCacheSegment, parts[0], parts[1]}, "/"), nil
+}
+
+// ActionsCacheIdentifier names the lifecycle rule for the actions cache
+// prefix, the way Identifier names a trust class's.
+const ActionsCacheIdentifier = "actions"
+
 // ParsePrefixRoot returns the repository and trust class encoded by a complete
 // credential root. It rejects additional path segments and ambiguous values.
 func ParsePrefixRoot(prefix string) (string, TrustClass, error) {
@@ -107,6 +125,9 @@ const (
 	// to omit -- the template described seven segments and the implementation
 	// wrote eight.
 	trustSegment = "trust"
+	// actionsCacheSegment is the top-level segment runs-on/cache writes under;
+	// see ActionsCachePrefixFor.
+	actionsCacheSegment = "cache"
 )
 
 // PrefixRoot is the credential-scoped root for a trust class. Every S3 policy,

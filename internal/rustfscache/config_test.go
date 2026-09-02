@@ -195,3 +195,46 @@ func testConfig(t *testing.T, directory string) Config {
 		},
 	}
 }
+
+// The trusted writer may carry runs-on/cache's cache/<owner>/<repo> prefix,
+// and only it: an untrusted build keeps GitHub's cache so nothing it writes
+// is restored by a trusted build, and the prefix is exactly the layout the
+// action hard-codes, never a hand-picked one.
+func TestOnlyTheTrustedWriterMayCarryTheActionsCachePrefix(t *testing.T) {
+	config, err := Load(filepath.Join("..", "..", "config", "rustfs-cache-identities.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Endpoint = "https://192.0.2.1:9002"
+	index := func(role string) int {
+		for i, identity := range config.Identities {
+			if identity.Role == role {
+				return i
+			}
+		}
+		t.Fatalf("role %s is missing", role)
+		return -1
+	}
+	trusted, untrusted := index("trusted-writer"), index("untrusted-writer")
+
+	accepted := config
+	accepted.Identities = append([]Identity(nil), config.Identities...)
+	accepted.Identities[trusted].ActionsCachePrefix = "cache/example-org/example-actions"
+	if err := accepted.Validate(); err != nil {
+		t.Fatalf("the trusted writer's actions cache prefix must validate: %v", err)
+	}
+
+	wrongPrefix := config
+	wrongPrefix.Identities = append([]Identity(nil), config.Identities...)
+	wrongPrefix.Identities[trusted].ActionsCachePrefix = "cache/example-org/other"
+	if err := wrongPrefix.Validate(); err == nil || !strings.Contains(err.Error(), "actions cache prefix must be") {
+		t.Fatalf("a prefix outside the repository must be refused, got %v", err)
+	}
+
+	onUntrusted := config
+	onUntrusted.Identities = append([]Identity(nil), config.Identities...)
+	onUntrusted.Identities[untrusted].ActionsCachePrefix = "cache/example-org/example-actions"
+	if err := onUntrusted.Validate(); err == nil || !strings.Contains(err.Error(), "only the trusted writer may") {
+		t.Fatalf("the untrusted writer must never carry the actions cache prefix, got %v", err)
+	}
+}

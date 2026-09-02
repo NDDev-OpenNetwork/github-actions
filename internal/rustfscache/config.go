@@ -57,6 +57,14 @@ type Identity struct {
 	Prefix        string `yaml:"prefix" json:"prefix"`
 	Mode          string `yaml:"mode" json:"mode"`
 	RetentionDays int    `yaml:"retention_days" json:"retention_days"`
+	// ActionsCachePrefix, when set on the trusted writer, also grants that
+	// credential cache/<owner>/<repo>/* -- the layout runs-on/cache, the
+	// drop-in for actions/cache, hard-codes -- so a job's dependency caches
+	// live on the fleet's own store instead of GitHub's, one LAN hop away.
+	// Only the trusted writer may carry it: an untrusted build keeps GitHub's
+	// cache, so nothing it writes is ever restored by a trusted build. The
+	// prefix follows the trusted writer's retention.
+	ActionsCachePrefix string `yaml:"actions_cache_prefix,omitempty" json:"actions_cache_prefix,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -170,6 +178,15 @@ func (c Config) Validate() error {
 		if identity.Mode != expected.mode || identity.Policy != expected.policy || identity.Prefix != expected.prefix ||
 			identity.RetentionDays != expected.retention {
 			return fmt.Errorf("identity %s trust contract drifted", identity.Role)
+		}
+		if identity.ActionsCachePrefix != "" {
+			if identity.Role != "trusted-writer" {
+				return fmt.Errorf("identity %s must not carry an actions cache prefix; only the trusted writer may", identity.Role)
+			}
+			wantedActions, actionsErr := cachenamespace.ActionsCachePrefixFor(repository)
+			if actionsErr != nil || identity.ActionsCachePrefix != wantedActions {
+				return fmt.Errorf("identity %s actions cache prefix must be %q", identity.Role, wantedActions)
+			}
 		}
 	}
 	return nil
