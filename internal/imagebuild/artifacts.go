@@ -2,9 +2,12 @@ package imagebuild
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/imagemanifest"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/imageplan"
 )
 
@@ -31,6 +35,9 @@ type Artifacts struct {
 	CompilerCache string `json:"compiler_cache"`
 	GoCacheSeed   string `json:"go_cache_seed"`
 	BrowserSmoke  string `json:"browser_smoke,omitempty"`
+	// RegistryMirrorCA is the verified copy of the fleet cache CA the
+	// docker-capable image bakes into its trust store; empty otherwise.
+	RegistryMirrorCA string `json:"registry_mirror_ca,omitempty"`
 	// Toolchains maps each pinned toolchain name to its verified local archive.
 	Toolchains map[string]string `json:"toolchains"`
 	// PathBinaries maps each pinned PATH tool to its verified local archive.
@@ -82,6 +89,9 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 	}
 	if plan.BrowserSmoke != nil {
 		artifacts.BrowserSmoke = filepath.Join(directory, plan.BrowserSmoke.Archive)
+	}
+	if plan.RegistryMirrorCA != nil {
+		artifacts.RegistryMirrorCA = filepath.Join(directory, registryMirrorCAArtifact)
 	}
 	failed := true
 	defer func() {
@@ -155,9 +165,61 @@ func FetchArtifacts(ctx context.Context, plan imageplan.Plan) (Artifacts, error)
 			return Artifacts{}, fmt.Errorf("download browser smoke artifact: %w", err)
 		}
 	}
+	if plan.RegistryMirrorCA != nil {
+		if err := copyRegistryMirrorCA(*plan.RegistryMirrorCA, artifacts.RegistryMirrorCA); err != nil {
+			return Artifacts{}, fmt.Errorf("verify registry mirror CA: %w", err)
+		}
+	}
 	artifacts.VerifiedBy = plan.Source.SignerFingerprint
 	failed = false
 	return artifacts, nil
+}
+
+const registryMirrorCAArtifact = "registry-mirror-ca.crt"
+
+// copyRegistryMirrorCA reads the fleet cache CA from the build host and
+// proves it is the certificate the manifest pins -- by digest, by subject and
+// by being a CA that is still valid -- before it becomes part of an image.
+// The host file is the estate's trust anchor for the cache; the build does
+// not fetch it from anywhere else.
+func copyRegistryMirrorCA(pin imagemanifest.RegistryMirrorCA, destination string) error {
+	info, err := os.Lstat(pin.Path)
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", pin.Path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", pin.Path)
+	}
+	if info.Size() > 64<<10 {
+		return fmt.Errorf("%s is %d bytes, larger than any single CA certificate", pin.Path, info.Size())
+	}
+	raw, err := os.ReadFile(pin.Path)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(raw)
+	if got := hex.EncodeToString(digest[:]); got != pin.SHA256 {
+		return fmt.Errorf("%s has digest %s, manifest pins %s", pin.Path, got, pin.SHA256)
+	}
+	block, rest := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
+		return fmt.Errorf("%s must hold exactly one PEM certificate", pin.Path)
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", pin.Path, err)
+	}
+	if subject := certificate.Subject.String(); subject != pin.Subject {
+		return fmt.Errorf("%s has subject %q, manifest pins %q", pin.Path, subject, pin.Subject)
+	}
+	if !certificate.IsCA {
+		return fmt.Errorf("%s is not a CA certificate", pin.Path)
+	}
+	if now := time.Now(); now.Before(certificate.NotBefore) || now.After(certificate.NotAfter) {
+		return fmt.Errorf("%s is not valid at build time (valid %s to %s)", pin.Path,
+			certificate.NotBefore.Format(time.RFC3339), certificate.NotAfter.Format(time.RFC3339))
+	}
+	return os.WriteFile(destination, raw, 0o600)
 }
 
 func downloadClient() *http.Client {

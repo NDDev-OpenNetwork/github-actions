@@ -381,7 +381,7 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 		}
 	}
 	dockerProvision, _ := scripts.ReadFile("assets/docker-provision.sh")
-	for _, invariant := range []string{"overlay2", "overlayfs", "GHA_DOCKER_STORAGE_DRIVER", "native.cgroupdriver=systemd", "docker buildx version", "docker compose version", "docker import", "--network none"} {
+	for _, invariant := range []string{"overlay2", "overlayfs", "GHA_DOCKER_STORAGE_DRIVER", "native.cgroupdriver=systemd", "docker buildx version", "docker compose version", "docker import", "--network none", "GHA_REGISTRY_MIRROR_CA_SHA256", "update-ca-certificates", "openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt"} {
 		if !strings.Contains(string(dockerProvision), invariant) {
 			t.Fatalf("Docker provision script misses %s", invariant)
 		}
@@ -464,6 +464,7 @@ func TestIntegrationSmokeCleanupDoesNotReenterErrorTrap(t *testing.T) {
 		"GHA_TOOLCHAINS_B64="+base64.StdEncoding.EncodeToString([]byte("[]")),
 		"GHA_GO_CACHE_SEED_COMMIT="+strings.Repeat("a", 40),
 		"GHA_GO_CACHE_SEED_SHA256="+strings.Repeat("b", 64),
+		"GHA_REGISTRY_MIRROR_CA_SHA256="+strings.Repeat("c", 64),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {

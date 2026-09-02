@@ -155,6 +155,28 @@ type Guest struct {
 	Variant             string            `json:"variant,omitempty" yaml:"variant,omitempty"`
 	DockerActionBaseRef string            `json:"docker_action_base_ref,omitempty" yaml:"docker_action_base_ref,omitempty"`
 	Browser             string            `json:"browser,omitempty" yaml:"browser,omitempty"`
+	// RegistryMirrorCA is the fleet CA that signs every member's registry
+	// mirror (zot on 192.0.2.1:5001, the docker.io pull-through cache the
+	// daemon.json this image bakes has named since the image was born).
+	// dockerd with the containerd image store loads its trust once, from the
+	// system store, when it starts: a CA delivered later by a claim, into
+	// certs.d, or into the store without a restart never reaches it, which
+	// is why the mirror went unused for a month while every pull logged an
+	// unknown authority and fell through to docker.io. The build reads the
+	// certificate from the host it runs on, proves the pinned digest and
+	// subject, and installs it into the image's trust store before Docker
+	// first starts.
+	RegistryMirrorCA *RegistryMirrorCA `json:"registry_mirror_ca,omitempty" yaml:"registry_mirror_ca,omitempty"`
+}
+
+// RegistryMirrorCA pins the certificate the docker-capable image trusts for
+// the members' registry mirror. Path names the file on the build host; the
+// estate installs it on every host as the cache trust anchor, and the pinned
+// digest is what makes the bytes the image ships reviewable.
+type RegistryMirrorCA struct {
+	Path    string `json:"path" yaml:"path"`
+	SHA256  string `json:"sha256" yaml:"sha256"`
+	Subject string `json:"subject" yaml:"subject"`
 }
 
 func (g Guest) EffectiveVariant() string {
