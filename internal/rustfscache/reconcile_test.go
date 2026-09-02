@@ -519,3 +519,34 @@ func (f *fakeRustFS) objectRequest(method, key string, body []byte, canRead, can
 func status(code int) Response {
 	return Response{StatusCode: code, Body: []byte(fmt.Sprintf("status-%d", code))}
 }
+
+// A trusted writer with an actions cache prefix is granted the listing and the
+// objects under it, bounded to that prefix, and the bucket expires the prefix
+// with the trusted writer's retention.
+func TestPolicyAndLifecycleCarryTheActionsCachePrefix(t *testing.T) {
+	identity := Identity{Role: "trusted-writer", Policy: "gha-cache-example-trusted", Prefix: "example-org/example-actions/trust/trusted",
+		Mode: "read-write", RetentionDays: 30, ActionsCachePrefix: "cache/example-org/example-actions"}
+	policy := string(policyDocument("example-actions-cache", identity))
+	for _, want := range []string{
+		`"s3:ListBucket"`, `"s3:prefix":["cache/example-org/example-actions/*"]`,
+		`"arn:aws:s3:::example-actions-cache/cache/example-org/example-actions/*"`,
+		`"arn:aws:s3:::example-actions-cache/example-org/example-actions/trust/trusted/*"`,
+	} {
+		if !strings.Contains(policy, want) {
+			t.Fatalf("policy lacks %s: %s", want, policy)
+		}
+	}
+	plain := string(policyDocument("example-actions-cache", Identity{Role: "trusted-writer", Prefix: identity.Prefix, Mode: "read-write"}))
+	if strings.Contains(plain, "s3:ListBucket") || strings.Contains(plain, "example-actions-cache/cache/example-org") {
+		t.Fatalf("a writer without the prefix must not be granted it: %s", plain)
+	}
+	config := Config{Identities: []Identity{identity,
+		{Role: "untrusted-writer", Prefix: "example-org/example-actions/trust/untrusted", Mode: "read-write", RetentionDays: 7}}}
+	lifecycle := lifecycleDocument(config)
+	if !strings.Contains(string(lifecycle), "<ID>actions-cache-expiry</ID><Filter><Prefix>cache/example-org/example-actions/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days>") {
+		t.Fatalf("lifecycle lacks the actions cache rule: %s", lifecycle)
+	}
+	if !lifecycleEquivalent(lifecycle, config) {
+		t.Fatal("the lifecycle document must be equivalent to its own config")
+	}
+}

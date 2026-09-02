@@ -648,28 +648,61 @@ func policyDocument(bucket string, identity Identity) []byte {
 		actions = append(actions, "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:PutObject")
 		sort.Strings(actions)
 	}
-	document := map[string]any{
-		"Version": "2012-10-17",
-		"Statement": []any{
+	statements := []any{
+		map[string]any{
+			"Effect": "Allow", "Action": []string{"s3:GetBucketLocation"},
+			"Resource": []string{"arn:aws:s3:::" + bucket},
+		},
+		map[string]any{
+			"Effect": "Allow", "Action": actions,
+			"Resource": []string{"arn:aws:s3:::" + bucket + "/" + identity.Prefix + "/*"},
+		},
+	}
+	if identity.ActionsCachePrefix != "" {
+		// runs-on/cache lists the prefix to resolve restore-keys, then reads
+		// and writes objects under it; the listing is bounded to that prefix.
+		statements = append(statements,
 			map[string]any{
-				"Effect": "Allow", "Action": []string{"s3:GetBucketLocation"},
-				"Resource": []string{"arn:aws:s3:::" + bucket},
+				"Effect": "Allow", "Action": []string{"s3:ListBucket"},
+				"Resource":  []string{"arn:aws:s3:::" + bucket},
+				"Condition": map[string]any{"StringLike": map[string]any{"s3:prefix": []string{identity.ActionsCachePrefix + "/*"}}},
 			},
 			map[string]any{
 				"Effect": "Allow", "Action": actions,
-				"Resource": []string{"arn:aws:s3:::" + bucket + "/" + identity.Prefix + "/*"},
+				"Resource": []string{"arn:aws:s3:::" + bucket + "/" + identity.ActionsCachePrefix + "/*"},
 			},
-		},
+		)
 	}
+	document := map[string]any{"Version": "2012-10-17", "Statement": statements}
 	encoded, _ := json.Marshal(document)
 	return encoded
 }
 
-func lifecycleDocument(config Config) []byte {
+// lifecycleRules is every prefix the bucket expires and after how many days:
+// the four trust roots, and the trusted writer's actions cache prefix when
+// it has one.
+func lifecycleRules(config Config) map[string]int {
 	retention := make(map[string]int)
 	for _, identity := range config.Identities {
 		retention[identity.Prefix] = identity.RetentionDays
+		if identity.ActionsCachePrefix != "" {
+			retention[identity.ActionsCachePrefix] = identity.RetentionDays
+		}
 	}
+	return retention
+}
+
+// lifecycleIdentifier names a rule: the trust class for a trust root, and the
+// fixed actions identifier for the actions cache prefix.
+func lifecycleIdentifier(prefix string) (string, error) {
+	if strings.HasPrefix(prefix, "cache/") {
+		return cachenamespace.ActionsCacheIdentifier, nil
+	}
+	return cachenamespace.Identifier(prefix)
+}
+
+func lifecycleDocument(config Config) []byte {
+	retention := lifecycleRules(config)
 	prefixes := make([]string, 0, len(retention))
 	for prefix := range retention {
 		prefixes = append(prefixes, prefix)
@@ -678,7 +711,7 @@ func lifecycleDocument(config Config) []byte {
 	var document strings.Builder
 	document.WriteString(`<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
 	for _, prefix := range prefixes {
-		identifier, identifierErr := cachenamespace.Identifier(prefix)
+		identifier, identifierErr := lifecycleIdentifier(prefix)
 		if identifierErr != nil {
 			continue
 		}
@@ -696,8 +729,8 @@ func lifecycleEquivalent(document []byte, config Config) bool {
 		return false
 	}
 	expected := make(map[string]int)
-	for _, identity := range config.Identities {
-		expected[identity.Prefix+"/"] = identity.RetentionDays
+	for prefix, days := range lifecycleRules(config) {
+		expected[prefix+"/"] = days
 	}
 	if len(decoded.Rules) != len(expected) {
 		return false
@@ -705,7 +738,7 @@ func lifecycleEquivalent(document []byte, config Config) bool {
 	seen := make(map[string]struct{}, len(decoded.Rules))
 	for _, rule := range decoded.Rules {
 		days, exists := expected[rule.Prefix]
-		base, identifierErr := cachenamespace.Identifier(strings.TrimSuffix(rule.Prefix, "/"))
+		base, identifierErr := lifecycleIdentifier(strings.TrimSuffix(rule.Prefix, "/"))
 		if identifierErr != nil {
 			return false
 		}
