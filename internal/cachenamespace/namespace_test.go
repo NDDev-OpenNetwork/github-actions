@@ -114,3 +114,15 @@ func TestBuildcacheRepositoryCarriesTheTrustClass(t *testing.T) {
 		t.Fatal("malformed repository was accepted")
 	}
 }
+
+// GitHub spells owners with capitals; an OCI repository cannot carry them.
+func TestBuildcacheRepositoryIsLowercaseForAMixedCaseOwner(t *testing.T) {
+	t.Parallel()
+	got, err := BuildcacheRepositoryFor("NDDev-it-com/almaty-libraries", Trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "buildcache/nddev-it-com/almaty-libraries/trusted" {
+		t.Fatalf("buildcache repository = %q", got)
+	}
+}
