@@ -310,6 +310,12 @@ func TestJobStartedHookClaimsRepositoryScopedDelivery(t *testing.T) {
 	environment, _ := os.ReadFile(githubEnv)
 	require.Contains(t, string(environment), "NDDEV_CACHE_ROLE=trusted-writer")
 	require.Contains(t, string(environment), "AWS_ACCESS_KEY_ID="+delivery.AccessKey)
+	// The trusted writer is handed runs-on/cache's bucket, endpoint and path
+	// style so the drop-in for actions/cache lands on the fleet's store.
+	require.Contains(t, string(environment), "RUNS_ON_S3_BUCKET_CACHE="+delivery.Bucket)
+	require.Contains(t, string(environment), "RUNS_ON_S3_BUCKET_ENDPOINT="+delivery.Endpoint)
+	require.Contains(t, string(environment), "RUNS_ON_S3_FORCE_PATH_STYLE=true")
+	require.NotContains(t, string(environment), "NDDEV_BUILDCACHE_REF=")
 	requestRaw, err := os.ReadFile(requestPath)
 	require.NoError(t, err)
 	var claimRequest map[string]any
@@ -436,4 +442,70 @@ func TestJobStartedHookFailsOpenWhenTheAssignmentIsUnusable(t *testing.T) {
 	require.Empty(t, environment)
 	_, err = os.Lstat(consumedPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// A delivery that carries a buildcache credential logs the runner's Docker
+// client into the member's zot for exactly this repository's layer-cache
+// namespace and names the reference the workflow passes to BuildKit; the
+// untrusted writer is handed no runs-on/cache bucket at all.
+func TestJobStartedHookLogsIntoTheBuildcacheAndKeepsGitHubCacheForUntrusted(t *testing.T) {
+	directory := t.TempDir()
+	home := filepath.Join(directory, "home")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	assignmentPath := filepath.Join(directory, "assignment.json")
+	readyPath := filepath.Join(directory, "assignment.ready")
+	consumedPath := filepath.Join(directory, "assignment.consumed")
+	caPath := filepath.Join(directory, "ca.pem")
+	githubEnv := filepath.Join(directory, "github-env")
+	delivery := testCacheDelivery()
+	assignment := workerCacheClaim{SchemaVersion: 2, InstanceName: "warm-integration-example", RunnerName: "runner-example", ClaimEndpoint: "https://198.51.100.1:9443/api/v1/cache/claim", ClaimToken: strings.Repeat("t", 43), CAPEMB64: base64.StdEncoding.EncodeToString(delivery.CAPEM)}
+	raw, _ := json.Marshal(assignment)
+	require.NoError(t, os.WriteFile(assignmentPath, raw, 0o400))
+	require.NoError(t, os.WriteFile(readyPath, nil, 0o400))
+	require.NoError(t, os.WriteFile(caPath, delivery.CAPEM, 0o400))
+	require.NoError(t, os.WriteFile(githubEnv, nil, 0o600))
+	response := map[string]any{
+		"schema_version": 1, "delivery_id": strings.Repeat("b", 64), "role": "untrusted-writer", "mode": "read-write",
+		"endpoint": delivery.Endpoint, "region": delivery.Region, "bucket": delivery.Bucket,
+		"prefix_root": "example-org/example-actions/trust/untrusted", "access_key": delivery.AccessKey,
+		"secret_key_b64": base64.StdEncoding.EncodeToString(delivery.SecretKey), "ca_pem_b64": base64.StdEncoding.EncodeToString(delivery.CAPEM),
+		"buildcache": map[string]any{"registry": "https://192.0.2.1:5001", "repository": "buildcache/example-org/example-actions/untrusted",
+			"username": "gha-zot-example-org-example-actions-buildcache-untrusted", "password_b64": base64.StdEncoding.EncodeToString([]byte("secret-pass"))},
+	}
+	responseRaw, _ := json.Marshal(response)
+	fakeCurl := filepath.Join(directory, "curl")
+	require.NoError(t, os.WriteFile(fakeCurl, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '"+string(responseRaw)+"'\n"), 0o700))
+	hook := strings.NewReplacer(cacheAssignmentPath, assignmentPath, cacheReadyPath, readyPath, cacheConsumedPath, consumedPath, cacheCAPath, caPath).Replace(cacheJobStartedHook())
+	command := exec.Command("bash", "-c", hook)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv, "HOME="+home,
+		"GITHUB_REPOSITORY=example-org/example-actions", "GITHUB_REPOSITORY_ID=123",
+		"GITHUB_RUN_ID=456", "GITHUB_RUN_ATTEMPT=1", "GITHUB_JOB=test",
+		"GITHUB_WORKFLOW_REF=example-org/example-actions/.github/workflows/ci.yml@refs/heads/main",
+		"GITHUB_SHA="+strings.Repeat("a", 40), "RUNNER_NAME=runner-example")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("claim hook failed: %v\n%s", err, output)
+	}
+	require.Contains(t, string(output), "::add-mask::secret-pass")
+	environment, _ := os.ReadFile(githubEnv)
+	require.Contains(t, string(environment), "NDDEV_BUILDCACHE_REGISTRY=192.0.2.1:5001")
+	require.Contains(t, string(environment), "NDDEV_BUILDCACHE_REF=192.0.2.1:5001/buildcache/example-org/example-actions/untrusted")
+	require.NotContains(t, string(environment), "RUNS_ON_S3_BUCKET_CACHE=")
+	dockerConfig, err := os.ReadFile(filepath.Join(home, ".docker", "config.json"))
+	require.NoError(t, err)
+	var parsed struct {
+		Auths map[string]struct {
+			Auth string `json:"auth"`
+		} `json:"auths"`
+	}
+	require.NoError(t, json.Unmarshal(dockerConfig, &parsed))
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("gha-zot-example-org-example-actions-buildcache-untrusted:secret-pass")), parsed.Auths["192.0.2.1:5001"].Auth)
+	info, err := os.Stat(filepath.Join(home, ".docker", "config.json"))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+// Node keeps its own root store, so the runner's .env hands it the fleet CA.
+func TestCacheSetupHandsNodeTheFleetCA(t *testing.T) {
+	require.Contains(t, string(renderCacheSetupScript()), "NODE_EXTRA_CA_CERTS=%s")
 }

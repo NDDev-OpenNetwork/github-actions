@@ -272,6 +272,10 @@ install -d -o runner -g runner -m 0755 "${runner_root}"
   printf 'SSL_CERT_FILE=%%s\n' %q
   printf 'CURL_CA_BUNDLE=%%s\n' %q
   printf 'AWS_CA_BUNDLE=%%s\n' %q
+  # Node keeps its own root store and ignores the system bundle; the runner's
+  # JavaScript actions (runs-on/cache among them) reach the fleet's store
+  # over TLS the fleet CA signs, so Node is handed that CA explicitly.
+  printf 'NODE_EXTRA_CA_CERTS=%%s\n' "${ca_path}"
 } >"${runner_root}/.env"
 chown runner:runner "${runner_root}/.env"
 chmod 0600 "${runner_root}/.env"
@@ -369,7 +373,19 @@ if [[ "$(jq -r '.schema_version' "${assignment}")" == 2 ]]; then
 fi
 
 jq -e '
-  (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) and
+  (
+    (keys | sort) == (["access_key","bucket","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort) or
+    (keys | sort) == (["access_key","bucket","buildcache","ca_pem_b64","delivery_id","endpoint","mode","prefix_root","region","role","schema_version","secret_key_b64"] | sort)
+  ) and
+  (
+    (.buildcache // null) == null or (
+      (.buildcache | keys | sort) == (["password_b64","registry","repository","username"] | sort) and
+      (.buildcache.registry | test("^https://[0-9]{1,3}(\\.[0-9]{1,3}){3}:5001$")) and
+      (.buildcache.repository | test("^buildcache/[^/]+/[^/]+/(trusted|untrusted)$")) and
+      (.buildcache.username | test("^[a-z][a-z0-9-]{2,62}$")) and
+      (.buildcache.password_b64 | test("^[A-Za-z0-9+/=]+$"))
+    )
+  ) and
   .schema_version == 1 and
   (.delivery_id | test("^[0-9a-f]{64}$")) and
   (.endpoint | startswith("https://") and (endswith(":9002") or endswith(":9003"))) and
@@ -409,6 +425,54 @@ printf '::add-mask::%s\n' "${secret_key}"
   printf 'NDDEV_CACHE_MODE=%s\n' "${mode}"
   printf 'NDDEV_CACHE_PREFIX_ROOT=%s\n' "${prefix}"
 } >>"${GITHUB_ENV}"
+
+# The trusted writer's credential also covers cache/<owner>/<repo>/*, the
+# layout runs-on/cache -- the drop-in for actions/cache -- hard-codes, so a
+# workflow that swaps the action gets its dependency caches from the fleet's
+# store one LAN hop away instead of from GitHub's. The untrusted writer is
+# handed nothing here: runs-on/cache then falls back to GitHub's cache by
+# itself, and nothing an untrusted build writes is ever restored by a
+# trusted one.
+if [[ "${role}" == "trusted-writer" ]]; then
+  {
+    printf 'RUNS_ON_S3_BUCKET_CACHE=%s\n' "${bucket}"
+    printf 'RUNS_ON_S3_BUCKET_ENDPOINT=%s\n' "${endpoint}"
+    printf 'RUNS_ON_S3_FORCE_PATH_STYLE=true\n'
+    printf 'RUNS_ON_AWS_REGION=%s\n' "${region}"
+  } >>"${GITHUB_ENV}"
+fi
+
+# A buildcache credential, when the broker delivers one, logs the runner's
+# Docker client into the member's zot for this repository's BuildKit
+# layer-cache namespace (one trust class, never the other), and names the
+# reference a workflow passes to --cache-from and --cache-to.
+if jq -e '.buildcache != null' "${assignment}" >/dev/null; then
+  buildcache_registry="$(jq -r '.buildcache.registry' "${assignment}")"
+  buildcache_repository="$(jq -r '.buildcache.repository' "${assignment}")"
+  buildcache_username="$(jq -r '.buildcache.username' "${assignment}")"
+  buildcache_password="$(jq -r '.buildcache.password_b64' "${assignment}" | base64 --decode)"
+  test -n "${buildcache_password}"
+  printf '::add-mask::%s\n' "${buildcache_password}"
+  buildcache_host="${buildcache_registry#https://}"
+  docker_config_dir="${DOCKER_CONFIG:-${HOME}/.docker}"
+  install -d -m 0700 "${docker_config_dir}"
+  docker_config="${docker_config_dir}/config.json"
+  docker_config_temp="$(mktemp "${docker_config_dir}/config.json.XXXXXXXX")"
+  buildcache_auth="$(printf '%s:%s' "${buildcache_username}" "${buildcache_password}" | base64 -w0)"
+  if [[ -s "${docker_config}" ]]; then
+    jq --arg host "${buildcache_host}" --arg auth "${buildcache_auth}" '.auths = ((.auths // {}) + {($host): {auth: $auth}})' "${docker_config}" >"${docker_config_temp}"
+  else
+    jq -n --arg host "${buildcache_host}" --arg auth "${buildcache_auth}" '{auths: {($host): {auth: $auth}}}' >"${docker_config_temp}"
+  fi
+  chmod 0600 "${docker_config_temp}"
+  mv -f "${docker_config_temp}" "${docker_config}"
+  {
+    printf 'NDDEV_BUILDCACHE_REGISTRY=%s\n' "${buildcache_host}"
+    printf 'NDDEV_BUILDCACHE_REPOSITORY=%s\n' "${buildcache_repository}"
+    printf 'NDDEV_BUILDCACHE_REF=%s/%s\n' "${buildcache_host}" "${buildcache_repository}"
+  } >>"${GITHUB_ENV}"
+  unset buildcache_password buildcache_auth
+fi
 
 printf '%s\n' "${delivery_id}" >"${consumed}"
 chmod 0600 "${consumed}"
