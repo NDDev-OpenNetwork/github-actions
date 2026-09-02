@@ -68,7 +68,8 @@ func TestDiagnosticExporterPageRequiresSustainedFailure(t *testing.T) {
 			}
 			for _, alert := range rendered.Alerts {
 				if alert.Name == rule.ID && (rule.HoldSecs != 180 || alert.TriggerCondition.Threshold != 1 ||
-					!strings.HasPrefix(withoutSubject(alert.QueryCondition.PromQL), "min_over_time(")) {
+					!strings.HasPrefix(withoutSubject(alert.QueryCondition.PromQL),
+						"min_over_time((gha_fleet_diagnostic_export_consecutive_failures)")) {
 					t.Fatalf("diagnostic rule=%#v alert=%#v", rule, alert)
 				}
 			}
