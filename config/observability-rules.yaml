@@ -345,11 +345,26 @@ rules:
     summary: A fleet host still requires a reboot after package maintenance.
     action: Drain jobs naturally and use the rolling reboot procedure while preserving cluster quorum.
     recovery: No fleet host reports a pending reboot for ten minutes.
+  # Fires on updates the host's own automation did not take, not on updates
+  # that merely appeared. unattended-upgrades runs daily on every fleet host
+  # and its allowed origins are the Ubuntu archive and -security, so a
+  # security update announced in the afternoon is gone by the next morning
+  # without anyone reading a ticket. Ubuntu also phases updates per machine,
+  # so the same package reaches the five hosts on five different days: on
+  # 2026-09-02 this rule ticketed four times for one set of nine packages,
+  # each host as its phase arrived.
+  #
+  # min_over_time asks the question that is worth a ticket: did the count stay
+  # above zero through a full automation cycle? Twenty-six hours covers the
+  # daily apt timer plus its randomised delay. A package the automation will
+  # never take -- one from noble-updates rather than -security, or a phased
+  # one it defers -- still surfaces, one day later, which is when it becomes
+  # a human's problem rather than the machine's.
   - id: host_standard_updates_available
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_host_standard_updates_available
-    expression: max by (host_name) (gha_fleet_host_standard_updates_available)
+    expression: min_over_time((max by (host_name) (gha_fleet_host_standard_updates_available))[26h:10m])
     operator: ">"
     threshold: 0
     evaluation_seconds: 300
@@ -362,9 +377,9 @@ rules:
     enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: Standard Ubuntu package updates remain available on a fleet host.
-    action: Apply the normal rolling package-maintenance procedure and prove service and runner recovery after each member.
-    recovery: Every fleet host reports zero standard updates for one hour.
+    summary: Package updates have sat on a fleet host through a full unattended-upgrades cycle.
+    action: Read whether unattended-upgrades is failing or the package is one it will not take (noble-updates, or a phased deferral), then apply the rolling procedure and prove service and runner recovery.
+    recovery: Every fleet host has reached zero standard updates at least once in the last twenty-six hours.
   - id: host_swap_high
     severity: ticket
     query_language: promql
