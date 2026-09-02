@@ -230,7 +230,7 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 		Diagnostics: func(now time.Time) (workerdiagnostics.SpoolStats, error) {
 			return workerdiagnostics.Inspect(providerConfiguration.DiagnosticsDirectory, now)
 		},
-		Service:            serviceState,
+		Service:            serviceStateFor(platform),
 		DiagnosticMaxBytes: providerConfiguration.DiagnosticsMaxTotalBytes,
 		CreatedVisibility:  fleetobserve.NewCreatedVisibilityTracker(),
 		OrphanVisibility:   fleetobserve.NewOrphanVisibilityTracker(),
@@ -299,8 +299,17 @@ func sample(ctx context.Context, collector fleetobserve.Collector, queueReader q
 	}
 }
 
-func serviceState(ctx context.Context, name string) (string, error) {
-	if !serviceNameAllowed(name) {
+// serviceStateFor probes exactly the units the platform config makes the
+// observer demand; any other name is refused before systemctl sees it.
+func serviceStateFor(platform config.Config) func(context.Context, string) (string, error) {
+	allowed := fleetobserve.ServiceNamesFor(platform)
+	return func(ctx context.Context, name string) (string, error) {
+		return serviceState(ctx, name, allowed)
+	}
+}
+
+func serviceState(ctx context.Context, name string, allowed []string) (string, error) {
+	if !serviceNameAllowed(name, allowed) {
 		return "", fmt.Errorf("service %q is outside the fixed observer inventory", name)
 	}
 	output, err := exec.CommandContext(ctx, "systemctl", "is-active", systemdUnitName(name)).CombinedOutput()
@@ -316,13 +325,13 @@ func serviceState(ctx context.Context, name string) (string, error) {
 	}
 }
 
-func serviceNameAllowed(name string) bool {
-	for _, expected := range fleetobserve.ServiceNames() {
+func serviceNameAllowed(name string, allowed []string) bool {
+	for _, expected := range allowed {
 		if name == expected {
 			return true
 		}
 	}
-	return name == "gha-cache-broker" || name == "gha-services-rustfs-route.timer"
+	return false
 }
 
 func systemdUnitName(name string) string {

@@ -87,6 +87,17 @@ var servicesHostTimerUnits = []string{
 	"gha-garm-liveness-watchdog.timer",
 }
 
+// ServiceNamesFor is the unit inventory the observer demands for a platform
+// config: the fixed compute list in cluster mode, the services-host list plus
+// its reconcilers and one warm-pool pair per pool with a warm depth otherwise.
+// The observer's unit probe accepts exactly these names, so the inventory the
+// health is computed from and the inventory the probe may query cannot drift
+// apart again (they did on 2026-09-02: the probe kept a fixed list and read
+// every newly demanded unit as down).
+func ServiceNamesFor(platform config.Config) []string {
+	return append([]string(nil), serviceNamesForConfig(platform)...)
+}
+
 func serviceNamesForConfig(platform config.Config) []string {
 	if !platform.Incus.Cluster.Enabled {
 		names := []string{

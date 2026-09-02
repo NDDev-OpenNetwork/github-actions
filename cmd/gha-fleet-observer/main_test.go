@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/fleetobserve"
 )
 
 func TestServicesHostOwnsDiagnosticExporterSource(t *testing.T) {
@@ -54,15 +55,40 @@ func TestRunVersion(t *testing.T) {
 }
 
 func TestServiceStateRejectsUnboundedName(t *testing.T) {
-	_, err := serviceState(t.Context(), "ssh")
+	services, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = serviceStateFor(services)(t.Context(), "ssh")
 	if err == nil || !strings.Contains(err.Error(), "outside the fixed observer inventory") {
 		t.Fatalf("service error = %v", err)
 	}
 }
 
-func TestServicesRoleBrokerIsInFixedInventory(t *testing.T) {
-	if !serviceNameAllowed("gha-cache-broker") || !serviceNameAllowed("gha-services-rustfs-route.timer") || serviceNameAllowed("ssh") {
-		t.Fatal("service inventory boundary drifted")
+// The probe admits exactly the inventory the health is computed from: the
+// services-host units, its reconcilers, and the warm-pool pair of every pool
+// with a warm depth -- and nothing else. A fixed list here read every newly
+// demanded unit as down on 2026-09-02.
+func TestServicesRoleInventoryFollowsTheConfig(t *testing.T) {
+	services, err := config.Load("../../config/example-services.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	services.Pools[0].Warm.TargetReady = 1
+	services.Pools[0].Warm.MaxReady = 1
+	allowed := fleetobserve.ServiceNamesFor(services)
+	for _, name := range []string{
+		"gha-cache-broker", "gha-services-rustfs-route.timer", "gha-state-backup.timer",
+		"gha-warm-pool@" + services.Pools[0].Name + ".service", "gha-warm-pool@" + services.Pools[0].Name + ".timer",
+	} {
+		if !serviceNameAllowed(name, allowed) {
+			t.Fatalf("services inventory omits %q", name)
+		}
+	}
+	for _, name := range []string{"ssh", "gha-warm-pool@" + services.Pools[1].Name + ".service", "gha-zot"} {
+		if serviceNameAllowed(name, allowed) {
+			t.Fatalf("services inventory admits %q", name)
+		}
 	}
 }
 
