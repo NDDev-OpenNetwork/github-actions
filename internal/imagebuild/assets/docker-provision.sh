@@ -34,6 +34,25 @@ if id --groups --name runner | tr ' ' '\n' | grep -qx lxd; then
   exit 1
 fi
 
+# The daemon.json below names the member's registry mirror. dockerd with the
+# containerd image store loads its trust once, from the system store, when
+# it starts, so the CA that signs the mirror has to be in that store before
+# the first start -- delivered later by a claim, into certs.d, or into the
+# store without a restart, it never reached the daemon (measured on the .110
+# and .111 workers: every pull logged an unknown authority and fell through
+# to docker.io). The build host's copy is the estate's trust anchor; the
+# manifest pins its digest and subject, and the file is proven here again.
+: "${GHA_REGISTRY_MIRROR_CA:?}"
+: "${GHA_REGISTRY_MIRROR_CA_SHA256:?}"
+: "${GHA_REGISTRY_MIRROR_CA_SUBJECT:?}"
+[[ "$(sha256sum "${GHA_REGISTRY_MIRROR_CA}" | cut -d' ' -f1)" == "${GHA_REGISTRY_MIRROR_CA_SHA256}" ]]
+mirror_ca_subject="$(openssl x509 -in "${GHA_REGISTRY_MIRROR_CA}" -noout -subject | sed -e 's/^subject=//' -e 's/ = /=/g' -e 's/, /,/g')"
+[[ "${mirror_ca_subject}" == "${GHA_REGISTRY_MIRROR_CA_SUBJECT}" ]]
+install -o root -g root -m 0644 "${GHA_REGISTRY_MIRROR_CA}" /usr/local/share/ca-certificates/nddev-gha-cache-ca.crt
+rm -f "${GHA_REGISTRY_MIRROR_CA}"
+update-ca-certificates >/dev/null
+openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /usr/local/share/ca-certificates/nddev-gha-cache-ca.crt >/dev/null
+
 install -d -m 0755 /etc/docker
 daemon_config="$(mktemp)"
 jq -n --arg storage_driver "${GHA_DOCKER_STORAGE_DRIVER}" '({

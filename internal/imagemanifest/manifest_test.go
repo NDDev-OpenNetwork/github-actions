@@ -114,7 +114,68 @@ func TestIntegrationManifestPinsDockerToolchain(t *testing.T) {
 	if manifest.Guest.DockerActionBaseRef != "nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1" {
 		t.Fatalf("unexpected action base reference %q", manifest.Guest.DockerActionBaseRef)
 	}
+	if ca := manifest.Guest.RegistryMirrorCA; ca == nil || ca.Path != "/etc/gha-fleet/trust/rustfs-ca.pem" ||
+		ca.Subject != "CN=NDDev-GHA-Cache-CA" || len(ca.SHA256) != 64 {
+		t.Fatalf("integration image does not pin the registry mirror CA: %#v", manifest.Guest.RegistryMirrorCA)
+	}
 	assertBakedToolchains(t, manifest)
+}
+
+// dockerd reads its trust once, at start, from the image's own store, so the
+// CA that signs the members' registry mirror is part of the docker-capable
+// image and nothing else: pinned by digest and subject, read from the fleet's
+// trust directory, refused everywhere it does not belong.
+func TestRegistryMirrorCAIsPinnedToTheDockerCapableImage(t *testing.T) {
+	t.Parallel()
+	integration, err := Load(filepath.Join("..", "..", "config", "golden-image-container-integration.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard, err := Load(filepath.Join("..", "..", "config", "golden-image-container.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if standard.Guest.RegistryMirrorCA != nil {
+		t.Fatalf("the standard image must not carry a registry mirror CA: %#v", standard.Guest.RegistryMirrorCA)
+	}
+	pinned := *integration.Guest.RegistryMirrorCA
+	tests := []struct {
+		name   string
+		mutate func(*Manifest)
+		want   string
+	}{
+		{"missing on the docker image", func(m *Manifest) { m.Guest.RegistryMirrorCA = nil }, "guest.registry_mirror_ca"},
+		{"outside the trust directory", func(m *Manifest) { c := pinned; c.Path = "/tmp/ca.pem"; m.Guest.RegistryMirrorCA = &c }, "guest.registry_mirror_ca.path"},
+		{"traversal", func(m *Manifest) {
+			c := pinned
+			c.Path = "/etc/gha-fleet/trust/../secrets/x.pem"
+			m.Guest.RegistryMirrorCA = &c
+		}, "guest.registry_mirror_ca.path"},
+		{"unpinned digest", func(m *Manifest) { c := pinned; c.SHA256 = "latest"; m.Guest.RegistryMirrorCA = &c }, "guest.registry_mirror_ca.sha256"},
+		{"loose subject", func(m *Manifest) { c := pinned; c.Subject = "NDDev-GHA-Cache-CA"; m.Guest.RegistryMirrorCA = &c }, "guest.registry_mirror_ca.subject"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			manifest := integration
+			test.mutate(&manifest)
+			err := manifest.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q validation failure, got %v", test.want, err)
+			}
+		})
+	}
+	t.Run("present on the standard image", func(t *testing.T) {
+		t.Parallel()
+		manifest := standard
+		c := pinned
+		manifest.Guest.RegistryMirrorCA = &c
+		err := manifest.Validate()
+		if err == nil || !strings.Contains(err.Error(), "guest.registry_mirror_ca") {
+			t.Fatalf("expected the standard image to refuse the mirror CA, got %v", err)
+		}
+	})
 }
 
 func TestValidationRequiresEveryBakedToolchain(t *testing.T) {

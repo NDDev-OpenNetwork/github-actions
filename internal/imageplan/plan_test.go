@@ -134,6 +134,9 @@ func TestBuildProducesPinnedDockerIntegrationPlan(t *testing.T) {
 		plan.SmokeRootDiskGiB != 50 || plan.BuilderDiskGiB != 30 {
 		t.Fatalf("unexpected integration plan: %#v", plan)
 	}
+	if plan.RegistryMirrorCA == nil || plan.RegistryMirrorCA.SHA256 != manifest.Guest.RegistryMirrorCA.SHA256 {
+		t.Fatalf("integration plan does not carry the pinned registry mirror CA: %#v", plan.RegistryMirrorCA)
+	}
 	if plan.DockerActionBaseRef != "nddev/gha-action-base:busybox-1-1.36.1-6ubuntu3.1" {
 		t.Fatalf("unexpected local action base: %q", plan.DockerActionBaseRef)
 	}

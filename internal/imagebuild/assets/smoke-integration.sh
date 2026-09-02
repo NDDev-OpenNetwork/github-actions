@@ -16,6 +16,7 @@ trap 'report_error "$?" "${LINENO:-0}" "$BASH_COMMAND"' ERR
 : "${GHA_EXPECTED_ROOT_DISK_GIB:?}"
 : "${GHA_DOCKER_ACTION_BASE_REF:?}"
 : "${GHA_DOCKER_STORAGE_DRIVER:?}"
+: "${GHA_REGISTRY_MIRROR_CA_SHA256:?}"
 : "${GHA_INSTANCE_TYPE:?}"
 [[ "${GHA_INSTANCE_TYPE}" == "virtual-machine" || "${GHA_INSTANCE_TYPE}" == "container" ]]
 : "${GHA_SCCACHE_VERSION:?}"
@@ -371,6 +372,13 @@ docker_cgroup="$(docker info --format '{{.CgroupDriver}}')"
 [[ "${docker_cgroup}" == "systemd" ]]
 docker buildx version >/dev/null
 docker compose version >/dev/null
+# The mirror's CA sits in the trust store dockerd read at start; the pinned
+# digest proves it is the estate's certificate and the bundle proves the
+# store took it.
+registry_mirror_ca=/usr/local/share/ca-certificates/nddev-gha-cache-ca.crt
+[[ "$(sha256sum "${registry_mirror_ca}" | cut -d' ' -f1)" == "${GHA_REGISTRY_MIRROR_CA_SHA256}" ]]
+openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt "${registry_mirror_ca}" >/dev/null
+[[ "$(jq -r '."registry-mirrors"[0]' /etc/docker/daemon.json)" == https://* ]]
 
 docker_root_source="$(findmnt --noheadings --output SOURCE --target /var/lib/docker | tr -d '[:space:]')"
 [[ "${docker_root_source}" == "${root_source}" ]]
@@ -443,6 +451,7 @@ jq -n \
   --arg runner_tool_cache "${runner_tool_cache}" \
   --arg machine_id "$(cat /etc/machine-id)" \
   --arg docker_engine_version "${docker_version}" \
+  --arg registry_mirror_ca_sha256 "${GHA_REGISTRY_MIRROR_CA_SHA256}" \
   --arg docker_storage_driver "${docker_storage}" \
   --arg docker_cgroup_driver "${docker_cgroup}" \
   --arg docker_action_base_id "${actual_base_id}" \
@@ -459,5 +468,5 @@ jq -n \
   --argjson root_disk_bytes "${root_disk_bytes}" \
   --argjson root_filesystem_bytes "${root_bytes}" \
 	  --arg startup_mode "${startup_mode}" \
-  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,image_variant:"integration",browser:$browser,browser_smoke_version:$browser_smoke_version,browser_launch:$browser_launch,browser_bytes_retained:$browser_bytes_retained,docker_engine_version:$docker_engine_version,docker_storage_driver:$docker_storage_driver,docker_cgroup_driver:$docker_cgroup_driver,docker_action_base_id:$docker_action_base_id,docker_socket:$docker_socket_scope,docker_socket_filesystem:$docker_socket_filesystem,docker_nonroot_access:"ok",docker_action_build:"ok",docker_service_network:"ok",public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:$startup_mode,ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
+  '{runner_version:$runner_version,sccache_version:$sccache_version,toolchains:$toolchains,runner_tool_cache:$runner_tool_cache,machine_id:$machine_id,image_variant:"integration",browser:$browser,browser_smoke_version:$browser_smoke_version,browser_launch:$browser_launch,browser_bytes_retained:$browser_bytes_retained,docker_engine_version:$docker_engine_version,registry_mirror_ca_sha256:$registry_mirror_ca_sha256,docker_storage_driver:$docker_storage_driver,docker_cgroup_driver:$docker_cgroup_driver,docker_action_base_id:$docker_action_base_id,docker_socket:$docker_socket_scope,docker_socket_filesystem:$docker_socket_filesystem,docker_nonroot_access:"ok",docker_action_build:"ok",docker_service_network:"ok",public_egress:$public_egress,host_route:$host_route,metadata_route:$metadata_route,forbidden_devices:"absent",nested_cpu_flags:$nested_cpu_flags,root_disk_bytes:$root_disk_bytes,root_filesystem_bytes:$root_filesystem_bytes,registration_state:"absent",startup_mode:$startup_mode,ssh_server_package:"absent",ssh_units:"masked",ssh_listener:"absent"}'
 [[ "$(id -u runner)" == 1000 && "$(id -g runner)" == 1001 ]]
