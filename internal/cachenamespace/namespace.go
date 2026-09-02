@@ -60,7 +60,11 @@ func BuildcacheRepositoryFor(repository string, class TrustClass) (string, error
 	if len(parts) != 2 || !validSegment(parts[0]) || !validSegment(parts[1]) {
 		return "", fmt.Errorf("cache repository %q must be organization/repository", repository)
 	}
-	return strings.Join([]string{"buildcache", parts[0], parts[1], string(class)}, "/"), nil
+	// An OCI repository name is lowercase by specification and BuildKit
+	// refuses anything else ("repository name must be lowercase"); GitHub
+	// owners are not (NDDev-it-com), so the namespace lowercases the
+	// repository while the object-store roots keep GitHub's spelling.
+	return strings.Join([]string{"buildcache", strings.ToLower(parts[0]), strings.ToLower(parts[1]), string(class)}, "/"), nil
 }
 
 // ActionsCachePrefixFor is where a drop-in replacement for actions/cache
