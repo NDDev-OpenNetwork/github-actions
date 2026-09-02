@@ -298,7 +298,7 @@ pools:
     resources: {vcpu: 2, memory_mib: 4096, disk_gib: 30}
     max_running: 3
     warm: {target_ready: 0, max_ready: 0}
-    capabilities: {docker: false, credentials: repository, network_policy: public-internet, cache_write_scope: none}
+    capabilities: {docker: false, credentials: repository, network_policy: public-internet, cache_write_scope: trusted}
   - name: nddev-priority-integration
     backend: linux-amd64-incus-container
     scale_set_name: nddev-priority-integration
@@ -306,7 +306,7 @@ pools:
     resources: {vcpu: 4, memory_mib: 6144, disk_gib: 50}
     max_running: 8
     warm: {target_ready: 0, max_ready: 0}
-    capabilities: {docker: true, credentials: repository, network_policy: public-internet, cache_write_scope: none}
+    capabilities: {docker: true, credentials: repository, network_policy: public-internet, cache_write_scope: trusted}
   - name: nddev-priority-untrusted
     backend: linux-amd64-incus-container
     scale_set_name: nddev-priority-untrusted

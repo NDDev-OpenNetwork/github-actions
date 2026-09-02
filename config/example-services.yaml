@@ -339,7 +339,7 @@ pools:
       docker: false
       credentials: repository
       network_policy: public-internet
-      cache_write_scope: none
+      cache_write_scope: trusted
 
   - name: nddev-priority-integration
     backend: linux-amd64-incus-container
@@ -358,7 +358,7 @@ pools:
       browser: true
       credentials: repository
       network_policy: public-internet
-      cache_write_scope: none
+      cache_write_scope: trusted
 
   - name: nddev-priority-untrusted
     backend: linux-amd64-incus-container
