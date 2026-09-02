@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	filePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
-	shaPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	streamPattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
-	versionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
-	bucketPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,62}$`)
+	filePattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
+	shaPattern            = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	streamPattern         = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
+	versionPattern        = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+	releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$`)
+	bucketPattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,62}$`)
 )
 
 type Issue struct {
@@ -99,13 +100,13 @@ func validateStore(add func(string, string), store Store) {
 	if store.Implementation != "openobserve" {
 		add("store.implementation", "must be openobserve")
 	}
-	if !versionPattern.MatchString(store.Version) {
-		add("store.version", "must be an exact vMAJOR.MINOR.PATCH version")
+	if !releaseVersionPattern.MatchString(store.Version) {
+		add("store.version", "must be an exact semantic release version")
 	}
 	if store.BinaryPath != "openobserve" {
 		add("store.binary_path", "must be the exact extracted openobserve executable")
 	}
-	if versionPattern.MatchString(store.Version) {
+	if releaseVersionPattern.MatchString(store.Version) {
 		name := "openobserve-" + store.Version + "-linux-amd64.tar.gz"
 		validateAsset(add, "store.archive", store.Archive, "downloads.openobserve.ai",
 			"/releases/openobserve/"+store.Version+"/"+name, name)

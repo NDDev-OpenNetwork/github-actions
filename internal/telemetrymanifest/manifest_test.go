@@ -86,6 +86,21 @@ func TestValidationRejectsMutableUnsafeOrSharedInputs(t *testing.T) {
 	}
 }
 
+func TestStoreAcceptsAnExactPrereleaseIdentity(t *testing.T) {
+	manifest := mustLoadManifest(t)
+	manifest.Store.Version = "v1.0.0-rc1"
+	manifest.Store.Archive.Name = "openobserve-v1.0.0-rc1-linux-amd64.tar.gz"
+	manifest.Store.Archive.URL = "https://downloads.openobserve.ai/releases/openobserve/v1.0.0-rc1/openobserve-v1.0.0-rc1-linux-amd64.tar.gz"
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("exact prerelease artifact was refused: %v", err)
+	}
+
+	manifest.Store.Version = "v1.0.0-rc1/latest"
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "store.version") {
+		t.Fatalf("mutable or malformed prerelease identity was accepted: %v", err)
+	}
+}
+
 func TestDecodeRejectsUnknownAndMultipleDocuments(t *testing.T) {
 	t.Parallel()
 
