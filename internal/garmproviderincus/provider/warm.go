@@ -100,11 +100,12 @@ func (l *Incus) DrainWarm(ctx context.Context, flavor, instanceName string, appl
 		{scaleSetKey, pool.ScaleSetName},
 		{repositoryKey, ""},
 		{garmJobNameKey, ""},
-		{networkPolicyKey, pool.Capabilities.NetworkPolicy},
-		{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 		{osTypeKeyName, string(commonParams.Linux)},
 		{osArchKeyNAme, string(commonParams.Amd64)},
 	}
+	// A drain deletes; an instance prepared under a capability the pool has
+	// since moved away from is exactly what a drain must be able to remove,
+	// so the capability keys are not held against it here.
 	// Same reason as validateWarmReadyMetadata: the isolation contract belongs
 	// to the pool's image, not to a virtual-machine assumption this function
 	// used to hard-code. A container pool could not be drained at all.
@@ -521,9 +522,13 @@ func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor str
 	if err != nil {
 		return err
 	}
-	// Currency keys move with every release and image wave; a mismatch there
-	// is an OUTDATED disposable, not a boundary violation, and the caller
-	// recycles it. Everything below stays a hard contract.
+	// Currency keys move with every release, image wave and pool capability
+	// change; a mismatch there is an OUTDATED disposable, not a boundary
+	// violation, and the caller recycles it. Everything below stays a hard
+	// contract. The two capabilities are currency because a pool's network
+	// policy or cache write scope can move while its warm instances live;
+	// held as a hard contract they stalled every warm reconcile on
+	// 2026-09-02 until the records were corrected by hand.
 	for _, currency := range []struct {
 		key      string
 		expected string
@@ -532,6 +537,8 @@ func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor str
 		{providerCommitKey, Commit},
 		{imageAliasKey, imagePolicy.Alias},
 		{imageFingerprintKey, imagePolicy.Fingerprint},
+		{networkPolicyKey, pool.Capabilities.NetworkPolicy},
+		{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 	} {
 		if actual := instance.ExpandedConfig[currency.key]; actual != currency.expected {
 			return fmt.Errorf("%w: warm instance %q has %s=%q, current is %q",
@@ -551,8 +558,6 @@ func (l *Incus) validateWarmReadyMetadata(instance *api.InstanceFull, flavor str
 		{scaleSetKey, pool.ScaleSetName},
 		{repositoryKey, ""},
 		{garmJobNameKey, ""},
-		{networkPolicyKey, pool.Capabilities.NetworkPolicy},
-		{cacheWriteScopeKey, pool.Capabilities.CacheWriteScope},
 		{osTypeKeyName, string(commonParams.Linux)},
 		{osArchKeyNAme, string(commonParams.Amd64)},
 		{"boot.autostart", "true"},

@@ -299,3 +299,51 @@ func TestObservedAllocationsAccountImageMaintenanceInstance(t *testing.T) {
 	require.Equal(t, pool.Resources.VCPU, allocations[0].VCPU)
 	require.Equal(t, pool.Resources.MemoryMiB, allocations[0].MemoryMiB)
 }
+
+// A pool's cache write scope moved under an EXECUTING worker -- the priority
+// pools took trusted on 2026-09-02 -- and the worker's record is the contract
+// it was created under: history, still admissible, still counted. The same
+// record on a warm instance is left to the warm reconciler, which recycles
+// it. What the inventory still refuses is a value no pool could ever have
+// declared. Held equal to the pool's current value, this check stalled every
+// warm reconcile until seven records were corrected by hand.
+func TestObservedAllocationsKeepAWorkerWhosePoolCapabilityMoved(t *testing.T) {
+	t.Parallel()
+	admission := testNDDevAdmission()
+
+	executing := *ownedInstance("runner-executing")
+	executing.ExpandedConfig[cacheWriteScopeKey] = "none"
+	cli := new(MockIncusServer)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{executing}, nil).Once()
+	allocations, err := admission.observedAllocations(context.Background(), cli)
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	require.Equal(t, "runner-executing", allocations[0].InstanceName)
+
+	warm := *ownedInstance("warm-moved")
+	warm.ExpandedConfig[lifecycleKey] = lifecycleWarmUnregistered
+	warm.ExpandedConfig[warmReadyKey] = "true"
+	warm.ExpandedConfig[poolIDKey] = warmPoolIDPrefix + "nddev-linux-standard"
+	warm.ExpandedConfig[repositoryKey] = ""
+	warm.ExpandedConfig[garmJobNameKey] = ""
+	warm.ExpandedConfig[networkPolicyKey] = "github-cache-only"
+	cli = new(MockIncusServer)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{warm}, nil).Once()
+	allocations, err = admission.observedAllocations(context.Background(), cli)
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+
+	undeclared := *ownedInstance("runner-undeclared")
+	undeclared.ExpandedConfig[cacheWriteScopeKey] = "everything"
+	cli = new(MockIncusServer)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{undeclared}, nil).Once()
+	_, err = admission.observedAllocations(context.Background(), cli)
+	require.ErrorContains(t, err, "which no pool declares")
+
+	foreign := *ownedInstance("runner-foreign-trust")
+	foreign.ExpandedConfig[trustKey] = "untrusted"
+	cli = new(MockIncusServer)
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{foreign}, nil).Once()
+	_, err = admission.observedAllocations(context.Background(), cli)
+	require.ErrorContains(t, err, "has user.nddev.trust=\"untrusted\", expected \"trusted\"")
+}
