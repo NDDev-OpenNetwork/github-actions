@@ -129,3 +129,29 @@ func TestNotificationBodySurvivesEncoding(t *testing.T) {
 		t.Fatalf("placeholders did not survive encoding: %s", encoded)
 	}
 }
+
+// Thirty-four alerts must not evaluate in the same millisecond. OpenObserve
+// snaps an aligned alert's next run to its frequency boundary, so alignment
+// puts every rule of a given frequency on the same tick: on 2026-09-02 the
+// searches queued until some exceeded the PromQL load-data timeout and the
+// group-state writes queued behind the single SQLite writer until they were
+// refused 2386 times, and a scheduler that cannot persist that it notified
+// notifies again.
+func TestRenderedAlertsDoNotShareOneSchedulingTick(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rendered.Alerts) < 20 {
+		t.Fatalf("only %d alerts rendered; the check proves nothing", len(rendered.Alerts))
+	}
+	for _, alert := range rendered.Alerts {
+		if alert.TriggerCondition.AlignTime {
+			t.Fatalf("alert %q is aligned to the wall clock and will evaluate in the herd", alert.Name)
+		}
+	}
+}
