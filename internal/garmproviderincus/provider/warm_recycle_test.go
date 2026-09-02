@@ -2,8 +2,14 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/cloudbase/garm-provider-common/errors"
+	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -121,4 +127,72 @@ func TestReconcileWarmRecyclesAnInstanceWhosePoolCapabilityMoved(t *testing.T) {
 	require.Equal(t, []string{"warm-standard-moved"}, result.RecycledStale)
 	require.Equal(t, 0, result.ReadyBefore)
 	cli.AssertNotCalled(t, "DeleteInstance", mock.Anything)
+}
+
+// One warm instance that never publishes readiness is deleted and recorded,
+// and the pool's reconcile carries on: failing it instead left the depth
+// unrestored during exactly the bursts that consume it (2026-09-02, eleven
+// aborted reconciles).
+func TestWarmInstanceThatNeverBecomesReadyIsAbandonedNotFatal(t *testing.T) {
+	previous := stateOperationTimeout
+	stateOperationTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { stateOperationTimeout = previous })
+
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	setWarmTarget(provider, "nddev-linux-standard", 1)
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{}, nil).Once()
+	prepareCreateMocks(cli, testImageDigest)
+	operation := new(MockOperation)
+	operation.On("WaitContext", mock.Anything).Return(nil)
+	cli.On("CreateInstance", mock.Anything).Return(operation, nil).Once()
+	cli.On("UpdateInstanceState", mock.Anything, api.InstanceStatePut{Action: "start", Timeout: -1}, "").Return(operation, nil).Maybe()
+	// The instance is created and reachable, but its readiness evidence never
+	// appears, so every poll finds nothing and the wait times out.
+	created := warmInstance("warm-standard-unready")
+	created.ExpandedConfig[lifecycleKey] = lifecycleWarmPreparing
+	created.ExpandedConfig[warmReadyKey] = ""
+	created.State = &api.InstanceState{Status: "Running", Network: map[string]api.InstanceStateNetwork{
+		"eth0": {Addresses: []api.InstanceStateNetworkAddress{{Family: "inet", Scope: "global", Address: "10.0.0.5"}}},
+	}}
+	cli.On("GetInstanceFull", mock.Anything).Return(created, "etag", nil).Maybe()
+	cli.On("GetInstanceFile", mock.Anything, warmReadyGuestPath).
+		Return(io.NopCloser(strings.NewReader("")), (*incus.InstanceFileResponse)(nil), fmt.Errorf("evidence absent: %w", errors.ErrNotFound)).Maybe()
+	cli.On("DeleteInstance", mock.Anything).Return(operation, nil).Maybe()
+	cli.On("UpdateInstanceState", mock.Anything, api.InstanceStatePut{Action: "stop", Timeout: -1, Force: true}, "").Return(operation, nil).Maybe()
+
+	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", true)
+	require.NoError(t, err, "one unready instance must not fail the pool")
+	require.Len(t, result.Abandoned, 1)
+	require.Empty(t, result.Created)
+}
+
+// Incus answers a file read on an instance whose delete has begun with
+// "Instance storage pool not found", not with a 404; that is the instance
+// going away, not a broken pool.
+func TestAVanishingInstanceIsRecognisedByItsStoragePoolError(t *testing.T) {
+	require.True(t, warmInstanceRetiredDuringCreate(fmt.Errorf("reading warm readiness evidence: Failed getting instance pool: Instance storage pool not found")))
+	require.True(t, warmInstanceRetiredDuringCreate(fmt.Errorf("attempt count exceeded: fetching instance: Instance not found")))
+	require.False(t, warmInstanceRetiredDuringCreate(fmt.Errorf("storage pool is full")))
+	require.False(t, warmInstanceRetiredDuringCreate(nil))
+}
+
+// The preparing loop reads each instance's readiness evidence. One that is
+// being deleted answers with the storage-pool error; the pass must skip it
+// and keep reconciling, not abort the pool (2026-09-02, 10:59Z).
+func TestPreparingInstanceThatVanishesMidReadIsSkipped(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	setWarmTarget(provider, "nddev-linux-standard", 0)
+	preparing := warmInstance("warm-standard-vanishing")
+	preparing.ExpandedConfig[lifecycleKey] = lifecycleWarmPreparing
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*preparing}, nil).Once()
+	cli.On("GetInstanceFull", preparing.Name).Return(preparing, "etag", nil).Maybe()
+	cli.On("GetInstanceFile", preparing.Name, warmReadyGuestPath).
+		Return(io.NopCloser(strings.NewReader("")), (*incus.InstanceFileResponse)(nil),
+			fmt.Errorf("Failed getting instance pool: Instance storage pool not found")).Once()
+
+	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", true)
+	require.NoError(t, err, "an instance that vanished mid-read must not fail the pool")
+	require.Empty(t, result.Promoted)
 }

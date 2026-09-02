@@ -53,8 +53,12 @@ type WarmPoolResult struct {
 	AdmissionDecision *admission.Decision `json:"admission_decision,omitempty"`
 	Created           []string            `json:"created"`
 	Consumed          []string            `json:"consumed_during_create"`
-	Promoted          []string            `json:"promoted"`
-	DeletedExcess     []string            `json:"deleted_excess"`
+	// Abandoned names instances that were created but never published their
+	// readiness evidence in time. They are deleted and the deficit refills on
+	// the next pass. One instance that does not arrive is not a failed pool.
+	Abandoned     []string `json:"abandoned_during_create,omitempty"`
+	Promoted      []string `json:"promoted"`
+	DeletedExcess []string `json:"deleted_excess"`
 }
 
 type WarmDrainResult struct {
@@ -200,6 +204,11 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 		for _, name := range preparing {
 			promoted, err := l.promoteWarmReady(ctx, name, flavor)
 			if err != nil {
+				if warmInstanceRetiredDuringCreate(err) {
+					// It was claimed or deleted while this pass read it; the
+					// next pass sees the resulting inventory.
+					continue
+				}
 				return result, err
 			}
 			if promoted {
@@ -232,6 +241,10 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 		for range deficit {
 			name, consumed, decision, err := l.createWarm(ctx, flavor)
 			if err != nil {
+				if errors2.Is(err, errWarmNotReady) {
+					result.Abandoned = append(result.Abandoned, name)
+					continue
+				}
 				return result, err
 			}
 			if consumed {
@@ -318,6 +331,17 @@ func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, con
 		return "", false, nil, errors.Wrap(err, "waiting for warm instance network")
 	}
 	if err = l.waitWarmReady(ctx, name, flavor, 2*time.Second); err != nil {
+		if errors2.Is(err, runnerErrors.ErrTimeout) {
+			// The instance exists but never published readiness. It will never
+			// be claimed, and leaving it costs the pool a slot, so it is
+			// deleted and the deficit refills on the next pass. Failing here
+			// instead aborted the whole pool's reconcile -- so the depth was
+			// not restored during exactly the bursts that consume it.
+			if deleteErr := l.DeleteInstance(ctx, name); deleteErr != nil {
+				return "", false, nil, errors.Wrapf(deleteErr, "deleting warm instance %q that never became ready", name)
+			}
+			return name, false, nil, errWarmNotReady
+		}
 		if warmInstanceRetiredDuringCreate(err) {
 			err = nil
 			return name, true, nil, nil
@@ -336,7 +360,18 @@ func warmInstanceRetiredDuringCreate(err error) bool {
 	// hides inside "attempt count exceeded: fetching instance: ...". A warm
 	// instance that vanished during create was consumed by useful concurrent
 	// work, whatever the wrapper says.
-	return err != nil && strings.Contains(err.Error(), "Instance not found")
+	//
+	// Incus does not always answer 404 for an instance that is going away.
+	// Reading a file from one whose delete has begun answers "Failed getting
+	// instance pool: Instance storage pool not found", and that read is
+	// exactly what the readiness poll does: on 2026-09-02 it failed the whole
+	// pool's reconcile eleven times.
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return strings.Contains(message, "Instance not found") ||
+		strings.Contains(message, "Instance storage pool not found")
 }
 
 // isPlacementRefusal recognizes the scriptlet's per-member capacity refusal
@@ -349,6 +384,10 @@ func isPlacementRefusal(err error) bool {
 	return strings.Contains(message, "Failed instance placement scriptlet") ||
 		strings.Contains(message, "no fleet member has room")
 }
+
+// errWarmNotReady marks an instance that was created but never published its
+// readiness evidence: the reconciler deletes it and carries on with the pool.
+var errWarmNotReady = errors2.New("warm instance never became ready")
 
 func (l *Incus) waitWarmReady(ctx context.Context, name, flavor string, pollInterval time.Duration) error {
 	if pollInterval <= 0 {

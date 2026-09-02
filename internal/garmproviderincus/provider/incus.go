@@ -85,9 +85,13 @@ var (
 const (
 	createOperationTimeout = 2 * time.Minute
 	deleteOperationTimeout = time.Minute
-	stateOperationTimeout  = time.Minute
 	defaultPlacementLock   = "/var/lib/gha-fleet/placement.lock"
 )
+
+// stateOperationTimeout bounds a wait on an instance's own state, the warm
+// readiness poll among them. It is a var so a test can shorten it; nothing
+// outside a test writes it.
+var stateOperationTimeout = time.Minute
 
 const (
 	directJITPhasePath     = "/home/runner/actions-runner/_diag/nddev-direct-jit-phase.log"
