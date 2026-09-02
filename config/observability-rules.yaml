@@ -2,6 +2,19 @@ schema_version: 2
 backend: openobserve
 organization: default
 rules:
+  # Every rule that reads an OTel signal-event stream must aggregate the host
+  # out of the pipeline's own labels. Those streams carry a `start_time` label
+  # that changes with each counter run, so an unaggregated expression returns
+  # one series per run, not one per host: the sum below counted a single run
+  # instead of the hour, and the alert dispatched once per series.
+  #
+  # Measured on 2026-09-02: sixteen failed evaluations in two minutes arrived
+  # as three series of 4, 4 and 3 -- three identical pages for one incident,
+  # re-sent every eleven minutes for the hour the window remembers, while
+  # three failures spread across three runs would have summed to one each and
+  # never crossed the threshold at all. The same shape sits in
+  # audit_suppression_burst and kernel_workqueue_hog, where a counter that
+  # restarts hides half the increase.
   - id: alert_evaluation_failed
     severity: page
     query_language: promql
@@ -32,7 +45,7 @@ rules:
     # one failure would have subtracted a post-restart minimum from a
     # pre-restart maximum and paged the on-call over nothing. Summing deltas
     # counts exactly and survives a restart.
-    expression: sum_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_DELTA"}[1h])
+    expression: sum by (host_name) (sum_over_time(gha_fleet_observability_signal_events{signal_class="alert_evaluation_failed",aggregation_temporality="AGGREGATION_TEMPORALITY_DELTA"}[1h]))
     operator: ">"
     threshold: 2
     evaluation_seconds: 60
@@ -59,7 +72,7 @@ rules:
     #
     # A window with no events now returns an empty result, which is the honest
     # answer to "how many events", evaluates without error, and does not fire.
-    expression: max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m])
+    expression: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
     operator: ">"
     threshold: 30
     # No outer subquery: evaluation and hold are equal, so the renderer emits
@@ -412,7 +425,7 @@ rules:
     query_language: promql
     stream_name: gha_fleet_host_signal_events
     # Same `or vector(0)` removal as audit_suppression_burst; see there.
-    expression: max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h])
+    expression: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
     operator: ">"
     threshold: 10
     # No outer subquery: evaluation and hold are equal, so the renderer emits

@@ -117,8 +117,19 @@ func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) 
 			if strings.Contains(alert.QueryCondition.PromQL, "min_over_time((max_over_time(") {
 				t.Fatalf("%s still wraps its windowed delta in a subquery a quiet window cannot satisfy: %s", id, alert.QueryCondition.PromQL)
 			}
-			if !strings.HasPrefix(withoutSubject(alert.QueryCondition.PromQL), "max_over_time(") {
-				t.Fatalf("%s is not the plain windowed delta: %s", id, alert.QueryCondition.PromQL)
+			// The windowed delta stays the whole statement, and it is summed
+			// by host_name: the signal-event streams carry a start_time label
+			// that changes with each counter run, so an unaggregated delta
+			// measures one run instead of the host and splits the alert into
+			// one dispatch per run (2026-09-02: sixteen failures arrived as
+			// three series of 4, 4 and 3). Summing by host keeps the subject
+			// the notification prints and cannot collapse it to a scalar.
+			body := withoutSubject(alert.QueryCondition.PromQL)
+			if !strings.HasPrefix(body, "sum by (host_name) (max_over_time(") {
+				t.Fatalf("%s is not the windowed delta summed by host: %s", id, alert.QueryCondition.PromQL)
+			}
+			if !strings.Contains(body, "- min_over_time(") {
+				t.Fatalf("%s lost the min_over_time half of its delta: %s", id, alert.QueryCondition.PromQL)
 			}
 		}
 		if !found {
@@ -541,5 +552,31 @@ func TestEveryPromQLAlertCarriesASubjectLabel(t *testing.T) {
 	}
 	if grouped == 0 || scalar == 0 {
 		t.Fatalf("expected both grouped and fleet-wide alerts, got %d grouped and %d fleet", grouped, scalar)
+	}
+}
+
+// Every rule that reads an OTel signal-event stream must aggregate by
+// host_name. Those streams carry start_time, flag and instrumentation
+// labels that change with each counter run, so an unaggregated expression
+// returns one series per run: the count is wrong and the alert dispatches
+// once per series. Found on 2026-09-02 when one incident of sixteen failed
+// evaluations arrived as three identical pages.
+func TestSignalEventRulesAggregateThePipelineLabelsAway(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, rule := range bundle.Rules {
+		if !strings.Contains(rule.Expression, "signal_events") {
+			continue
+		}
+		checked++
+		if !strings.Contains(rule.Expression, "by (host_name)") {
+			t.Fatalf("rule %q reads a signal-event stream without aggregating by host_name: %s", rule.ID, rule.Expression)
+		}
+	}
+	if checked < 3 {
+		t.Fatalf("only %d signal-event rules were checked; the walk proves nothing", checked)
 	}
 }
