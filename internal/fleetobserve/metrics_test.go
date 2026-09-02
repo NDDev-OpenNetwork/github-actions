@@ -88,6 +88,24 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 	}
 }
 
+func TestRenderPrometheusEmitsEverySeriesOnce(t *testing.T) {
+	metrics := RenderPrometheus(healthyCollector(t).Collect(t.Context()), observationTime, 45*time.Second)
+	seen := map[string]bool{}
+	for line := range strings.Lines(metrics) {
+		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		series, _, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			t.Fatalf("metric line has no value: %q", line)
+		}
+		if seen[series] {
+			t.Fatalf("Prometheus series emitted more than once: %s", series)
+		}
+		seen[series] = true
+	}
+}
+
 func TestRenderPrometheusExposesBoundedDiagnosticConvergence(t *testing.T) {
 	collector := healthyCollector(t)
 	collector.Diagnostics = func(time.Time) (workerdiagnostics.SpoolStats, error) {
