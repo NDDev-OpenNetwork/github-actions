@@ -177,6 +177,30 @@ rules:
     summary: Diagnostic objects remain after their S3 lifecycle eligibility boundary.
     action: Preserve object-age counts and lifecycle read-back, then repair RustFS expiry processing without deleting evidence manually.
     recovery: No expiration-eligible diagnostic object remains after the one-hour implementation grace.
+  # fleet_platform_unhealthy pages when health is down for two minutes. A
+  # reconciler that fails and is restarted by its timer takes health down for
+  # one minute at a time, so no rule saw it: on 2026-09-02 the warm pool
+  # reconcilers failed eleven times between 09:35Z and 11:00Z and nothing
+  # fired, because `max` over the two-minute period read the healthy minute
+  # beside each failed one. Counting the unhealthy minutes catches the shape
+  # the page is built to miss, and it is a ticket: a fleet that recovers by
+  # itself every minute is not an outage, it is a defect with a heartbeat.
+  - id: fleet_health_flapping
+    severity: ticket
+    query_language: promql
+    stream_name: gha_fleet_platform_healthy
+    expression: count_over_time((min by (host_name) (gha_fleet_platform_healthy) < 1)[30m:1m])
+    operator: ">="
+    threshold: 3
+    evaluation_seconds: 300
+    hold_seconds: 900
+    destination_ref: fleet_oncall
+    enabled: true
+    owner: fleet-operations
+    runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
+    summary: Fleet health keeps dipping and recovering within the page's window.
+    action: Read gha_fleet_service_up per service for the dipping minutes and find the unit that fails and is restarted by its timer.
+    recovery: Fleet health holds for half an hour without a dip.
   - id: fleet_platform_unhealthy
     severity: page
     query_language: promql
