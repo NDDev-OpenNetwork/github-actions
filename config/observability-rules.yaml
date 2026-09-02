@@ -162,7 +162,10 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_diagnostic_export_consecutive_failures
-    expression: max by (host_name) (gha_fleet_diagnostic_export_consecutive_failures)
+    # One exporter series exists, already labeled with its host. Aggregating it
+    # before the sustained range turns an empty input into a scalar on
+    # OpenObserve v1 and makes the subquery fail instead of reporting healthy.
+    expression: gha_fleet_diagnostic_export_consecutive_failures
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
