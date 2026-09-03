@@ -380,7 +380,12 @@ func rootFilesystem(root string, runner CommandRunner, ctx context.Context) (Fil
 	}
 	total := uint64(stats.Blocks) * uint64(stats.Bsize)
 	available := uint64(stats.Bavail) * uint64(stats.Bsize)
-	freePercent := percent(available, total)
+	var rootStat syscall.Stat_t
+	loopAllocated := uint64(0)
+	if syscall.Stat(root, &rootStat) == nil {
+		loopAllocated = loopBackingAllocatedOn(root, uint64(rootStat.Dev))
+	}
+	freePercent := usableFreePercent(total, available, loopAllocated)
 	freeInodesPercent := 100
 	if stats.Files > 0 {
 		freeInodesPercent = percent(uint64(stats.Ffree), uint64(stats.Files))
@@ -418,6 +423,39 @@ func rootFilesystem(root string, runner CommandRunner, ctx context.Context) (Fil
 		}
 	}
 	return filesystem, nil
+}
+
+// usableFreePercent is the free share of the host disk that jobs, caches and
+// logs can actually consume. The Incus loop-backed thin pool is a fixed
+// reservation on the same root filesystem; counting it as tenant-used space
+// made admission and compute_root_disk_low fire while the pool itself was
+// mostly empty. docs/maintenance-windows.md requires both values; this is the
+// host-side one. Placement already reads the thin pool.
+func usableFreePercent(total, available, loopAllocated uint64) int {
+	if loopAllocated == 0 || loopAllocated >= total {
+		return percent(available, total)
+	}
+	usableTotal := total - loopAllocated
+	if available >= usableTotal {
+		return 100
+	}
+	return percent(available, usableTotal)
+}
+
+func loopBackingAllocatedOn(root string, rootDev uint64) uint64 {
+	matches, err := filepath.Glob(filepath.Join(root, "var", "lib", "incus", "disks", "*.img"))
+	if err != nil {
+		return 0
+	}
+	var allocated uint64
+	for _, path := range matches {
+		var st syscall.Stat_t
+		if syscall.Stat(path, &st) != nil || uint64(st.Dev) != rootDev {
+			continue
+		}
+		allocated += uint64(st.Blocks) * 512
+	}
+	return allocated
 }
 
 func kvmState(root string) KVM {

@@ -145,10 +145,16 @@ rules:
   - id: compute_root_disk_low
     severity: ticket
     query_language: promql
-    stream_name: system_filesystem_usage
-    expression: sum by (host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state="free"}) / sum by (host_name) (system_filesystem_usage{service_namespace="nddev-github-actions",mountpoint="/",state=~"free|used"})
+    stream_name: gha_fleet_host_root_free_percent
+    # The OTel host filesystem series counts the Incus loop-backed thin pool
+    # as ordinary used space on /. That file is a fixed 200 GiB reservation;
+    # with discards=nopassdown it stays fully allocated while pool data_percent
+    # is ~20%. The ticket then fired at 17–18% free of the whole root, which
+    # is the loop file, not tenant data. Placement already reads the thin pool.
+    # Admission and this rule use the observer percent that excludes the loop.
+    expression: min by (host_name) (gha_fleet_host_root_free_percent)
     operator: "<"
-    threshold: 0.2
+    threshold: 20
     evaluation_seconds: 300
     hold_seconds: 900
     # Disk pressure changes slowly and the ticket already carries one exact
