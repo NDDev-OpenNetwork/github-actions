@@ -185,6 +185,7 @@ guest:
     - git
     - git-lfs
     - jq
+    - libsqlite3-dev
     - libssl-dev
     - maven
     - ninja-build

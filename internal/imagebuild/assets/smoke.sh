@@ -206,6 +206,12 @@ python3 -m pip --version >/dev/null
 pip --version >/dev/null
 pip3 --version >/dev/null
 
+# Release workers have no apt egress. Host tests that load libsqlite3.so or
+# compile against sqlite3.h must find both already in the image.
+test -f /usr/include/sqlite3.h
+test -e /usr/lib/x86_64-linux-gnu/libsqlite3.so
+pkg-config --exists sqlite3
+
 for forbidden in \
   /var/run/docker.sock \
   /run/incus/unix.socket \
