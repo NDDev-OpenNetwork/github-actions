@@ -151,7 +151,9 @@ rules:
     # with discards=nopassdown it stays fully allocated while pool data_percent
     # is ~20%. The ticket then fired at 17–18% free of the whole root, which
     # is the loop file, not tenant data. Placement already reads the thin pool.
-    # Admission and this rule use the observer percent that excludes the loop.
+    # Clustered admission uses Incus pool free percent. This rule reads
+    # gha_fleet_host_root_free_percent from each member's pressure observer
+    # (compute hosts do not run the central fleet observer).
     expression: min by (host_name) (gha_fleet_host_root_free_percent)
     operator: "<"
     threshold: 20

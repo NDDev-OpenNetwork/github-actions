@@ -4,6 +4,8 @@
 // Placement already reads the thin pool. The OTel host filesystem series and
 // raw statvfs count that file as ordinary used space, so compute_root_disk_low
 // fired at 17–18% free of a 309 GiB root while pool data_percent was ~20%.
+// Compute members publish the result from the pressure observer; the central
+// fleet observer only sees gha-services.
 package hostdisk
 
 import (
@@ -39,6 +41,22 @@ func UsableFreePercent(total, available, loopAllocated uint64) int {
 		return 100
 	}
 	return percent(available, usableTotal)
+}
+
+// Observe is the live usable free percent of root, excluding loop-backed
+// Incus pool files on the same device. A stat error is returned so the
+// publisher can fail closed instead of omitting the series.
+func Observe(root string) (int, error) {
+	if root == "" {
+		root = "/"
+	}
+	var stats syscall.Statfs_t
+	if err := syscall.Statfs(root, &stats); err != nil {
+		return 0, err
+	}
+	total := uint64(stats.Blocks) * uint64(stats.Bsize)
+	available := uint64(stats.Bavail) * uint64(stats.Bsize)
+	return UsableFreePercent(total, available, LoopBackingAllocatedOn(root)), nil
 }
 
 // LoopBackingAllocatedOn sums allocated bytes of Incus pool images on the
