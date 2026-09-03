@@ -34,6 +34,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
 		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
 		"host_compliance_observer_missing":  "gha_fleet_host_compliance_observer_up",
+		"host_oom_detected":                 "round(max by (host_name) (increase(gha_fleet_host_oom_kills_total[5m])))",
 		"host_package_inventory_stale":      "gha_fleet_host_package_inventory_age_seconds",
 		"host_reboot_required":              "gha_fleet_host_reboot_required",
 		"host_standard_updates_available":   "gha_fleet_host_standard_updates_available",
