@@ -161,6 +161,8 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
 	  [[ "$(runuser -u runner -- env HOME=/home/runner "${python_hosted_root}/bin/python3.14" --version)" == "Python ${expected_version}" ]]
 	  runuser -u runner -- env HOME=/home/runner "${python_hosted_root}/bin/python3.14" -m pip --version >/dev/null
 	  [[ "$(python --version)" == "Python ${expected_version}" ]]
+	  [[ "$(python3 --version)" == "Python 3.12."* ]]
+	  python3 -m pip --version >/dev/null
 	  ;;
 	pnpm) [[ "$(pnpm --version)" == "${expected_version}" ]] ;;
     rustup)

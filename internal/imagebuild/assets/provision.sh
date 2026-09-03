@@ -422,14 +422,15 @@ for toolchain_name in "${toolchain_names[@]}"; do
 	    "/opt/hostedtoolcache/Python/${toolchain_version}/x64.complete"
 	  ln -sfn "/opt/hostedtoolcache/Python/${toolchain_version}" "${python_runner_root}"
 	  chown -h runner:runner "${python_runner_root}"
-	  for executable in python python3 pip pip3; do
+	  # Keep python3/pip3 on Ubuntu's interpreter. Host automation imports
+	  # apt-owned modules from it; replacing that command with the project
+	  # interpreter makes a fully provisioned image less compatible, not more.
+	  for executable in python pip; do
 	    target="${python_hosted_root}/bin/${executable}"
 	    if [[ ! -e "${target}" ]]; then
 	      case "${executable}" in
 	        python) target="${python_hosted_root}/bin/python3.14" ;;
-	        python3) target="${python_hosted_root}/bin/python3.14" ;;
 	        pip) target="${python_hosted_root}/bin/pip3.14" ;;
-	        pip3) target="${python_hosted_root}/bin/pip3.14" ;;
 	      esac
 	    fi
 	    ln -sfn "${target}" "/usr/local/bin/${executable}"

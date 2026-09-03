@@ -36,17 +36,17 @@ const (
 	DefaultPoolBalancerType           = "roundrobin"
 	DefaultProviderName               = "nddev-incus"
 	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
-	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b17"
-	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b23"
-	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b17"
+	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b18"
+	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b24"
+	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b18"
 	// Every Linux class is an ephemeral Incus container. Docker-capable classes
 	// use their nested-runtime image; release uses a separately stage-smoked
 	// standard image so OIDC authority does not inherit Docker/nesting.
 	FastImage                   = ContainerCanaryImage
 	UntrustedImage              = IntegrationImage
-	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b23"
+	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b24"
 	ContainerCanaryImage        = "nddev-ubuntu-24.04-amd64-container-current"
-	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b17"
+	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b18"
 	DefaultFlavor               = "nddev-linux-standard"
 	IntegrationFlavor           = "nddev-linux-integration"
 	FastFlavor                  = "nddev-linux-fast"
