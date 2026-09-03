@@ -151,6 +151,9 @@ rules:
     threshold: 0.2
     evaluation_seconds: 300
     hold_seconds: 900
+    # Disk pressure changes slowly and the ticket already carries one exact
+    # host subject. Repeat twice daily rather than every alert silence window.
+    repeat_seconds: 43200
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations
