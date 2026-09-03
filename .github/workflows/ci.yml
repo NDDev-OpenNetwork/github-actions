@@ -61,6 +61,7 @@ jobs:
           fi
           git cat-file -e "${base}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
+          ./scripts/validate-image-alias-advance.sh "${base}" "${HEAD_SHA}"
           garm=false
           provider=false
           while IFS= read -r changed; do

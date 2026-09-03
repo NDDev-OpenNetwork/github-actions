@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Advance every image identity changed by the SQLite development headers to a
+  new immutable alias. Pull-request CI now rejects a manifest or provisioning
+  change that keeps the old alias, before a live image reconcile has to detect
+  the mismatch.
+
+- Publish the existing 8192 MiB Android envelope through the release and
+  priority-integration GARM scale-set contracts. The private estate had already
+  applied those hard limits, but a later reconcile from public source would
+  otherwise have restored 6144 MiB.
+
 - Publish `gha_fleet_host_root_free_percent` from each compute member's
   pressure observer, excluding the Incus loop-backed thin-pool file. The
   central fleet observer runs only on gha-services, so switching the ticket

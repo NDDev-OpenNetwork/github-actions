@@ -155,17 +155,12 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	if first != second || !strings.HasPrefix(first, "sha256:") || len(first) != 71 {
 		t.Fatalf("unexpected recipe fingerprints %q %q", first, second)
 	}
-	// Pinned so a recipe change has to be stated rather than noticed. It has
-	// moved with every recipe change -- the b15 alias, the restored warm agent,
-	// the runner-owned /home/runner/.cache -- and moves here because b22 pins
-	// the runner's uid and gid, skips the warm-up on a one-job worker, lets
-	// cloud-init exit when there is no cloud-config to apply, and masks the
-	// server units a one-job worker never needs. b21 is built and promoted, so
-	// its contents cannot change under it -- the alias goes to b22. That
-	// coupling is the point: the alias is part of the recipe, so a manifest
-	// whose contents changed under an unchanged alias would otherwise ask the
-	// builder to produce different bytes for a name that is already promoted.
-	if first != "sha256:7a3a1820816163ead5bbbfecfd455147adcae39195b8d6d194927408f7e2c40b" {
+	// Pinned so a recipe change has to be stated rather than noticed. The
+	// manifest now guarantees the SQLite development headers required by
+	// release workers. The prior image is already promoted, so the alias moves
+	// with the recipe instead of asking the builder to produce different bytes
+	// for an immutable name.
+	if first != "sha256:c8c7dd85141e4958052a580251ee1b9fd66f71e2fdee25205853c456ff120c1c" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
