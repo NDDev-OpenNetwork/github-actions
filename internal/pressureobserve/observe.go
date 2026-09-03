@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostdisk"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/pressuregate"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/psimetrics"
@@ -49,7 +50,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		metrics := Render(state, now, h.maxStaleness(), err) +
 			RenderPressure(hostprobe.ReadPressure(h.hostRoot())) +
-			RenderCompliance(CollectCompliance(h.HostRoot, now))
+			RenderCompliance(CollectCompliance(h.HostRoot, now)) +
+			RenderRootDisk(h.hostRoot())
 		_, _ = w.Write([]byte(metrics))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -147,4 +149,20 @@ func RenderPressure(pressure hostprobe.Pressure, err error) string {
 		return psimetrics.Render(hostprobe.Pressure{})
 	}
 	return psimetrics.Render(pressure)
+}
+
+// RenderRootDisk publishes this host's usable root free percent. Compute
+// members do not run the central fleet observer, so compute_root_disk_low
+// would otherwise see only gha-services. The value excludes the Incus
+// loop-backed pool file; a stat error publishes 0 so the ticket fails closed
+// instead of going silent.
+func RenderRootDisk(root string) string {
+	percent, err := hostdisk.Observe(root)
+	if err != nil {
+		percent = 0
+	}
+	return fmt.Sprintf(
+		"# HELP gha_fleet_host_root_free_percent Free block percentage of host-usable root space, excluding the Incus loop-backed pool file.\n"+
+			"# TYPE gha_fleet_host_root_free_percent gauge\n"+
+			"gha_fleet_host_root_free_percent %d\n", percent)
 }

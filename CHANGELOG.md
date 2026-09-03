@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-- Compute `compute_root_disk_low` from usable root space, excluding the Incus
-  loop-backed thin-pool file. With `discards=nopassdown` that file stays fully
-  allocated (~200 GiB on a 309 GiB root) while pool `data_percent` is ~20%, so
-  the OTel filesystem ratio fired at 17–18% free of the whole disk. Placement
-  already reads the thin pool; the observer metric and ticket now match that
-  fact. Provider admission still uses raw statvfs until the next provider
-  derivative, because hostprobe is part of that artifact.
+- Publish `gha_fleet_host_root_free_percent` from each compute member's
+  pressure observer, excluding the Incus loop-backed thin-pool file. The
+  central fleet observer runs only on gha-services, so switching the ticket
+  to that family without this series would have watched the control-plane
+  host and gone blind to the four members whose 200 GiB loop file is the
+  whole problem. Clustered admission already reads Incus pool free percent;
+  the OTel filesystem ratio remains the live ticket until these series exist
+  on every member.
 
 - Treat the authenticated job-start claim as the only repository identity for
   cache delivery and teardown diagnostics. An organization scale-set runner can

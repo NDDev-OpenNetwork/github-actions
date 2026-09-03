@@ -23,10 +23,17 @@ func TestHandlerExportsOOMCounterAndFreshPressureState(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d", response.Code)
 	}
-	for _, wanted := range []string{"gha_fleet_pressure_observer_up 1\n", "gha_fleet_host_oom_kills_total 23\n", "gha_fleet_host_pressure_open 1\n"} {
+	for _, wanted := range []string{"gha_fleet_pressure_observer_up 1\n", "gha_fleet_host_oom_kills_total 23\n", "gha_fleet_host_pressure_open 1\n", "gha_fleet_host_root_free_percent "} {
 		if !strings.Contains(response.Body.String(), wanted) {
 			t.Fatalf("metrics missing %q\n%s", wanted, response.Body.String())
 		}
+	}
+}
+
+func TestRenderRootDiskFailsClosedWhenRootCannotBeStat(t *testing.T) {
+	got := RenderRootDisk(filepath.Join(t.TempDir(), "missing"))
+	if !strings.Contains(got, "gha_fleet_host_root_free_percent 0\n") {
+		t.Fatalf("missing root did not fail closed\n%s", got)
 	}
 }
 
