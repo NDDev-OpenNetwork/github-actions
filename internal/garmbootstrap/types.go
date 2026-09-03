@@ -36,17 +36,17 @@ const (
 	DefaultPoolBalancerType           = "roundrobin"
 	DefaultProviderName               = "nddev-incus"
 	DefaultImage                      = "nddev-ubuntu-24.04-amd64-container-current"
-	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b19"
-	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b25"
-	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b19"
+	IntegrationImage                  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b20"
+	PriorityStandardImage             = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b26"
+	PriorityIntegrationImage          = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b20"
 	// Every Linux class is an ephemeral Incus container. Docker-capable classes
 	// use their nested-runtime image; release uses a separately stage-smoked
 	// standard image so OIDC authority does not inherit Docker/nesting.
 	FastImage                   = ContainerCanaryImage
 	UntrustedImage              = IntegrationImage
-	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b25"
+	ReleaseImage                = "nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b26"
 	ContainerCanaryImage        = "nddev-ubuntu-24.04-amd64-container-current"
-	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b19"
+	DockerContainerCanaryImage  = "nddev-u24-amd64-ctr-docker-runner-2.336.0-r20260801-b20"
 	DefaultFlavor               = "nddev-linux-standard"
 	IntegrationFlavor           = "nddev-linux-integration"
 	FastFlavor                  = "nddev-linux-fast"
@@ -104,11 +104,11 @@ func PublishedScaleSets() []ScaleSetClass {
 		class(IntegrationScaleSetName, IntegrationImage, IntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, true, 4, 8192, 50, false),
 		class(FastScaleSetName, FastImage, FastFlavor, 16, "trusted", "repository", "public-internet", "trusted", false, false, 2, 3072, 30, false),
 		class(UntrustedScaleSetName, UntrustedImage, UntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, false),
-		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, false, 4, 6144, 40, false),
+		class(ReleaseScaleSetName, ReleaseImage, ReleaseFlavor, 1, "release", "oidc-only", "release-allowlist", "none", false, false, 4, 8192, 40, false),
 		class(ContainerCanaryScaleSetName, ContainerCanaryImage, ContainerCanaryFlavor, 12, "trusted", "none", "public-internet", "none", false, false, 2, 2048, 30, false),
 		class(DockerContainerCanaryScaleSetName, DockerContainerCanaryImage, DockerContainerCanaryFlavor, 1, "trusted", "repository", "public-internet", "none", true, false, 2, 4096, 40, false),
 		class(PriorityStandardScaleSetName, PriorityStandardImage, PriorityStandardFlavor, 16, "trusted", "repository", "public-internet", "trusted", false, false, 2, 4096, 30, true),
-		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, true, 4, 6144, 50, true),
+		class(PriorityIntegrationScaleSetName, PriorityIntegrationImage, PriorityIntegrationFlavor, 8, "trusted", "repository", "public-internet", "trusted", true, true, 4, 8192, 50, true),
 		class(PriorityUntrustedScaleSetName, UntrustedImage, PriorityUntrustedFlavor, 8, "untrusted", "none", "public-internet", "none", true, false, 4, 6144, 50, true),
 	}
 }

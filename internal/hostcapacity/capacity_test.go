@@ -28,7 +28,7 @@ func TestDeclaredCapsAlreadyImplyTheCeiling(t *testing.T) {
 		{Pool: "nddev-linux-standard", Workers: 3, Binding: BindingMemory},
 		{Pool: "nddev-linux-integration", Workers: 1, Binding: BindingMemory},
 		{Pool: "nddev-linux-untrusted", Workers: 2, Binding: BindingCPU},
-		{Pool: "nddev-linux-release", Workers: 2, Binding: BindingCPU},
+		{Pool: "nddev-linux-release", Workers: 1, Binding: BindingMemory},
 	} {
 		got, err := ForPool(cfg, expected.Pool)
 		if err != nil {

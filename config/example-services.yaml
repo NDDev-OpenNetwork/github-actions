@@ -293,7 +293,7 @@ pools:
     trust: release
     resources:
       vcpu: 4
-      memory_mib: 6144
+      memory_mib: 8192
       disk_gib: 40
     max_running: 1
     warm:
@@ -347,7 +347,7 @@ pools:
     trust: trusted
     resources:
       vcpu: 4
-      memory_mib: 6144
+      memory_mib: 8192
       disk_gib: 50
     max_running: 8
     warm:
