@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Compute `compute_root_disk_low` from usable root space, excluding the Incus
+  loop-backed thin-pool file. With `discards=nopassdown` that file stays fully
+  allocated (~200 GiB on a 309 GiB root) while pool `data_percent` is ~20%, so
+  the OTel filesystem ratio fired at 17–18% free of the whole disk. Placement
+  already reads the thin pool; the observer metric and ticket now match that
+  fact. Provider admission still uses raw statvfs until the next provider
+  derivative, because hostprobe is part of that artifact.
+
 - Treat the authenticated job-start claim as the only repository identity for
   cache delivery and teardown diagnostics. An organization scale-set runner can
   be created for one queued repository and receive another job from GitHub;

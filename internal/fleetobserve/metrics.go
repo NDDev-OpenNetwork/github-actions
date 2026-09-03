@@ -37,7 +37,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	counter(&output, "gha_fleet_host_oom_kills_total", "Kernel OOM kills observed since host boot.", float64(snapshot.Host.Memory.OOMKillsTotal))
 	output.WriteString(psimetrics.Render(snapshot.Host.Pressure))
 	gauge(&output, "gha_fleet_host_root_available_bytes", "Available bytes on the root filesystem.", float64(snapshot.Host.RootFilesystem.AvailableMiB)*1024*1024)
-	gauge(&output, "gha_fleet_host_root_free_percent", "Free block percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreePercent))
+	gauge(&output, "gha_fleet_host_root_free_percent", "Free block percentage of host-usable root space, excluding the Incus loop-backed pool file.", float64(snapshot.Host.RootFilesystem.FreePercent))
 	gauge(&output, "gha_fleet_host_root_free_inodes_percent", "Free inode percentage on the root filesystem.", float64(snapshot.Host.RootFilesystem.FreeInodesPercent))
 	gauge(&output, "gha_fleet_host_kvm_present", "Whether /dev/kvm is present in the observer service.", boolFloat(snapshot.Host.KVM.Present))
 	gauge(&output, "gha_fleet_host_kvm_accessible", "Whether /dev/kvm is accessible to the observer service.", boolFloat(snapshot.Host.KVM.Accessible))

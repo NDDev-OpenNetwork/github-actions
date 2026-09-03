@@ -21,6 +21,7 @@ import (
 	"github.com/NDDev-OpenNetwork/github-actions/internal/fleettrace"
 	providerconfig "github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/config"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/garmproviderincus/provider"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/hostdisk"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/hostprobe"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerjournal"
 	"github.com/NDDev-OpenNetwork/github-actions/internal/providerretry"
@@ -189,7 +190,14 @@ func buildCollector(options options) (fleetobserve.Collector, error) {
 	}
 	collector := fleetobserve.Collector{
 		Config: platform,
-		Host:   hostprobe.Collect,
+		Host: func(ctx context.Context) (hostprobe.Snapshot, error) {
+			snapshot, err := hostprobe.Collect(ctx)
+			if err != nil {
+				return snapshot, err
+			}
+			hostdisk.ApplyUsableRootPercent(&snapshot)
+			return snapshot, nil
+		},
 		Journal: func(ctx context.Context) (providerjournal.Journal, error) {
 			return journalStore.ReadOnly(ctx)
 		},
