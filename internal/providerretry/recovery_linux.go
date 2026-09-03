@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
 const minimumTerminalRecoveryAge = time.Minute
@@ -323,7 +325,7 @@ func requireActiveQueueJob(path, jobID string, now time.Time) error {
 			ExpiresAt time.Time `json:"expires_at"`
 		} `json:"intents"`
 	}
-	if err := json.Unmarshal(data, &queue); err != nil || queue.SchemaVersion != 4 || queue.Intents == nil {
+	if err := json.Unmarshal(data, &queue); err != nil || queue.SchemaVersion != queueintent.SchemaVersion || queue.Intents == nil {
 		return errors.New("queue journal identity is invalid")
 	}
 	for _, intent := range queue.Intents {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NDDev-OpenNetwork/github-actions/internal/queueintent"
 )
 
 func TestRecoverTerminalUsesExactCASAndGeneration(t *testing.T) {
@@ -114,8 +116,8 @@ func TestRecoverExactJobTerminalRequiresLiveQueueProofAndCAS(t *testing.T) {
 	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	queue := fmt.Sprintf(`{"schema_version":4,"intents":{"github-scale-set-job:v2:3:job-one":{"job_id":"job-one","state":"assigned","expires_at":%q}}}`,
-		time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
+	queue := fmt.Sprintf(`{"schema_version":%d,"intents":{"github-scale-set-job:v2:3:job-one":{"job_id":"job-one","state":"assigned","expires_at":%q}}}`,
+		queueintent.SchemaVersion, time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
 	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +144,8 @@ func TestRecoverExactJobTerminalRejectsMissingOrInvalidQueueProof(t *testing.T) 
 		name  string
 		queue string
 	}{
-		{name: "job absent", queue: `{"schema_version":4,"intents":{}}`},
-		{name: "job running", queue: `{"schema_version":4,"intents":{"job":{"job_id":"job-one","state":"running","expires_at":"2099-01-01T00:00:00Z"}}}`},
+		{name: "job absent", queue: fmt.Sprintf(`{"schema_version":%d,"intents":{}}`, queueintent.SchemaVersion)},
+		{name: "job running", queue: fmt.Sprintf(`{"schema_version":%d,"intents":{"job":{"job_id":"job-one","state":"running","expires_at":"2099-01-01T00:00:00Z"}}}`, queueintent.SchemaVersion)},
 		{name: "wrong schema", queue: `{"schema_version":3,"intents":{"job":{"job_id":"job-one","state":"assigned","expires_at":"2099-01-01T00:00:00Z"}}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
