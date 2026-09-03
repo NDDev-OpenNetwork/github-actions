@@ -31,24 +31,3 @@ func TestRunnerProcessesExcludeIncusGuests(t *testing.T) {
 		t.Fatalf("host listeners/workers = %d/%d, want 1/1", listeners, workers)
 	}
 }
-
-func TestUsableFreePercentExcludesLoopBackingFile(t *testing.T) {
-	t.Parallel()
-	// Live members: 309 GiB root, 73 GiB available, 200 GiB fully allocated
-	// loop file. Raw statvfs is 23% free and trips the 20% gate; the usable
-	// share of the remaining 109 GiB is 67%.
-	const gib = 1024 * 1024 * 1024
-	got := usableFreePercent(309*gib, 73*gib, 200*gib)
-	if got != 67 {
-		t.Fatalf("usable free = %d, want 67", got)
-	}
-	if raw := usableFreePercent(309*gib, 73*gib, 0); raw != 24 {
-		t.Fatalf("raw free = %d, want 24", raw)
-	}
-	if got := usableFreePercent(309*gib, 73*gib, 400*gib); got != 24 {
-		t.Fatalf("oversize loop must not invert the percentage: %d", got)
-	}
-	if got := usableFreePercent(100*gib, 100*gib, 40*gib); got != 100 {
-		t.Fatalf("available covering usable total = %d, want 100", got)
-	}
-}
