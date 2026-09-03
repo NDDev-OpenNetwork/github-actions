@@ -79,6 +79,23 @@ func TestEveryPromisedCommandComesFromThisManifest(t *testing.T) {
 	}
 }
 
+func TestEveryImageBakesSqliteCLibrary(t *testing.T) {
+	t.Parallel()
+	for _, path := range goldenManifestPaths(t) {
+		manifest := loadGolden(t, path)
+		found := false
+		for _, name := range manifest.Guest.Packages {
+			if name == "libsqlite3-dev" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s does not install libsqlite3-dev; release workers have no apt egress", filepath.Base(path))
+		}
+	}
+}
+
 func goldenManifestPaths(t *testing.T) []string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join("..", "..", "config", "golden-image*.yaml"))

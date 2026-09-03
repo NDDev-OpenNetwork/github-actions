@@ -223,6 +223,7 @@ guest:
     - libnspr4
     - libnss3
     - libpango-1.0-0
+    - libsqlite3-dev
     - libssl-dev
     - libx11-6
     - libxcb1
