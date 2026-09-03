@@ -2,7 +2,7 @@ schema_version: 1
 
 image:
   type: container
-  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b24
+  alias: nddev-ubuntu-24.04-amd64-container-runner-2.336.0-r20260801-b25
   current_alias: nddev-ubuntu-24.04-amd64-container-current
   previous_alias: nddev-ubuntu-24.04-amd64-container-previous
   source_alias: nddev-source-ubuntu-24.04-amd64-container-r20260801
@@ -49,10 +49,10 @@ go_cache_seed:
 
 toolchains:
   - name: bun
-    version: 1.4.0
+    version: 1.3.14
     archive: bun-linux-x64.zip
-    download_url: https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-linux-x64.zip
-    archive_sha256: 2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452
+    download_url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip
+    archive_sha256: 951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
   - name: codeql
     version: 2.26.4
     archive: codeql-bundle-linux64.tar.gz
