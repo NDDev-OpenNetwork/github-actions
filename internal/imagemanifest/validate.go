@@ -89,6 +89,20 @@ var toolchainAssets = map[string]struct {
 			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
 		},
 	},
+	"node26": {
+		Host:    "nodejs.org",
+		Archive: func(version string) string { return "node-v" + version + "-linux-x64.tar.xz" },
+		Path: func(version string) string {
+			return "/dist/v" + version + "/node-v" + version + "-linux-x64.tar.xz"
+		},
+	},
+	"python314": {
+		Host:    "github.com",
+		Archive: func(version string) string { return "python-" + version + "-linux-24.04-x64.tar.gz" },
+		Path: func(version string) string {
+			return "/actions/python-versions/releases/download/3.14.7-31064857500/python-" + version + "-linux-24.04-x64.tar.gz"
+		},
+	},
 	"pnpm": {
 		Host:    "registry.npmjs.org",
 		Archive: func(version string) string { return "pnpm-" + version + ".tgz" },

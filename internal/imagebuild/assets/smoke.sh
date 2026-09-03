@@ -94,8 +94,8 @@ smoke_toolchains="$(printf '%s' "${GHA_TOOLCHAINS_B64}" | base64 --decode)"
 mapfile -t smoke_toolchain_names < <(jq -r '.[].name' <<<"${smoke_toolchains}")
 smoke_toolchain_set="$(printf '%s\n' "${smoke_toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
 [[ "${smoke_toolchain_set}" == bun,codeql,gh,go,rustup,uv \
-  || "${smoke_toolchain_set}" == bun,codeql,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
-  || "${smoke_toolchain_set}" == bun,codeql,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]
+  || "${smoke_toolchain_set}" == bun,codeql,gh,go,node22,node24,node25,node26,pnpm,python314,rustup,uv,yarn \
+  || "${smoke_toolchain_set}" == bun,codeql,flutter,gh,go,node22,node24,node25,node26,pnpm,python314,rustup,uv,yarn ]]
 for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
   entry="$(jq -ce --arg name "${smoke_toolchain}" '.[] | select(.name == $name)' <<<"${smoke_toolchains}")"
   expected_version="$(jq -er .version <<<"${entry}")"
@@ -137,7 +137,7 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
       [[ "$("${go_root}/bin/go" version)" == "go version go${expected_version} linux/amd64" ]]
 		[[ "$(go version)" == "go version go${expected_version} linux/amd64" ]]
       ;;
-    node22|node24|node25)
+    node22|node24|node25|node26)
       node_root="${runner_tool_cache}/node/${expected_version}"
       test -f "${node_root}/x64.complete"
       test -x "${node_root}/x64/bin/node"
@@ -149,6 +149,17 @@ for smoke_toolchain in "${smoke_toolchain_names[@]}"; do
         corepack --version >/dev/null
       fi
       ;;
+	python314)
+	  python_hosted_root="/opt/hostedtoolcache/Python/${expected_version}/x64"
+	  python_runner_root="${runner_tool_cache}/Python/${expected_version}"
+	  test -f "/opt/hostedtoolcache/Python/${expected_version}/x64.complete"
+	  test -x "${python_hosted_root}/bin/python3.14"
+	  test -L "${python_runner_root}"
+	  [[ "$(readlink -f -- "${python_runner_root}")" == "/opt/hostedtoolcache/Python/${expected_version}" ]]
+	  [[ "$(runuser -u runner -- env HOME=/home/runner "${python_hosted_root}/bin/python3.14" --version)" == "Python ${expected_version}" ]]
+	  runuser -u runner -- env HOME=/home/runner "${python_hosted_root}/bin/python3.14" -m pip --version >/dev/null
+	  [[ "$(python --version)" == "Python ${expected_version}" ]]
+	  ;;
 	pnpm) [[ "$(pnpm --version)" == "${expected_version}" ]] ;;
     rustup)
       # Verified exactly as a job sees it: through the runner user, whose

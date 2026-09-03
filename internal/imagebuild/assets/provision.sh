@@ -288,8 +288,8 @@ jq -e 'type == "array"' <<<"${toolchain_manifest}" >/dev/null
 mapfile -t toolchain_names < <(jq -r '.[].name' <<<"${toolchain_manifest}")
 toolchain_set="$(printf '%s\n' "${toolchain_names[@]}" | LC_ALL=C sort | paste -sd, -)"
 if [[ "${toolchain_set}" != bun,codeql,gh,go,rustup,uv \
-  && "${toolchain_set}" != bun,codeql,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn \
-  && "${toolchain_set}" != bun,codeql,flutter,gh,go,node22,node24,node25,pnpm,rustup,uv,yarn ]]; then
+  && "${toolchain_set}" != bun,codeql,gh,go,node22,node24,node25,node26,pnpm,python314,rustup,uv,yarn \
+  && "${toolchain_set}" != bun,codeql,flutter,gh,go,node22,node24,node25,node26,pnpm,python314,rustup,uv,yarn ]]; then
   echo "toolchain manifest does not pin the exact baked set" >&2
   exit 1
 fi
@@ -383,7 +383,7 @@ for toolchain_name in "${toolchain_names[@]}"; do
 		ln -sfn "${runner_tool_cache}/go/${toolchain_version}/x64/bin/gofmt" /usr/local/bin/gofmt
 		[[ "$(go version)" == "go version go${toolchain_version} linux/amd64" ]]
       ;;
-    node22|node24|node25)
+    node22|node24|node25|node26)
       tar --extract --xz --file "${toolchain_archive}" \
         --directory "${toolchain_scratch}" --no-same-owner --no-same-permissions
       node_root="${runner_tool_cache}/node/${toolchain_version}"
@@ -402,6 +402,41 @@ for toolchain_name in "${toolchain_names[@]}"; do
         corepack --version >/dev/null
       fi
       ;;
+	python314)
+	  # The official actions/python-versions archive is linked for
+	  # /opt/hostedtoolcache. Install it there and expose that exact tree through
+	  # this runner's tool cache so actions/setup-python resolves it locally.
+	  python_hosted_root="/opt/hostedtoolcache/Python/${toolchain_version}/x64"
+	  python_runner_root="${runner_tool_cache}/Python/${toolchain_version}"
+	  install -d -o runner -g runner -m 0755 \
+	    /opt/hostedtoolcache/Python "${python_hosted_root}" \
+	    "${runner_tool_cache}/Python"
+	  tar --extract --gzip --file "${toolchain_archive}" \
+	    --directory "${python_hosted_root}" --no-same-owner --no-same-permissions
+	  rm -f -- "${python_hosted_root}/setup.sh"
+	  chown -R runner:runner "/opt/hostedtoolcache/Python/${toolchain_version}"
+	  runuser -u runner -- env HOME=/home/runner \
+	    "${python_hosted_root}/bin/python3.14" -m ensurepip --upgrade >/dev/null
+	  ln -sfn "${python_hosted_root}/bin/python3.14" "${python_hosted_root}/python"
+	  install -o runner -g runner -m 0644 /dev/null \
+	    "/opt/hostedtoolcache/Python/${toolchain_version}/x64.complete"
+	  ln -sfn "/opt/hostedtoolcache/Python/${toolchain_version}" "${python_runner_root}"
+	  chown -h runner:runner "${python_runner_root}"
+	  for executable in python python3 pip pip3; do
+	    target="${python_hosted_root}/bin/${executable}"
+	    if [[ ! -e "${target}" ]]; then
+	      case "${executable}" in
+	        python) target="${python_hosted_root}/bin/python3.14" ;;
+	        python3) target="${python_hosted_root}/bin/python3.14" ;;
+	        pip) target="${python_hosted_root}/bin/pip3.14" ;;
+	        pip3) target="${python_hosted_root}/bin/pip3.14" ;;
+	      esac
+	    fi
+	    ln -sfn "${target}" "/usr/local/bin/${executable}"
+	  done
+	  [[ "$(python --version)" == "Python ${toolchain_version}" ]]
+	  python -m pip --version >/dev/null
+	  ;;
 	pnpm)
 		package_root="/usr/local/libexec/gha-toolchains/pnpm-${toolchain_version}"
 		install -d -o root -g root -m 0755 "${package_root}"

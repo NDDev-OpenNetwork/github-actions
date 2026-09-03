@@ -165,7 +165,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// coupling is the point: the alias is part of the recipe, so a manifest
 	// whose contents changed under an unchanged alias would otherwise ask the
 	// builder to produce different bytes for a name that is already promoted.
-	if first != "sha256:e8397808b79585a0d46dabf914549eaba101687602eba859ad4d0599ddbb67ef" {
+	if first != "sha256:6595cdc1795927be79055c6bc5d7a834cd1bb63c1eaa13233b51973067515e22" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)
@@ -351,6 +351,7 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 	}
 	for _, compatibilityInvariant := range []string{
 		"python3 -m pip --version", "/usr/local/bin/python", "/usr/local/bin/pip",
+		"python314", "/opt/hostedtoolcache/Python", "-m ensurepip --upgrade",
 		"/usr/local/bin/go", "/usr/local/bin/gofmt", "pnpm.cjs", "pnpx.cjs",
 		"yarn.js", `chmod 0755 "${package_root}/bin/pnpm.cjs" "${package_root}/bin/pnpx.cjs"`,
 		`chmod 0755 "${package_root}/bin/yarn.js"`, "pnpm --version", "yarn --version",
@@ -369,7 +370,7 @@ func TestEmbeddedScriptsPreserveSecurityBoundary(t *testing.T) {
 	}
 	for _, name := range []string{"assets/smoke.sh", "assets/smoke-integration.sh"} {
 		content, _ := scripts.ReadFile(name)
-		for _, compatibilityInvariant := range []string{"python3 -m pip --version", "pip --version", "pnpm --version", "yarn --version", "go version"} {
+		for _, compatibilityInvariant := range []string{"python3 -m pip --version", "pip --version", "python314", "/opt/hostedtoolcache/Python", "pnpm --version", "yarn --version", "go version"} {
 			if !strings.Contains(string(content), compatibilityInvariant) {
 				t.Fatalf("%s misses compatibility runtime invariant %s", name, compatibilityInvariant)
 			}

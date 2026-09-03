@@ -42,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:fe9f3da1c5e7b997008fe2b8ea04e1d4e1cfdb60f30db69cabdb4d69e06fb4b8" {
+	if fingerprint != "sha256:3ab8bc1630fe32db7b8e5943045e238c60b1f5ef129e4ac60aa69e9ae11c2f6c" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
@@ -70,17 +70,19 @@ func TestContainerManifestPinsCanonicalSignedRootfs(t *testing.T) {
 func assertBakedToolchains(t *testing.T, manifest Manifest) {
 	t.Helper()
 	wanted := map[string]struct{ version, archiveSHA256 string }{
-		"bun":    {"1.3.14", "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"},
-		"codeql": {"2.26.4", "48e1ab8b874d57bd6fd7c90fefee75addc5a45e9bd063982df9beb45a62dd5d3"},
-		"gh":     {"2.97.0", "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112"},
-		"go":     {"1.26.6", "708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"},
-		"node22": {"22.23.2", "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"},
-		"node24": {"24.19.0", "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"},
-		"node25": {"25.9.0", "1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e"},
-		"pnpm":   {"11.22.0", "57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc"},
-		"rustup": {"1.29.0", "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10"},
-		"uv":     {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
-		"yarn":   {"4.18.0", "606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497"},
+		"bun":       {"1.4.0", "2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452"},
+		"codeql":    {"2.26.4", "48e1ab8b874d57bd6fd7c90fefee75addc5a45e9bd063982df9beb45a62dd5d3"},
+		"gh":        {"2.97.0", "a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112"},
+		"go":        {"1.26.7", "ffb5f8de10c62550dfddab66b36b57030721e0a44a3218e9e1181d7b59f121ca"},
+		"node22":    {"22.23.2", "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"},
+		"node24":    {"24.19.0", "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"},
+		"node25":    {"25.9.0", "1d8db7d6e291d167e8c467ae4094be175e1a0b3969c7ae1f8955b9f7824f7b2e"},
+		"node26":    {"26.8.1", "3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"},
+		"pnpm":      {"11.22.0", "57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc"},
+		"python314": {"3.14.7", "76d5ddab6d2dd89a39c06220f6efeda486a48ed481eae97bfc596c74ac3623db"},
+		"rustup":    {"1.29.0", "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10"},
+		"uv":        {"0.11.30", "04bc7d180d6138bf6dc08387acf507a823f397a98fea55da36b0ccc7fbce3b68"},
+		"yarn":      {"4.18.0", "606e7e2dfc8bcc24e1b3a70a1043288a271ad2cc71cf42248fadc25f5938a497"},
 	}
 	if len(manifest.Toolchains) != len(wanted) {
 		t.Fatalf("toolchains = %d, want %d", len(manifest.Toolchains), len(wanted))
