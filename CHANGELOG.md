@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Point GARM bootstrap image constants at container standard b27 and
+  integration b21, matching the Go-cache-seed bake.
+
 - Advance the baked Go cache seed to github-actions `b17a1ec`. The previous
   seed `b4a49eec` predates the current controller and provider tree, so a
   fleet `gha-fleet` compile was only a partial GOCACHE hit. Immutable aliases
