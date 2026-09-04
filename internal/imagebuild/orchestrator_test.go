@@ -160,7 +160,7 @@ func TestRecipeFingerprintIsDeterministic(t *testing.T) {
 	// release workers. The prior image is already promoted, so the alias moves
 	// with the recipe instead of asking the builder to produce different bytes
 	// for an immutable name.
-	if first != "sha256:c8c7dd85141e4958052a580251ee1b9fd66f71e2fdee25205853c456ff120c1c" {
+	if first != "sha256:66e11f27e8c542cbe4011b5b475792a49c8751b2910da4c3073d2c0a6f6fd8ec" {
 		t.Fatalf("deployed standard recipe fingerprint drifted: %q", first)
 	}
 	smoke, err := SmokeFingerprint(plan)

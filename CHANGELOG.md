@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Advance the baked Go cache seed to github-actions `b17a1ec`. The previous
+  seed `b4a49eec` predates the current controller and provider tree, so a
+  fleet `gha-fleet` compile was only a partial GOCACHE hit. Immutable aliases
+  move with the payload: container standard b27, container integration b21,
+  VM standard b23, VM integration b22.
+
 - Stop paging a kernel reboot as a host-global OOM, and stop paging a
   30-second inventory listing blip as `lifecycle_inventory_gap`.
   `host_oom_detected` used max-min span of the boot-scoped counter, so
