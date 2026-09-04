@@ -72,7 +72,13 @@ rules:
     #
     # A window with no events now returns an empty result, which is the honest
     # answer to "how many events", evaluates without error, and does not fire.
-    expression: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
+    #
+    # last_over_time - min_over_time, not max - min: a collector restart that
+    # republishes the cumulative total, or a series that resets N→0, has the
+    # same unsigned max-min span as N new events. last-min is 0 across that
+    # reset and the true delta when the counter moves up. Same treatment as
+    # host_oom_detected.
+    expression: sum by (host_name) (last_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[15m]))
     operator: ">"
     threshold: 30
     # No outer subquery: evaluation and hold are equal, so the renderer emits
@@ -219,11 +225,19 @@ rules:
   # beside each failed one. Counting the unhealthy minutes catches the shape
   # the page is built to miss, and it is a ticket: a fleet that recovers by
   # itself every minute is not an outage, it is a defect with a heartbeat.
+  #
+  # Written as sum_over_time of a bool, not count_over_time of a filter.
+  # This backend drops `(healthy < 1)` when healthy is 1, so the inner
+  # range is empty on a quiet fleet; hold > eval then wraps that empty
+  # vector and raises error 20008, which pages as alert_evaluation_failed.
+  # `X < bool 1` returns 0 when healthy and 1 when not, so the range is
+  # never empty. sum_over_time of those 0/1 steps is the unhealthy-minute
+  # count; count_over_time would count every step, healthy or not.
   - id: fleet_health_flapping
     severity: ticket
     query_language: promql
     stream_name: gha_fleet_platform_healthy
-    expression: count_over_time((min by (host_name) (gha_fleet_platform_healthy) < 1)[30m:1m])
+    expression: sum_over_time((min by (host_name) (gha_fleet_platform_healthy) < bool 1)[30m:1m])
     operator: ">="
     threshold: 3
     evaluation_seconds: 300
@@ -486,7 +500,9 @@ rules:
     query_language: promql
     stream_name: gha_fleet_host_signal_events
     # Same `or vector(0)` removal as audit_suppression_burst; see there.
-    expression: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
+    # last_over_time - min_over_time, not max - min: same unsigned-reset
+    # treatment as host_oom_detected and audit_suppression_burst.
+    expression: sum by (host_name) (last_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
     operator: ">"
     threshold: 10
     # No outer subquery: evaluation and hold are equal, so the renderer emits
@@ -548,7 +564,7 @@ rules:
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
     summary: A created worker has no running job identity beyond transition grace.
     action: Verify GitHub absent/offline state before allowing the normal reaper to delete it.
-    recovery: No created lease remains unbound beyond five minutes.
+    recovery: No created lease remains unbound beyond fifteen minutes.
   - id: lifecycle_inventory_gap
     severity: page
     query_language: promql
@@ -614,9 +630,9 @@ rules:
     enabled: true
     owner: fleet-operations
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: An eligible queued job has not produced runner delivery progress within five minutes.
+    summary: An eligible queued job has not produced runner delivery progress within thirty minutes.
     action: Preserve the job and correlate queue intent, provider retry, admission, worker creation and GitHub registration before recovery.
-    recovery: Queued age remains below five minutes or the exact job advances without operator cancellation.
+    recovery: Queued wait remains below thirty minutes or the exact job advances without operator cancellation.
   - id: memory_psi_slow_burn
     severity: ticket
     query_language: promql
@@ -680,10 +696,10 @@ rules:
   #
   # A ticket must hold at least ten minutes -- that is the rule package's own
   # policy for the class, and it is right -- so the threshold has to come down
-  # to where a ten-minute hold can reach. 300 s is also the boundary this
-  # rule's own summary names: "between the two-minute objective and the
-  # five-minute page". Held ten minutes it fires once on a day like that one,
-  # which is what a slow-burn ticket should cost.
+  # to where a ten-minute hold can reach. 300 s is the slow-burn floor;
+  # lifecycle_queued_delivery_stall owns waits past thirty minutes. Held ten
+  # minutes it fires once on a day like that one, which is what a slow-burn
+  # ticket should cost.
   # The wait a developer feels, closed: first queued to runner running, over
   # the jobs that started in the last fifteen minutes. Every other wait rule
   # here reads a gauge that stops when the provider assigns the intent, so on
@@ -735,9 +751,9 @@ rules:
     enabled: true
     owner: fleet-performance
     runbook: https://github.com/NDDev-OpenNetwork/github-actions/blob/main/docs/runbooks/fleet-alerts.md
-    summary: Queue latency is persistently between the two-minute objective and the five-minute page.
+    summary: Queue latency is persistently between five minutes and the thirty-minute page.
     action: Create a capacity or fairness ticket using phase-specific and class metrics.
-    recovery: Queue age remains below two minutes for the hold window, or a stuck job crosses five minutes and lifecycle_queued_delivery_stall owns it instead.
+    recovery: Queue age remains below five minutes for the hold window, or a stuck job crosses thirty minutes and lifecycle_queued_delivery_stall owns it instead.
   - id: snapshot_stale
     severity: page
     query_language: promql
