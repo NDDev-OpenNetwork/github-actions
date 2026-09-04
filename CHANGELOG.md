@@ -9,7 +9,8 @@
   JVM hit its envelope; `increase()` treated an observer restart that
   republished the boot total as a burst of new kills (observed 4 and 3 with no
   dmesg). Kernel logs that cannot be read still fall back to vmstat so a
-  sandboxed observer does not fail the host snapshot.
+  sandboxed observer does not fail the host snapshot. The provider compiles
+  the same hostprobe package, so this is `v0.1.5-nddev.122`.
 
 - Stamp `gha-pressure-observer` from `make build-controller` with the same
   version and commit as the other host binaries. The live members were still
