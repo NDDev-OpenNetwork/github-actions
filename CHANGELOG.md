@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Stop paging a kernel reboot as a host-global OOM, and stop paging a
+  30-second inventory listing blip as `lifecycle_inventory_gap`.
+  `host_oom_detected` used max-min span of the boot-scoped counter, so
+  gha-runner-2's 09:43Z reboot (6.8.0-138 → 6.8.0-139, zero CONSTRAINT_NONE
+  lines this boot) replayed as observed 3 — the previous boot's three real
+  kills from 2026-09-03 18:09–18:22Z. last-min of the same window is 0.
+  `lifecycle_inventory_gap` used `min_over_time((max(a)+max(b)+max(c))[2m:30s])`,
+  which dropped the zero steps and returned 1 at 07:30:16Z and 14:41:31Z while
+  `missing_instances` was 1 for one sample. Raw `min_over_time(metric[2m])`
+  is 0 at both timestamps. Replayed against the live store before shipping.
+
+- Stop paging OpenObserve ingest after a services reboot as missing
+  observers, and apply the inventory-gap hold to `github_correlation_persistent`.
+  Instant `count(up==1)` was 2 at 09:54Z and 3 at 09:58:43Z while all four
+  members were up; `count(last_over_time(up[10m])==1)` was 4 at both.
+  Compliance was 3 vs 5 on the same window. The sibling `max(a)+max(b)`
+  correlation page used the same scalar subquery that dropped zeros.
+
 - Write a world-readable `/run/nddev/image-fingerprint` from the root
   assignment so an unprivileged job can attest the live image without the
   Incus guest API, which answers HTTP 401 to uid runner. The parent

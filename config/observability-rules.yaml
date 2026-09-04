@@ -114,11 +114,18 @@ rules:
     severity: page
     query_language: promql
     stream_name: up
-    expression: count(up{service_name="pressure-state"} == 1)
+    # Instant count(up==1) is the current ingest set, not the live observers.
+    # Measured 2026-09-04 after gha-services rebooted at 09:49Z: count was 2
+    # at 09:54Z and 3 at 09:58:43Z while all four members were up, because
+    # OpenObserve had not yet replayed every series. last_over_time[10m] was
+    # 4 at both timestamps — the pre-reboot samples still identify the hosts.
+    # A member whose collector has been silent for ten minutes falls out.
+    # hold equals evaluation so the renderer does not wrap this in a subquery.
+    expression: count(last_over_time(up{service_name="pressure-state"}[10m]) == 1)
     operator: "<"
     threshold: 4
     evaluation_seconds: 30
-    hold_seconds: 120
+    hold_seconds: 30
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations
@@ -275,11 +282,16 @@ rules:
     # are non-negative counts compared against zero, so their sum is positive
     # exactly when either is -- the same alert, in an operator the backend
     # evaluates.
-    expression: max(gha_fleet_queue_missing_workflow_run_id_beyond_grace) + max(gha_fleet_queue_unbound_repository_beyond_grace)
+    #
+    # Same hold as lifecycle_inventory_gap: min_over_time((max(a)+max(b))[2m:30s])
+    # drops the zero steps of a scalar aggregation, so a 30-second blip pages.
+    # Raw min_over_time(metric[2m]) keeps those zeros. hold equals evaluation
+    # so the renderer does not wrap this again.
+    expression: max(min_over_time(gha_fleet_queue_missing_workflow_run_id_beyond_grace[2m]) + min_over_time(gha_fleet_queue_unbound_repository_beyond_grace[2m]))
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
-    hold_seconds: 120
+    hold_seconds: 30
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations
@@ -291,11 +303,15 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_host_compliance_observer_up
-    expression: count(gha_fleet_host_compliance_observer_up == 1)
+    # Same ingest-set vs live-host distinction as
+    # compute_pressure_observer_missing. Measured 2026-09-04 09:54Z: instant
+    # count was 3 of 5 while last_over_time[10m] was 5. A host that has not
+    # exported a complete sample for ten minutes is the page.
+    expression: count(last_over_time(gha_fleet_host_compliance_observer_up[10m]) == 1)
     operator: "<"
     threshold: 5
     evaluation_seconds: 60
-    hold_seconds: 180
+    hold_seconds: 60
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations
@@ -311,10 +327,19 @@ rules:
     # republishes the same total after a restart, OpenObserve starts a new
     # series at that value, and increase() treats 0→N as N new kills. Measured
     # 2026-09-04 01:36Z: observed 4 and 3 with no dmesg after the image-cutover
-    # observer restart. The in-window span is zero across a republish and one
-    # when the boot total actually moves. `round` still strips PromQL's
-    # boundary extrapolation so a single integer event does not page as 1.05.
-    expression: round(max by (host_name) (max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))
+    # observer restart. `round` still strips PromQL's boundary extrapolation
+    # so a single integer event does not page as 1.05.
+    #
+    # Do not use max_over_time - min_over_time either. That span is unsigned:
+    # a kernel reboot that resets the boot total 3→0 has the same span as
+    # three new kills. Measured 2026-09-04 09:43Z on gha-runner-2: the host
+    # rebooted 6.8.0-138 → 6.8.0-139, this boot's journal has zero
+    # CONSTRAINT_NONE lines, and the page still said observed 3 because the
+    # previous boot's three real kills (2026-09-03 18:09–18:22Z) were still
+    # in the five-minute window. last_over_time - min_over_time is zero across
+    # that reset and one when the boot total actually moves up. Replayed
+    # against the live store at 09:43:02Z and 09:46:08Z.
+    expression: round(max by (host_name) (last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
@@ -539,11 +564,21 @@ rules:
     # minutes of normal traffic the raw counter was non-zero in two samples of
     # twenty-four. Paging on that buries the case worth waking for, which is an
     # intent still uncovered after nothing is coming for it.
-    expression: max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances) + max(gha_fleet_queue_uncovered_running_beyond_grace)
+    #
+    # Hold cannot be the renderer's aggregated subquery. Measured 2026-09-04
+    # against the live engine: min_over_time((max(missing)+max(orphan)+max(
+    # uncovered_bg))[2m:30s]) returned 1 at 07:30:16Z and 14:41:31Z while
+    # missing_instances was 1 for one 30-second sample and 0 for the rest of
+    # the window. The subquery drops the zero steps of an aggregated gauge,
+    # so min of the remaining 1 is 1 and the page fires on a listing blip.
+    # Raw min_over_time(metric[2m]) keeps those zeros (0 at both timestamps)
+    # and is the hold. evaluation_seconds equals hold_seconds so the renderer
+    # does not wrap this again.
+    expression: max(min_over_time(gha_fleet_incus_orphan_instances[2m]) + min_over_time(gha_fleet_journal_missing_instances[2m]) + min_over_time(gha_fleet_queue_uncovered_running_beyond_grace[2m]))
     operator: ">"
     threshold: 0
     evaluation_seconds: 30
-    hold_seconds: 120
+    hold_seconds: 30
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations

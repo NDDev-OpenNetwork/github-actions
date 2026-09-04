@@ -22,19 +22,20 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	wanted := map[string]string{
-		"github_correlation_persistent":     "gha_fleet_queue_missing_workflow_run_id_beyond_grace",
+		"github_correlation_persistent":     "min_over_time(gha_fleet_queue_missing_workflow_run_id_beyond_grace[2m])",
 		"lifecycle_queued_delivery_stall":   "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
 		"memory_psi_slow_burn":              `window_seconds="10"`,
 		"queue_wait_slow_burn":              "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
 		"provider_retry_error_persistent":   `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
-		"compute_pressure_observer_missing": `count(up{service_name="pressure-state"} == 1)`,
+		"compute_pressure_observer_missing": `count(last_over_time(up{service_name="pressure-state"}[10m]) == 1)`,
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
 		"compute_root_disk_low":             "gha_fleet_host_root_free_percent",
 		"kernel_slab_unreclaimable":         "gha_fleet_host_slab_unreclaimable_attributed_bytes",
 		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
 		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
-		"host_compliance_observer_missing":  "gha_fleet_host_compliance_observer_up",
-		"host_oom_detected":                 "round(max by (host_name) (max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))",
+		"host_compliance_observer_missing":  "last_over_time(gha_fleet_host_compliance_observer_up[10m])",
+		"host_oom_detected":                 "round(max by (host_name) (last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))",
+		"lifecycle_inventory_gap":           "min_over_time(gha_fleet_journal_missing_instances[2m])",
 		"host_package_inventory_stale":      "gha_fleet_host_package_inventory_age_seconds",
 		"host_reboot_required":              "gha_fleet_host_reboot_required",
 		"host_standard_updates_available":   "gha_fleet_host_standard_updates_available",
@@ -361,6 +362,148 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 // Non-negative counters compared against zero say the same thing with `+`, and
 // a window with no events says it with an empty result, which is honest and
 // does not fire.
+// host_oom_detected and lifecycle_inventory_gap both paged on 2026-09-04
+// for facts the live store still holds, and both expressions replayed as
+// firing at those timestamps. The replacements replay as 0.
+//
+// host_oom_detected: gha-runner-2 rebooted 09:43:43Z (6.8.0-138 → 6.8.0-139).
+// The previous boot's three CONSTRAINT_NONE kills were 2026-09-03 18:09–18:22Z.
+// max_over_time - min_over_time of the boot-scoped counter was 3 at 09:43:02Z
+// and 09:46:08Z; last_over_time - min_over_time was 0 at both.
+//
+// lifecycle_inventory_gap: missing_instances was 1 for one 30-second sample
+// at 07:30:16Z and 14:41:31Z. min_over_time((max(a)+max(b)+max(c))[2m:30s])
+// returned 1 — the subquery dropped the zero steps — while
+// min_over_time(metric[2m]) returned 0. Hold lives in that raw range, so
+// evaluation_seconds equals hold_seconds and the renderer must not wrap it.
+func TestAlertHoldsThatTheBackendActuallyEvaluates(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Rule{}
+	for _, rule := range bundle.Rules {
+		byID[rule.ID] = rule
+	}
+	oom, ok := byID["host_oom_detected"]
+	if !ok {
+		t.Fatal("host_oom_detected rule is missing")
+	}
+	if strings.Contains(oom.Expression, "max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time") {
+		t.Fatalf("host_oom_detected still pages a counter reset: %s", oom.Expression)
+	}
+	if !strings.Contains(oom.Expression, "last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])") {
+		t.Fatalf("host_oom_detected does not count only upward movement: %s", oom.Expression)
+	}
+	gap, ok := byID["lifecycle_inventory_gap"]
+	if !ok {
+		t.Fatal("lifecycle_inventory_gap rule is missing")
+	}
+	if gap.HoldSecs > gap.EvaluationSecs {
+		t.Fatalf("lifecycle_inventory_gap hold %d > eval %d would wrap the raw range in the aggregated subquery that dropped zeros", gap.HoldSecs, gap.EvaluationSecs)
+	}
+	if strings.Contains(gap.Expression, "max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances)") {
+		t.Fatalf("lifecycle_inventory_gap still sums instant max() gauges: %s", gap.Expression)
+	}
+	for _, metric := range []string{
+		"gha_fleet_incus_orphan_instances",
+		"gha_fleet_journal_missing_instances",
+		"gha_fleet_queue_uncovered_running_beyond_grace",
+	} {
+		want := "min_over_time(" + metric + "[2m])"
+		if !strings.Contains(gap.Expression, want) {
+			t.Fatalf("lifecycle_inventory_gap missing %s in %s", want, gap.Expression)
+		}
+	}
+	pressure, ok := byID["compute_pressure_observer_missing"]
+	if !ok {
+		t.Fatal("compute_pressure_observer_missing rule is missing")
+	}
+	if !strings.Contains(pressure.Expression, "last_over_time(up{service_name=\"pressure-state\"}[10m])") {
+		t.Fatalf("compute_pressure_observer_missing still counts the ingest set: %s", pressure.Expression)
+	}
+	if pressure.HoldSecs > pressure.EvaluationSecs {
+		t.Fatalf("compute_pressure_observer_missing hold %d > eval %d would wrap last_over_time in a subquery", pressure.HoldSecs, pressure.EvaluationSecs)
+	}
+	compliance, ok := byID["host_compliance_observer_missing"]
+	if !ok {
+		t.Fatal("host_compliance_observer_missing rule is missing")
+	}
+	if !strings.Contains(compliance.Expression, "last_over_time(gha_fleet_host_compliance_observer_up[10m])") {
+		t.Fatalf("host_compliance_observer_missing still counts the ingest set: %s", compliance.Expression)
+	}
+	if compliance.HoldSecs > compliance.EvaluationSecs {
+		t.Fatalf("host_compliance_observer_missing hold %d > eval %d would wrap last_over_time in a subquery", compliance.HoldSecs, compliance.EvaluationSecs)
+	}
+	corr, ok := byID["github_correlation_persistent"]
+	if !ok {
+		t.Fatal("github_correlation_persistent rule is missing")
+	}
+	if corr.HoldSecs > corr.EvaluationSecs {
+		t.Fatalf("github_correlation_persistent hold %d > eval %d would wrap the scalar max()+max() subquery that drops zeros", corr.HoldSecs, corr.EvaluationSecs)
+	}
+	if strings.Contains(corr.Expression, "max(gha_fleet_queue_missing_workflow_run_id_beyond_grace) + max(gha_fleet_queue_unbound_repository_beyond_grace)") {
+		t.Fatalf("github_correlation_persistent still sums instant max() gauges: %s", corr.Expression)
+	}
+	for _, alert := range rendered.Alerts {
+		switch alert.Name {
+		case "host_oom_detected":
+			if !strings.Contains(alert.QueryCondition.PromQL, "last_over_time(gha_fleet_host_oom_kills_total[5m])") {
+				t.Fatalf("rendered host_oom_detected lost last_over_time: %s", alert.QueryCondition.PromQL)
+			}
+		case "lifecycle_inventory_gap":
+			if strings.Contains(alert.QueryCondition.PromQL, "[2m:30s]") || strings.Contains(alert.QueryCondition.PromQL, "[2m:15s]") {
+				t.Fatalf("rendered lifecycle_inventory_gap was wrapped in the aggregated subquery: %s", alert.QueryCondition.PromQL)
+			}
+			if !strings.Contains(alert.QueryCondition.PromQL, "min_over_time(gha_fleet_journal_missing_instances[2m])") {
+				t.Fatalf("rendered lifecycle_inventory_gap lost the raw missing range: %s", alert.QueryCondition.PromQL)
+			}
+		case "compute_pressure_observer_missing":
+			if strings.Contains(alert.QueryCondition.PromQL, "count(up{service_name=\"pressure-state\"} == 1)") &&
+				!strings.Contains(alert.QueryCondition.PromQL, "last_over_time") {
+				t.Fatalf("rendered compute_pressure_observer_missing still counts the ingest set: %s", alert.QueryCondition.PromQL)
+			}
+		case "github_correlation_persistent":
+			if strings.Contains(alert.QueryCondition.PromQL, "[2m:30s]") {
+				t.Fatalf("rendered github_correlation_persistent was wrapped in the aggregated subquery: %s", alert.QueryCondition.PromQL)
+			}
+		}
+	}
+}
+
+// Instant max(a)+max(b) of gauges that are 0 when healthy cannot take the
+// renderer's min_over_time((expr)[hold:eval]) wrap: the subquery drops zero
+// steps and a 30-second blip pages. Those rules bake min_over_time on the
+// raw series and set hold equal to evaluation.
+func TestScalarZeroGaugesDoNotUseAggregatedSubqueryHold(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range bundle.Rules {
+		if rule.QueryLanguage != "" && rule.QueryLanguage != "promql" {
+			continue
+		}
+		if rule.Operator != ">" || rule.Threshold != 0 {
+			continue
+		}
+		if !strings.Contains(rule.Expression, "max(") || !strings.Contains(rule.Expression, ") + ") {
+			continue
+		}
+		if rule.HoldSecs > rule.EvaluationSecs {
+			t.Errorf("%s sums scalar max() gauges with a renderer wrap that drops zeros: hold %d eval %d expr %s",
+				rule.ID, rule.HoldSecs, rule.EvaluationSecs, rule.Expression)
+		}
+		if !strings.Contains(rule.Expression, "min_over_time(") {
+			t.Errorf("%s sums scalar max() gauges without a raw min_over_time hold: %s", rule.ID, rule.Expression)
+		}
+	}
+}
+
 func TestNoRuleDependsOnASetOperatorTheBackendDiscards(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
