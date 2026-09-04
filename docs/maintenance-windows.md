@@ -27,6 +27,11 @@ config, and the observer reads it there to tell maintenance from an incident.
 
 ## What the observer does during a hold
 
+Every drain-marked member, online or offline, is named on
+`gha_fleet_visibility_drain_marked_members` and the per-member
+`gha_fleet_visibility_drain_marked` rows. That series is how an authorized
+hold is observed; it does not change queue or assigned pages.
+
 While an offline member carries a `drained: ` reason, the member is **held
 out**: inventory gap counts (orphan / missing / uncovered-beyond-grace) move
 to `*_unattributable` snapshot fields, a loud listing failure moves to
@@ -36,6 +41,12 @@ to `*_unattributable` snapshot fields, a loud listing failure moves to
 ticket pages when a hold outlives half an hour, so the suppression can never
 hide a member that failed to come back. An offline member **without** a drain
 reason fails collection immediately.
+
+An **online** drain leaves the listing complete: empty on that member is the
+truth, so HeldOutMembers stays empty and queue/assigned pages still fire. If
+every reported cluster member is drain-marked, uncovered-beyond-grace does
+not fail platform health — there is no eligible placement left on purpose. A
+partial drain with an undrained sibling still fails health on that gap.
 
 ## Stopping the Incus daemon for real
 
