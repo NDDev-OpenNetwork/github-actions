@@ -479,12 +479,23 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	// residents are unobservable by design, so gap arithmetic over this sample
 	// cannot attribute blame and must not page. An offline member WITHOUT a
 	// drain reason is an incident and fails the platform loudly.
+	//
+	// An online drain is different: the listing is complete (empty on that
+	// member is the truth), so HeldOutMembers stays empty and queue/assigned
+	// pages still fire. If every member is drain-marked, there is no eligible
+	// placement left on purpose; uncovered-beyond-grace must not fail platform
+	// health, or an authorized bake drain pages fleet_platform_unhealthy.
 	visibilityDegraded := false
+	allMembersDrainMarked := false
 	if c.Members != nil {
 		if membersErr != nil {
 			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("cluster members", membersErr))
 		} else {
+			marked := 0
 			for _, member := range members {
+				if member.DrainReason != "" {
+					marked++
+				}
 				if member.Online {
 					continue
 				}
@@ -496,6 +507,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				snapshot.CollectionErrors = append(snapshot.CollectionErrors,
 					"incus: cluster member "+member.Name+" is offline without a drain")
 			}
+			allMembersDrainMarked = len(members) > 0 && marked == len(members)
 			sort.Strings(snapshot.HeldOutMembers)
 		}
 	}
@@ -670,9 +682,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Queue.OldestUncoveredRunningAgeSeconds = correlation.OldestUncoveredRunningAgeSeconds
 	}
 	sort.Strings(snapshot.CollectionErrors)
+	uncoveredFailsHealth := snapshot.Queue.UncoveredRunningBeyondGrace != 0 && !allMembersDrainMarked
 	snapshot.Healthy = len(snapshot.CollectionErrors) == 0 &&
 		snapshot.Incus.OrphanInstances == 0 && snapshot.Incus.MissingInstances == 0 &&
-		snapshot.Queue.UncoveredRunningBeyondGrace == 0
+		!uncoveredFailsHealth
 	for _, service := range snapshot.Services {
 		if !service.Active {
 			snapshot.Healthy = false

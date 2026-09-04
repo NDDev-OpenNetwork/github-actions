@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep platform health up when every cluster member is drain-marked,
+  including an online drain. `gha_fleet_visibility_held_out_members` still
+  counts only offline drained members, so queue and assigned pages keep
+  firing; uncovered-beyond-grace no longer zeros `gha_fleet_platform_healthy`
+  for an authorized full-fleet drain.
+
 - Point GARM bootstrap image constants at container standard b27 and
   integration b21, matching the Go-cache-seed bake.
 
