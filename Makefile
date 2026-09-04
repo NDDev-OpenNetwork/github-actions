@@ -2,10 +2,10 @@
 
 .PHONY: build build-controller build-garm-derivative fmt-check garm-derivative-script test test-race vet verify
 
-# The controller and observer that ship to the hosts. Stamped, because an
-# unstamped binary reports `version: dev, commit: unknown` -- which is what all
-# five hosts reported, since `build` compiles without ldflags and no other
-# target ever produced these. runProviderRelease's own comment already claimed
+# The controller, observer, cache broker and pressure observer that ship to
+# the hosts. Stamped, because an unstamped binary reports `version: dev,
+# commit: unknown` -- which is what the hosts reported whenever a target
+# compiled without ldflags. runProviderRelease's own comment already claimed
 # the Makefile stamped them; this is that claim made true.
 #
 # The version is the provider derivative version, read from the manifest rather
@@ -30,8 +30,10 @@ build-controller:
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-fleet ./cmd/gha-fleet
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-fleet-observer ./cmd/gha-fleet-observer
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-cache-broker ./cmd/gha-cache-broker
+	CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "$(CONTROLLER_LDFLAGS)" -o dist/gha-pressure-observer ./cmd/gha-pressure-observer
 	@./dist/gha-fleet version
 	@./dist/gha-cache-broker -version
+	@./dist/gha-pressure-observer --version
 
 garm-derivative-script:
 	go run ./cmd/gha-fleet render-garm-build

@@ -116,7 +116,7 @@ func Render(state pressuregate.State, now time.Time, maxStaleness time.Duration,
 	}
 	gauge("gha_fleet_pressure_observer_up", "Whether the local pressure state is valid and fresh.", boolFloat(fresh))
 	gauge("gha_fleet_pressure_sample_age_seconds", "Age of the local pressure publication, or -1 when unavailable.", age)
-	counter("gha_fleet_host_oom_kills_total", "Kernel OOM kills observed since host boot.", state.OOMKillsTotal)
+	counter("gha_fleet_host_oom_kills_total", "Host-global kernel OOM kills since boot (constraint=CONSTRAINT_NONE), excluding memory-cgroup kills.", state.OOMKillsTotal)
 	gauge("gha_fleet_host_pressure_open", "Whether local pressure admission is open and fresh.", boolFloat(fresh && state.State == pressuregate.StateOpen))
 	// The gate records why it is in its current state and that reason was
 	// readable only by opening a JSON file on the host. When admission closes

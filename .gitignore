@@ -10,6 +10,7 @@
 /gha-fleet
 /gha-fleet-gateway
 /gha-fleet-observer
+/gha-pressure-observer
 /coverage.out
 /*.prof
 *.test
