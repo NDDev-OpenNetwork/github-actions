@@ -26,8 +26,8 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 		manifest.CompilerCache.BinarySHA256 != "066c5a84c85044c8f48b3ab571ac114293ea717c3d36985db022af8206e21e63" {
 		t.Fatalf("compiler cache is not exactly pinned: %#v", manifest.CompilerCache)
 	}
-	if manifest.GoCacheSeed.Commit != "b4a49eecb836b2c97f15afe2c749d34f552f2ae4" ||
-		manifest.GoCacheSeed.ArchiveSHA256 != "e2e2325f28743b645cd5fce8f520ffa5cbeed2662eada73e22d34f6a5c7472a3" ||
+	if manifest.GoCacheSeed.Commit != "b17a1ecfcbbe96ab083fb3548bcd3102f73fcd69" ||
+		manifest.GoCacheSeed.ArchiveSHA256 != "22c2b34cdb5ddaba32bb67ebba4ae8bf1909e5d6082b18859350581b1efabdfa" ||
 		len(manifest.GoCacheSeed.Packages) != 1 || manifest.GoCacheSeed.Packages[0] != "./cmd/gha-fleet" {
 		t.Fatalf("Go cache seed is not exactly pinned: %#v", manifest.GoCacheSeed)
 	}
@@ -42,7 +42,7 @@ func TestRepositoryManifestIsValidAndPinned(t *testing.T) {
 	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+64 {
 		t.Fatalf("unexpected fingerprint %q", fingerprint)
 	}
-	if fingerprint != "sha256:ecb5434b09d2aa042b5d400115974741f733c2950f1a32af56c792c7655158ce" {
+	if fingerprint != "sha256:772c8f76f6851aedb9ab3aef6a89fc089c00807a889330b7251eb0eddf2d4a38" {
 		t.Fatalf("standard manifest fingerprint drifted: %q", fingerprint)
 	}
 }
