@@ -34,7 +34,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	gauge(&output, "gha_fleet_host_load1", "One-minute host load average.", snapshot.Host.CPU.Load1)
 	gauge(&output, "gha_fleet_host_memory_total_bytes", "Total host memory in bytes.", float64(snapshot.Host.Memory.TotalMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_memory_available_bytes", "Available host memory in bytes.", float64(snapshot.Host.Memory.AvailableMiB)*1024*1024)
-	counter(&output, "gha_fleet_host_oom_kills_total", "Kernel OOM kills observed since host boot.", float64(snapshot.Host.Memory.OOMKillsTotal))
+	counter(&output, "gha_fleet_host_oom_kills_total", "Host-global kernel OOM kills since boot (constraint=CONSTRAINT_NONE), excluding memory-cgroup kills.", float64(snapshot.Host.Memory.OOMKillsTotal))
 	output.WriteString(psimetrics.Render(snapshot.Host.Pressure))
 	gauge(&output, "gha_fleet_host_root_available_bytes", "Available bytes on the root filesystem.", float64(snapshot.Host.RootFilesystem.AvailableMiB)*1024*1024)
 	gauge(&output, "gha_fleet_host_root_free_percent", "Free block percentage of host-usable root space, excluding the Incus loop-backed pool file.", float64(snapshot.Host.RootFilesystem.FreePercent))

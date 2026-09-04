@@ -39,10 +39,13 @@ type CPU struct {
 }
 
 type Memory struct {
-	TotalMiB      int    `json:"total_mib"`
-	AvailableMiB  int    `json:"available_mib"`
-	SwapTotalMiB  int    `json:"swap_total_mib"`
-	SwapFreeMiB   int    `json:"swap_free_mib"`
+	TotalMiB     int `json:"total_mib"`
+	AvailableMiB int `json:"available_mib"`
+	SwapTotalMiB int `json:"swap_total_mib"`
+	SwapFreeMiB  int `json:"swap_free_mib"`
+	// Host-global kernel OOM kills since boot (`constraint=CONSTRAINT_NONE`).
+	// Memory-cgroup kills are excluded: they are the admission envelope working.
+	// When kernel logs are unreadable the value falls back to vmstat oom_kill.
 	OOMKillsTotal uint64 `json:"oom_kills_total"`
 }
 

@@ -307,13 +307,14 @@ rules:
     severity: page
     query_language: promql
     stream_name: gha_fleet_host_oom_kills_total
-    # PromQL increase extrapolates a counter to both range boundaries. A single
-    # exact kernel event therefore appeared in the notification as
-    # 1.0526315789473684. Preserve increase's reset handling, but report the
-    # physical event count rather than its sampling extrapolation. `round` is
-    # supported by the deployed OpenObserve engine and leaves the > 0 detector
-    # unchanged for integer counter increments.
-    expression: round(max by (host_name) (increase(gha_fleet_host_oom_kills_total[5m])))
+    # Do not use increase() on this boot-scoped counter. The pressure observer
+    # republishes the same total after a restart, OpenObserve starts a new
+    # series at that value, and increase() treats 0→N as N new kills. Measured
+    # 2026-09-04 01:36Z: observed 4 and 3 with no dmesg after the image-cutover
+    # observer restart. The in-window span is zero across a republish and one
+    # when the boot total actually moves. `round` still strips PromQL's
+    # boundary extrapolation so a single integer event does not page as 1.05.
+    expression: round(max by (host_name) (max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))
     operator: ">"
     threshold: 0
     evaluation_seconds: 30

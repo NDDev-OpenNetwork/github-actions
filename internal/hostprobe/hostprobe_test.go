@@ -1,8 +1,10 @@
 package hostprobe
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -79,6 +81,86 @@ func TestParsePressureAndOOMCounters(t *testing.T) {
 	if err != nil || oomKills != 7 {
 		t.Fatalf("oom kills=%d err=%v", oomKills, err)
 	}
+}
+
+func TestCountHostGlobalOOMLinesIgnoresMemoryCgroupKills(t *testing.T) {
+	t.Parallel()
+	body := []byte("" +
+		"6,1,0,-;Out of memory: Killed process 100 (java)\n" +
+		"6,2,0,-;oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=/,mems_allowed=0,task_memcg=/incus.gha-fleet/1\n" +
+		"6,3,0,-;Memory cgroup out of memory: Killed process 100 (java)\n" +
+		"6,4,0,-;oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/\n" +
+		"6,5,0,-;Out of memory: Killed process 200 (java)\n" +
+		"Sep  4 01:16:00 gha-runner-1 kernel: oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),global_oom\n")
+	if got := countHostGlobalOOMLines(body); got != 2 {
+		t.Fatalf("host-global oom lines=%d, want 2", got)
+	}
+}
+
+func TestObserveOOMKillsPrefersKmsgHostGlobalOverVmstat(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "dev"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "vmstat"), []byte("oom_kill 7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kmsg := []byte("oom-kill:constraint=CONSTRAINT_MEMCG,task_memcg=/incus\n" +
+		"oom-kill:constraint=CONSTRAINT_NONE,global_oom\n")
+	if err := os.WriteFile(filepath.Join(root, "dev", "kmsg"), kmsg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := observeOOMKills(t.Context(), root, stubCommandRunner{})
+	if err != nil || got != 1 {
+		t.Fatalf("observeOOMKills=%d err=%v, want 1 host-global kill", got, err)
+	}
+}
+
+func TestObserveOOMKillsFallsBackToVmstatWithoutKmsg(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "vmstat"), []byte("oom_kill 7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := observeOOMKills(t.Context(), root, stubCommandRunner{})
+	if err != nil || got != 7 {
+		t.Fatalf("observeOOMKills=%d err=%v, want vmstat 7", got, err)
+	}
+}
+
+func TestCountJournalHostGlobalOOMTreatsEmptyExitOneAsZero(t *testing.T) {
+	t.Parallel()
+	got, err := countJournalHostGlobalOOM(t.Context(), stubCommandRunner{err: exec.Command("sh", "-c", "exit 1").Run()})
+	if err != nil || got != 0 {
+		t.Fatalf("empty journal grep got=%d err=%v, want 0 nil", got, err)
+	}
+}
+
+func TestCountJournalHostGlobalOOMDoesNotTreatPermissionNoiseAsZero(t *testing.T) {
+	t.Parallel()
+	_, err := countJournalHostGlobalOOM(t.Context(), stubCommandRunner{
+		out: []byte("No journal files were opened due to insufficient permissions.\n"),
+		err: exec.Command("sh", "-c", "exit 1").Run(),
+	})
+	if err == nil {
+		t.Fatal("permission failure must fall back, not report zero host-global kills")
+	}
+}
+
+type stubCommandRunner struct {
+	out []byte
+	err error
+}
+
+func (s stubCommandRunner) Run(context.Context, string, ...string) ([]byte, error) {
+	return s.out, s.err
 }
 
 func TestParsePressureRejectsMalformedAvailableData(t *testing.T) {

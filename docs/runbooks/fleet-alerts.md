@@ -69,7 +69,11 @@ gha-fleet reconcile-openobserve-alerts \
 - Collector queue pages: preserve the queue directory, restore the private
   OpenObserve route/backend, and verify queue drain plus exact record recovery.
 - OOM or pressure pages: close admission; never stop an already running worker
-  merely to make utilization look healthy.
+  merely to make utilization look healthy. `host_oom_detected` is host-global
+  `CONSTRAINT_NONE` only. Memory-cgroup kills are the envelope working; they
+  must not close the member. The detector is the in-window span of
+  `gha_fleet_host_oom_kills_total`, not `increase()`, because an observer
+  restart republishes the boot total and `increase()` treats that as a burst.
 - Host-signal tickets: use `gha_fleet_host_signal_events` cumulative deltas.
   LVM activation and overlay `xino=off` are workload-volume context; audit
   suppression and workqueue-hog alerts act only on their bounded burst budget.

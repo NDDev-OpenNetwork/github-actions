@@ -2,6 +2,7 @@ package hostprobe
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -58,9 +59,9 @@ func collect(
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read meminfo: %w", err)
 	}
-	memory.OOMKillsTotal, err = parseOOMKills(filepath.Join(root, "proc", "vmstat"))
+	memory.OOMKillsTotal, err = observeOOMKills(ctx, root, runner)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("read vmstat OOM counter: %w", err)
+		return Snapshot{}, fmt.Errorf("read host-global OOM counter: %w", err)
 	}
 	pressure, err := parsePressure(filepath.Join(root, "proc", "pressure"))
 	if err != nil {
@@ -162,6 +163,68 @@ func parseOOMKills(path string) (uint64, error) {
 		return 0, err
 	}
 	return 0, nil
+}
+
+const hostGlobalOOMMarker = "constraint=CONSTRAINT_NONE"
+
+func observeOOMKills(ctx context.Context, root string, runner CommandRunner) (uint64, error) {
+	kmsgPath := filepath.Join(root, "dev", "kmsg")
+	vmstatPath := filepath.Join(root, "proc", "vmstat")
+	if root != "/" {
+		if _, err := os.Stat(kmsgPath); err == nil {
+			return parseHostGlobalOOMKills(kmsgPath)
+		}
+		return parseOOMKills(vmstatPath)
+	}
+	count, err := countJournalHostGlobalOOM(ctx, runner)
+	if err == nil {
+		return count, nil
+	}
+	if n, kmsgErr := parseHostGlobalOOMKills(kmsgPath); kmsgErr == nil {
+		return n, nil
+	}
+	return parseOOMKills(vmstatPath)
+}
+
+func countJournalHostGlobalOOM(ctx context.Context, runner CommandRunner) (uint64, error) {
+	out, err := runner.Run(ctx, "journalctl", "-k", "-b", "--grep="+hostGlobalOOMMarker, "--no-pager", "-o", "cat", "-q")
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 && len(bytes.TrimSpace(out)) == 0 {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return countHostGlobalOOMLines(out), nil
+}
+
+func parseHostGlobalOOMKills(path string) (uint64, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	var count uint64
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if bytes.Contains(scanner.Bytes(), []byte(hostGlobalOOMMarker)) {
+			count++
+		}
+	}
+	if scanErr := scanner.Err(); scanErr != nil && !errors.Is(scanErr, syscall.EAGAIN) && !errors.Is(scanErr, syscall.EWOULDBLOCK) {
+		return 0, scanErr
+	}
+	return count, nil
+}
+
+func countHostGlobalOOMLines(body []byte) uint64 {
+	var count uint64
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if bytes.Contains(line, []byte(hostGlobalOOMMarker)) {
+			count++
+		}
+	}
+	return count
 }
 
 // ReadPressure observes Linux pressure-stall information under root without

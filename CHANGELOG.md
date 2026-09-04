@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Count only host-global kernel OOM kills (`constraint=CONSTRAINT_NONE`) into
+  `gha_fleet_host_oom_kills_total`, and page `host_oom_detected` on the
+  in-window span of that counter instead of `increase()`. `/proc/vmstat
+  oom_kill` includes memory-cgroup kills, which closed the whole member when a
+  JVM hit its envelope; `increase()` treated an observer restart that
+  republished the boot total as a burst of new kills (observed 4 and 3 with no
+  dmesg). Kernel logs that cannot be read still fall back to vmstat so a
+  sandboxed observer does not fail the host snapshot. The provider compiles
+  the same hostprobe package, so this is `v0.1.5-nddev.122`.
+
+- Stamp `gha-pressure-observer` from `make build-controller` with the same
+  version and commit as the other host binaries. The live members were still
+  running an older unstamped identity because that target never produced it.
+
 - Advance every image identity changed by the SQLite development headers to a
   new immutable alias. Pull-request CI now rejects a manifest or provisioning
   change that keeps the old alias, before a live image reconcile has to detect
