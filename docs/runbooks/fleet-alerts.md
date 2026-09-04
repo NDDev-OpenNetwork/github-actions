@@ -71,9 +71,18 @@ gha-fleet reconcile-openobserve-alerts \
 - OOM or pressure pages: close admission; never stop an already running worker
   merely to make utilization look healthy. `host_oom_detected` is host-global
   `CONSTRAINT_NONE` only. Memory-cgroup kills are the envelope working; they
-  must not close the member. The detector is the in-window span of
-  `gha_fleet_host_oom_kills_total`, not `increase()`, because an observer
-  restart republishes the boot total and `increase()` treats that as a burst.
+  must not close the member. The detector is last minus min of
+  `gha_fleet_host_oom_kills_total` over five minutes, not `increase()` and
+  not max minus min: an observer restart republishes the boot total and
+  `increase()` treats that as a burst, while a kernel reboot that resets the
+  counter N→0 has the same unsigned span as N new kills. Confirm a new
+  `constraint=CONSTRAINT_NONE` journal line on the current boot before
+  treating the page as a live kill.
+- Inventory-gap pages: a 30-second `missing_instances=1` listing blip is not
+  the page. The rule requires each of orphan, missing and uncovered-beyond-grace
+  to stay non-zero for two minutes of raw samples. Preserve all three states
+  before recovering; a member reboot without a drain marker is still a gap if
+  it lasts that long.
 - Host-signal tickets: use `gha_fleet_host_signal_events` cumulative deltas.
   LVM activation and overlay `xino=off` are workload-volume context; audit
   suppression and workqueue-hog alerts act only on their bounded burst budget.

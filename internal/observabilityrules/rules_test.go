@@ -34,7 +34,8 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
 		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
 		"host_compliance_observer_missing":  "gha_fleet_host_compliance_observer_up",
-		"host_oom_detected":                 "round(max by (host_name) (max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))",
+		"host_oom_detected":                 "round(max by (host_name) (last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))",
+		"lifecycle_inventory_gap":           "min_over_time(gha_fleet_journal_missing_instances[2m])",
 		"host_package_inventory_stale":      "gha_fleet_host_package_inventory_age_seconds",
 		"host_reboot_required":              "gha_fleet_host_reboot_required",
 		"host_standard_updates_available":   "gha_fleet_host_standard_updates_available",
@@ -361,6 +362,80 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 // Non-negative counters compared against zero say the same thing with `+`, and
 // a window with no events says it with an empty result, which is honest and
 // does not fire.
+// host_oom_detected and lifecycle_inventory_gap both paged on 2026-09-04
+// for facts the live store still holds, and both expressions replayed as
+// firing at those timestamps. The replacements replay as 0.
+//
+// host_oom_detected: gha-runner-2 rebooted 09:43:43Z (6.8.0-138 → 6.8.0-139).
+// The previous boot's three CONSTRAINT_NONE kills were 2026-09-03 18:09–18:22Z.
+// max_over_time - min_over_time of the boot-scoped counter was 3 at 09:43:02Z
+// and 09:46:08Z; last_over_time - min_over_time was 0 at both.
+//
+// lifecycle_inventory_gap: missing_instances was 1 for one 30-second sample
+// at 07:30:16Z and 14:41:31Z. min_over_time((max(a)+max(b)+max(c))[2m:30s])
+// returned 1 — the subquery dropped the zero steps — while
+// min_over_time(metric[2m]) returned 0. Hold lives in that raw range, so
+// evaluation_seconds equals hold_seconds and the renderer must not wrap it.
+func TestAlertHoldsThatTheBackendActuallyEvaluates(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := RenderOpenObserve(bundle, "fleet_oncall", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Rule{}
+	for _, rule := range bundle.Rules {
+		byID[rule.ID] = rule
+	}
+	oom, ok := byID["host_oom_detected"]
+	if !ok {
+		t.Fatal("host_oom_detected rule is missing")
+	}
+	if strings.Contains(oom.Expression, "max_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time") {
+		t.Fatalf("host_oom_detected still pages a counter reset: %s", oom.Expression)
+	}
+	if !strings.Contains(oom.Expression, "last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])") {
+		t.Fatalf("host_oom_detected does not count only upward movement: %s", oom.Expression)
+	}
+	gap, ok := byID["lifecycle_inventory_gap"]
+	if !ok {
+		t.Fatal("lifecycle_inventory_gap rule is missing")
+	}
+	if gap.HoldSecs > gap.EvaluationSecs {
+		t.Fatalf("lifecycle_inventory_gap hold %d > eval %d would wrap the raw range in the aggregated subquery that dropped zeros", gap.HoldSecs, gap.EvaluationSecs)
+	}
+	if strings.Contains(gap.Expression, "max(gha_fleet_incus_orphan_instances) + max(gha_fleet_journal_missing_instances)") {
+		t.Fatalf("lifecycle_inventory_gap still sums instant max() gauges: %s", gap.Expression)
+	}
+	for _, metric := range []string{
+		"gha_fleet_incus_orphan_instances",
+		"gha_fleet_journal_missing_instances",
+		"gha_fleet_queue_uncovered_running_beyond_grace",
+	} {
+		want := "min_over_time(" + metric + "[2m])"
+		if !strings.Contains(gap.Expression, want) {
+			t.Fatalf("lifecycle_inventory_gap missing %s in %s", want, gap.Expression)
+		}
+	}
+	for _, alert := range rendered.Alerts {
+		switch alert.Name {
+		case "host_oom_detected":
+			if !strings.Contains(alert.QueryCondition.PromQL, "last_over_time(gha_fleet_host_oom_kills_total[5m])") {
+				t.Fatalf("rendered host_oom_detected lost last_over_time: %s", alert.QueryCondition.PromQL)
+			}
+		case "lifecycle_inventory_gap":
+			if strings.Contains(alert.QueryCondition.PromQL, "[2m:30s]") || strings.Contains(alert.QueryCondition.PromQL, "[2m:15s]") {
+				t.Fatalf("rendered lifecycle_inventory_gap was wrapped in the aggregated subquery: %s", alert.QueryCondition.PromQL)
+			}
+			if !strings.Contains(alert.QueryCondition.PromQL, "min_over_time(gha_fleet_journal_missing_instances[2m])") {
+				t.Fatalf("rendered lifecycle_inventory_gap lost the raw missing range: %s", alert.QueryCondition.PromQL)
+			}
+		}
+	}
+}
+
 func TestNoRuleDependsOnASetOperatorTheBackendDiscards(t *testing.T) {
 	bundle, err := Load("../../config/observability-rules.yaml")
 	if err != nil {
