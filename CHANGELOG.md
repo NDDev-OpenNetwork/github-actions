@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Write a world-readable `/run/nddev/image-fingerprint` from the root
+  assignment so an unprivileged job can attest the live image without the
+  Incus guest API, which answers HTTP 401 to uid runner. The parent
+  `/run/nddev` directory is created at assignment so current images do not
+  wait on a bake. This is `v0.1.5-nddev.123`.
+
 - Count only host-global kernel OOM kills (`constraint=CONSTRAINT_NONE`) into
   `gha_fleet_host_oom_kills_total`, and page `host_oom_detected` on the
   in-window span of that counter instead of `increase()`. `/proc/vmstat

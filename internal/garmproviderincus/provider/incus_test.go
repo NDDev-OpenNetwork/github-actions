@@ -1077,6 +1077,7 @@ func TestCreateInstanceReturnsOnlineOwnedVM(t *testing.T) {
 	cli.On("UpdateInstanceState", "runner-test-instance", api.InstanceStatePut{Action: "start", Timeout: -1}, "").Return(op, nil).Once()
 	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
 	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
 
 	got, err := provider.CreateInstance(context.Background(), validBootstrap())
 	require.NoError(t, err)
@@ -1111,6 +1112,7 @@ func TestCreateInstanceDeletesReservedWarmCapacityBeforeColdLaunch(t *testing.T)
 	cli.On("UpdateInstanceState", "runner-test-instance", api.InstanceStatePut{Action: "start", Timeout: -1}, "").
 		Return(createOperation, nil).Once()
 	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
 
 	got, err := provider.CreateInstance(context.Background(), validBootstrap())
 	require.NoError(t, err)
@@ -1187,6 +1189,7 @@ func TestCreateInstanceClaimsRunningUnregisteredWarmVMWithoutColdCreate(t *testi
 			strings.Contains(string(content), base64.StdEncoding.EncodeToString(bootstrap.CACertBundle)) &&
 			!strings.Contains(string(content), string(bootstrap.CACertBundle)) && !strings.Contains(string(content), "set -x")
 	})).Return(nil).Once()
+	expectImageIdentity(cli, warm.Name, testImageDigest)
 	cli.On("GetInstanceFull", warm.Name).Return(activated, "", nil).Once()
 
 	got, err := provider.CreateInstance(context.Background(), bootstrap)
@@ -1196,7 +1199,7 @@ func TestCreateInstanceClaimsRunningUnregisteredWarmVMWithoutColdCreate(t *testi
 	require.True(t, warmControl.injected)
 	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
 	cli.AssertNotCalled(t, "GetImage", mock.Anything)
-	cli.AssertNumberOfCalls(t, "CreateInstanceFile", 1)
+	cli.AssertNumberOfCalls(t, "CreateInstanceFile", 3)
 	cli.AssertExpectations(t)
 }
 
@@ -1225,6 +1228,7 @@ func TestCreateInstanceDirectJITClaimBypassesMetadataInstaller(t *testing.T) {
 			strings.Contains(string(content), encoded) && strings.Contains(string(content), "--jitconfig") &&
 			!strings.Contains(string(content), bootstrap.InstanceToken) && !strings.Contains(string(content), expectedMetadataURL)
 	})).Return(nil).Once()
+	expectImageIdentity(cli, warm.Name, testImageDigest)
 	cli.On("GetInstanceFile", warm.Name, directJITPhasePath).Return(
 		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
 		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
@@ -1252,13 +1256,13 @@ func TestCreateInstanceRetryAdoptsInjectedWarmClaimWithoutReinjecting(t *testing
 	activated := ownedInstance(warmControl.claim.InstanceName)
 	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
 	cli.On("GetInstanceFull", activated.Name).Return(activated, "warm-etag", nil).Twice()
+	expectImageIdentity(cli, activated.Name, testImageDigest)
 
 	got, err := provider.CreateInstance(context.Background(), validBootstrap())
 	require.NoError(t, err)
 	require.Equal(t, "runner-test-instance", got.Name)
 	require.Equal(t, activated.Name, got.ProviderID)
 	cli.AssertNotCalled(t, "UpdateInstance", mock.Anything, mock.Anything, mock.Anything)
-	cli.AssertNotCalled(t, "CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestCreateInstanceIdempotentlyAdoptsMatchingOwnedVM(t *testing.T) {
@@ -1266,6 +1270,7 @@ func TestCreateInstanceIdempotentlyAdoptsMatchingOwnedVM(t *testing.T) {
 	provider := newTestProvider(cli)
 	instance := ownedInstance("runner-test-instance")
 	cli.On("GetInstanceFull", instance.Name).Return(instance, "", nil).Twice()
+	expectImageIdentity(cli, instance.Name, testImageDigest)
 
 	got, err := provider.CreateInstance(context.Background(), validBootstrap())
 	require.NoError(t, err)
@@ -1286,6 +1291,7 @@ func TestCreateInstanceRetryAdoptsVMCreatedBeforeAmbiguousOperationTimeout(t *te
 		Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
 	cli.On("CreateInstance", mock.Anything).Return(createOperation, nil).Once()
 	cli.On("GetInstanceFull", instance.Name).Return(instance, "", nil).Twice()
+	expectImageIdentity(cli, instance.Name, testImageDigest)
 
 	_, err := provider.CreateInstance(context.Background(), validBootstrap())
 	require.ErrorContains(t, err, "waiting for instance creation")
@@ -1588,6 +1594,7 @@ func TestCreateInstanceDirectJITColdInjectsTheAssignmentInsteadOfCloudInit(t *te
 			strings.Contains(string(content), encoded) && strings.Contains(string(content), "--jitconfig") &&
 			!strings.Contains(string(content), bootstrap.InstanceToken) && !strings.Contains(string(content), expectedMetadataURL)
 	})).Return(nil).Once()
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
 	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
 		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
 		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
@@ -1612,12 +1619,12 @@ func TestCreateInstanceDirectJITColdRetryAdoptsAStartedWorkerWithoutReinjecting(
 		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
 		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
 	).Once()
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
 
 	got, err := provider.CreateInstance(context.Background(), directJITBootstrap(t))
 	require.NoError(t, err)
 	require.Equal(t, "runner-test-instance", got.ProviderID)
 	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
-	cli.AssertNotCalled(t, "CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything)
 	cli.AssertExpectations(t)
 }
 
@@ -1634,6 +1641,7 @@ func TestCreateInstanceDirectJITColdRetryDeliversAMissingAssignment(t *testing.T
 		content, err := io.ReadAll(args.Content)
 		return err == nil && strings.Contains(string(content), encoded)
 	})).Return(nil).Once()
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
 	cli.On("GetInstanceFile", "runner-test-instance", directJITPhasePath).Return(
 		io.NopCloser(strings.NewReader("{\"schema_version\":1,\"phase\":\"assignment-script-started\",\"unix_ns\":1786327000000000000}\n")),
 		&incus.InstanceFileResponse{Type: "file", UID: 1001, GID: 1002, Mode: 0o600}, nil,
