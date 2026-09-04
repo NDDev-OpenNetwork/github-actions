@@ -7,6 +7,18 @@
   online drain keeps platform health up and still fires queue and assigned
   pages; `gha_fleet_visibility_drain_marked_members` is now the count of
   that authorized hold instead of inferring it from health staying one.
+  Only a reason with the `drained: ` prefix counts; an empty member listing
+  is not a full drain.
+
+- Keep `fleet_health_flapping` evaluable on a healthy fleet: sum the bool
+  of `healthy < 1` over thirty one-minute steps instead of counting a
+  filter that this backend drops when health is one. Host-signal tickets
+  and dashboards use last-min of the cumulative counter, not unsigned
+  max-min, so a collector restart or series reset is not a burst.
+
+- Align queued-delivery, slow-burn and created-unbound operator copy with
+  the shipped thresholds (thirty minutes, five-to-thirty band, fifteen
+  minutes). Thresholds themselves are unchanged.
 
 - Keep platform health up when every cluster member is drain-marked,
   including an online drain. `gha_fleet_visibility_held_out_members` still

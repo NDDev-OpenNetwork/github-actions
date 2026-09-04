@@ -79,10 +79,10 @@ gha-fleet reconcile-openobserve-alerts \
   `constraint=CONSTRAINT_NONE` journal line on the current boot before
   treating the page as a live kill.
 - Inventory-gap pages: a 30-second `missing_instances=1` listing blip is not
-  the page. The rule requires each of orphan, missing and uncovered-beyond-grace
-  to stay non-zero for two minutes of raw samples. Preserve all three states
-  before recovering; a member reboot without a drain marker is still a gap if
-  it lasts that long.
+  the page. The rule is a sum of two-minute mins: any of orphan, missing or
+  uncovered-beyond-grace staying non-zero for two minutes of raw samples
+  fires. Preserve all three states before recovering; a member reboot without
+  a drain marker is still a gap if it lasts that long.
 - Host-signal tickets: use `gha_fleet_host_signal_events` cumulative deltas.
   LVM activation and overlay `xino=off` are workload-volume context; audit
   suppression and workqueue-hog alerts act only on their bounded burst budget.

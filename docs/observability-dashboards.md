@@ -47,6 +47,6 @@ human decision surfaces used by alert response and CD health verification; a
 private deployment must not silently edit them.
 
 Dashboards do not prove alerts deliver. `config/observability-rules.yaml` owns
-the twenty-five-rule separately tested alert contract, and a real backend lifecycle record must
+the thirty-one-rule separately tested alert contract, and a real backend lifecycle record must
 prove Collector buffering, recovered records and explicit loss counters before
 the observability product is accepted.
