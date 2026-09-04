@@ -13,6 +13,13 @@
   `missing_instances` was 1 for one sample. Raw `min_over_time(metric[2m])`
   is 0 at both timestamps. Replayed against the live store before shipping.
 
+- Stop paging OpenObserve ingest after a services reboot as missing
+  observers, and apply the inventory-gap hold to `github_correlation_persistent`.
+  Instant `count(up==1)` was 2 at 09:54Z and 3 at 09:58:43Z while all four
+  members were up; `count(last_over_time(up[10m])==1)` was 4 at both.
+  Compliance was 3 vs 5 on the same window. The sibling `max(a)+max(b)`
+  correlation page used the same scalar subquery that dropped zeros.
+
 - Write a world-readable `/run/nddev/image-fingerprint` from the root
   assignment so an unprivileged job can attest the live image without the
   Incus guest API, which answers HTTP 401 to uid runner. The parent

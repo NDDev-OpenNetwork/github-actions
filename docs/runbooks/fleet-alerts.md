@@ -87,6 +87,11 @@ gha-fleet reconcile-openobserve-alerts \
   LVM activation and overlay `xino=off` are workload-volume context; audit
   suppression and workqueue-hog alerts act only on their bounded burst budget.
   Raw host-signal logs are intentionally not duplicated into the fleet stream.
+- Compliance and pressure-observer pages: `count(up==1)` is the current
+  ingest set, not the live hosts. After OpenObserve restarts it fills in over
+  minutes while the members are already up. The page counts hosts whose last
+  sample in ten minutes is 1; a collector silent for ten minutes is the
+  page, a backend that has not yet replayed a live series is not.
 - Compliance alerts: require complete coverage from every declared host before
   trusting package, reboot, kernel or SRSO state. A kernel-reported hardware or
   microcode boundary is not a software rollout failure.
