@@ -261,7 +261,7 @@ pools:
     trust: release
     resources:
       vcpu: 4
-      memory_mib: 6144
+      memory_mib: 8192
       disk_gib: 40
     max_running: 1
     warm:
@@ -300,7 +300,7 @@ pools:
     backend: linux-amd64-incus-container
     scale_set_name: nddev-priority-integration
     trust: trusted
-    resources: {vcpu: 4, memory_mib: 6144, disk_gib: 50}
+    resources: {vcpu: 4, memory_mib: 8192, disk_gib: 50}
     max_running: 8
     warm: {target_ready: 0, max_ready: 0}
     capabilities: {docker: true, credentials: repository, network_policy: public-internet, cache_write_scope: trusted}

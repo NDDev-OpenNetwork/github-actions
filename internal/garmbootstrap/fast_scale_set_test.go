@@ -16,7 +16,7 @@ func TestFastScaleSetResolves(t *testing.T) {
 		t.Fatalf("fast spec = %+v", spec)
 	}
 	// It now uses the promoted unprivileged container image; integration and
-	// release retain VM images as the explicit compatibility fallback.
+	// release use their capability-specific container images.
 	if spec.Image != ContainerCanaryImage {
 		t.Fatalf("fast image = %q, want the promoted container image", spec.Image)
 	}
@@ -52,12 +52,17 @@ func TestUntrustedScaleSetUsesDockerImageAndDistinctFlavor(t *testing.T) {
 	}
 }
 
-func TestReleaseScaleSetUsesStandardVMImageAndReleaseFlavor(t *testing.T) {
-	spec, err := resolveScaleSetSpec(ReleaseScaleSetName)
-	if err != nil {
-		t.Fatal(err)
+func TestAndroidScaleSetsPublishEightGiBHardLimits(t *testing.T) {
+	classes := make(map[string]ScaleSetClass, len(PublishedScaleSets()))
+	for _, class := range PublishedScaleSets() {
+		classes[class.Name] = class
 	}
-	if spec.Image != ReleaseImage || spec.Flavor != ReleaseFlavor {
-		t.Fatalf("release spec=%+v", spec)
+	release := classes[ReleaseScaleSetName]
+	if release.Image != ReleaseImage || release.Flavor != ReleaseFlavor || release.MemoryMiB != 8192 {
+		t.Fatalf("release class=%+v", release)
+	}
+	priority := classes[PriorityIntegrationScaleSetName]
+	if priority.Image != PriorityIntegrationImage || priority.Flavor != PriorityIntegrationFlavor || priority.MemoryMiB != 8192 {
+		t.Fatalf("priority integration class=%+v", priority)
 	}
 }
