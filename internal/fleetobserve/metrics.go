@@ -118,6 +118,11 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	for _, member := range snapshot.HeldOutMembers {
 		metric(&output, "gha_fleet_visibility_degraded", map[string]string{"member": member}, 1)
 	}
+	gauge(&output, "gha_fleet_visibility_drain_marked_members", "Cluster members whose gate carries a drain reason, online or offline. Held-out members are the offline subset; an online drain leaves the listing complete.", float64(len(snapshot.DrainMarkedMembers)))
+	labeledGaugeHeader(&output, "gha_fleet_visibility_drain_marked", "One row per drain-marked member, for attribution.")
+	for _, member := range snapshot.DrainMarkedMembers {
+		metric(&output, "gha_fleet_visibility_drain_marked", map[string]string{"member": member}, 1)
+	}
 	gauge(&output, "gha_fleet_queue_uncovered_running_beyond_grace", "Running queue intents still uncovered after the broker reclaim window, which is the gap nothing is coming to close.", float64(snapshot.Queue.UncoveredRunningBeyondGrace))
 	gauge(&output, "gha_fleet_queue_uncovered_running_oldest_age_seconds", "Age of the oldest running queue intent whose runner holds no execution lease.", float64(snapshot.Queue.OldestUncoveredRunningAgeSeconds))
 	gauge(&output, "gha_fleet_queue_running_without_runner_identity", "Running queue intents written before or without an exact JobStarted runner identity.", float64(snapshot.Queue.RunningWithoutRunnerIdentity))

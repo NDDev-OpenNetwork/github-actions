@@ -32,6 +32,9 @@ func TestHeldOutMemberSuppressesGapsWithoutHidingThem(t *testing.T) {
 	if len(snapshot.HeldOutMembers) != 1 || snapshot.HeldOutMembers[0] != "gha-runner-3" {
 		t.Fatalf("held out = %v", snapshot.HeldOutMembers)
 	}
+	if len(snapshot.DrainMarkedMembers) != 1 || snapshot.DrainMarkedMembers[0] != "gha-runner-3" {
+		t.Fatalf("drain marked = %v", snapshot.DrainMarkedMembers)
+	}
 	if snapshot.Incus.MissingInstances != 0 {
 		t.Fatalf("a gap paged during a marked hold: %#v", snapshot.Incus)
 	}
@@ -67,6 +70,9 @@ func TestOfflineMemberWithoutADrainFailsCollection(t *testing.T) {
 	if len(snapshot.HeldOutMembers) != 0 {
 		t.Fatalf("an undrained member was treated as held out: %v", snapshot.HeldOutMembers)
 	}
+	if len(snapshot.DrainMarkedMembers) != 0 {
+		t.Fatalf("an undrained member was treated as drain-marked: %v", snapshot.DrainMarkedMembers)
+	}
 }
 
 // Online members change nothing: the healthy fixture stays byte-identical in
@@ -80,7 +86,7 @@ func TestOnlineMembersLeaveTheSnapshotUntouched(t *testing.T) {
 		}, nil
 	}
 	snapshot := collector.Collect(context.Background())
-	if !snapshot.Healthy || len(snapshot.HeldOutMembers) != 0 || len(snapshot.CollectionErrors) != 0 {
+	if !snapshot.Healthy || len(snapshot.HeldOutMembers) != 0 || len(snapshot.DrainMarkedMembers) != 0 || len(snapshot.CollectionErrors) != 0 {
 		t.Fatalf("online members disturbed the snapshot: %#v", snapshot)
 	}
 }
@@ -163,6 +169,9 @@ func TestOnlineDrainOfEveryMemberDoesNotFailPlatformHealth(t *testing.T) {
 	if len(snapshot.HeldOutMembers) != 0 {
 		t.Fatalf("online drain was counted as a listing hold-out: %v", snapshot.HeldOutMembers)
 	}
+	if len(snapshot.DrainMarkedMembers) != 4 {
+		t.Fatalf("online drain was not named: %v", snapshot.DrainMarkedMembers)
+	}
 	if !snapshot.Healthy {
 		t.Fatalf("a full online drain failed the platform: errors=%v uncovered=%d",
 			snapshot.CollectionErrors, snapshot.Queue.UncoveredRunningBeyondGrace)
@@ -185,5 +194,36 @@ func TestPartialOnlineDrainStillFailsPlatformHealthOnUncoveredRunning(t *testing
 	if snapshot.Healthy || snapshot.Queue.UncoveredRunningBeyondGrace == 0 {
 		t.Fatalf("partial drain hid an uncovered running gap: healthy=%v uncovered=%d",
 			snapshot.Healthy, snapshot.Queue.UncoveredRunningBeyondGrace)
+	}
+	if len(snapshot.DrainMarkedMembers) != 3 {
+		t.Fatalf("partial drain marked = %v", snapshot.DrainMarkedMembers)
+	}
+}
+
+// One offline drain-marked sibling makes the listing partial, so gaps move to
+// unattributable. The other three stay online and drain-marked. Held-out is
+// the offline subset; drain-marked is the whole authorized hold.
+func TestMixedOnlineAndOfflineFullDrainKeepsPlatformHealth(t *testing.T) {
+	collector := strandedUncoveredCollector(t)
+	collector.Members = func(context.Context) ([]MemberVisibility, error) {
+		return []MemberVisibility{
+			{Name: "gha-runner-1", Online: true, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-2", Online: true, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-3", Online: false, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-4", Online: true, DrainReason: "drained: image bake"},
+		}, nil
+	}
+	snapshot := collector.Collect(context.Background())
+	if !snapshot.Healthy {
+		t.Fatalf("a full mixed drain failed the platform: errors=%v", snapshot.CollectionErrors)
+	}
+	if len(snapshot.HeldOutMembers) != 1 || snapshot.HeldOutMembers[0] != "gha-runner-3" {
+		t.Fatalf("held out = %v", snapshot.HeldOutMembers)
+	}
+	if len(snapshot.DrainMarkedMembers) != 4 {
+		t.Fatalf("drain marked = %v", snapshot.DrainMarkedMembers)
+	}
+	if snapshot.Queue.UncoveredRunningBeyondGrace != 0 || snapshot.Queue.UncoveredUnattributable == 0 {
+		t.Fatalf("offline hold did not attribute the uncovered gap: %#v", snapshot.Queue)
 	}
 }

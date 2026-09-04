@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Export drain-marked cluster members as their own snapshot field and
+  Prometheus series, independent of held-out (offline) members. A full
+  online drain keeps platform health up and still fires queue and assigned
+  pages; `gha_fleet_visibility_drain_marked_members` is now the count of
+  that authorized hold instead of inferring it from health staying one.
+
 - Keep platform health up when every cluster member is drain-marked,
   including an online drain. `gha_fleet_visibility_held_out_members` still
   counts only offline drained members, so queue and assigned pages keep
