@@ -1251,6 +1251,9 @@ func (l *Incus) activateWarmInstance(
 		}
 		claimCommitted = false
 	}
+	if err := l.publishJobImageIdentity(ctx, cli, instance.Name, bootstrapParams.Flavor); err != nil {
+		return commonParams.ProviderInstance{}, err
+	}
 	if encodedJIT != "" {
 		if err := l.waitDirectJITAssignmentStarted(ctx, cli, instance.Name, bootstrapParams.Flavor); err != nil {
 			return commonParams.ProviderInstance{}, err
@@ -1315,6 +1318,9 @@ func (l *Incus) startColdDirectJIT(
 	if err := l.injectAssignment(ctx, cli, instanceName, warmAssignmentPath(bootstrap.Name), assignment); err != nil {
 		return commonParams.ProviderInstance{}, err
 	}
+	if err := l.publishJobImageIdentity(ctx, cli, instanceName, bootstrap.Flavor); err != nil {
+		return commonParams.ProviderInstance{}, err
+	}
 	claimCommitted = false
 	if err := l.admission.MarkCreated(ctx, instanceName); err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "recording created instance")
@@ -1375,6 +1381,9 @@ func (l *Incus) adoptColdDirectJIT(
 	switch {
 	case err == nil:
 		_ = content.Close()
+		if err := l.publishJobImageIdentity(ctx, cli, bootstrap.Name, bootstrap.Flavor); err != nil {
+			return commonParams.ProviderInstance{}, err
+		}
 		ret, err := l.waitInstanceHasIP(ctx, bootstrap.Name)
 		if err != nil {
 			return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching existing instance")
@@ -1615,6 +1624,13 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 				return commonParams.ProviderInstance{}, err
 			}
 		}
+		cli, err := l.getCLI(ctx)
+		if err != nil {
+			return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching client")
+		}
+		if err := l.publishJobImageIdentity(ctx, cli, bootstrapParams.Name, bootstrapParams.Flavor); err != nil {
+			return commonParams.ProviderInstance{}, err
+		}
 		ret, err := l.waitInstanceHasIP(ctx, bootstrapParams.Name)
 		if err != nil {
 			return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching existing instance")
@@ -1714,6 +1730,13 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	}
 	if err := l.admission.MarkCreated(ctx, args.Name); err != nil {
 		return commonParams.ProviderInstance{}, errors.Wrap(err, "recording created instance")
+	}
+	cli, err := l.getCLI(ctx)
+	if err != nil {
+		return commonParams.ProviderInstance{}, errors.Wrap(err, "fetching client")
+	}
+	if err := l.publishJobImageIdentity(ctx, cli, args.Name, bootstrapParams.Flavor); err != nil {
+		return commonParams.ProviderInstance{}, err
 	}
 
 	ret, err := l.waitInstanceHasIP(ctx, args.Name)
