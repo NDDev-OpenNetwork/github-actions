@@ -227,3 +227,50 @@ func TestMixedOnlineAndOfflineFullDrainKeepsPlatformHealth(t *testing.T) {
 		t.Fatalf("offline hold did not attribute the uncovered gap: %#v", snapshot.Queue)
 	}
 }
+
+// A blank cluster listing is not an authorized full drain: there is no
+// evidence every member was marked. The stranded uncovered intent must still
+// fail platform health.
+func TestEmptyMemberListingDoesNotCountAsFullDrain(t *testing.T) {
+	collector := strandedUncoveredCollector(t)
+	collector.Members = func(context.Context) ([]MemberVisibility, error) {
+		return []MemberVisibility{}, nil
+	}
+	snapshot := collector.Collect(context.Background())
+	if snapshot.Healthy {
+		t.Fatal("an empty member listing left the platform healthy")
+	}
+	if len(snapshot.DrainMarkedMembers) != 0 || len(snapshot.HeldOutMembers) != 0 {
+		t.Fatalf("empty listing was treated as a drain: drain=%v held=%v",
+			snapshot.DrainMarkedMembers, snapshot.HeldOutMembers)
+	}
+}
+
+// Only the drained: prefix is an authorized hold. A pressure-closed or
+// operator-typed reason must not suppress gaps or keep health up.
+func TestNonDrainReasonDoesNotHoldOutOrMark(t *testing.T) {
+	collector := strandedUncoveredCollector(t)
+	collector.Members = func(context.Context) ([]MemberVisibility, error) {
+		return []MemberVisibility{
+			{Name: "gha-runner-1", Online: true, DrainReason: "pressure-closed"},
+			{Name: "gha-runner-2", Online: false, DrainReason: "manual"},
+		}, nil
+	}
+	snapshot := collector.Collect(context.Background())
+	if snapshot.Healthy {
+		t.Fatal("a non-drain reason left the platform healthy")
+	}
+	if len(snapshot.DrainMarkedMembers) != 0 || len(snapshot.HeldOutMembers) != 0 {
+		t.Fatalf("non-drain reason was treated as a drain: drain=%v held=%v",
+			snapshot.DrainMarkedMembers, snapshot.HeldOutMembers)
+	}
+	found := false
+	for _, message := range snapshot.CollectionErrors {
+		if strings.Contains(message, "gha-runner-2") && strings.Contains(message, "offline without a drain") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("collection errors do not name the offline member: %v", snapshot.CollectionErrors)
+	}
+}

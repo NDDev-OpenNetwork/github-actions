@@ -140,6 +140,15 @@ type ProviderRetrySource func(time.Time) (providerretry.Snapshot, error)
 type QueueIntentSource func(context.Context) (queueintent.Snapshot, error)
 type InstanceSource func(context.Context) ([]string, error)
 
+// drainReasonPrefix is the gate's authorized-hold marker. The provider only
+// copies a reason that already carries it; the observer requires the same
+// prefix so a pressure-closed or operator-typed string cannot look like a drain.
+const drainReasonPrefix = "drained: "
+
+func isDrainMarked(reason string) bool {
+	return strings.HasPrefix(reason, drainReasonPrefix)
+}
+
 // MemberVisibility is one cluster member as the collector needs it: name,
 // availability, and the drain reason its gate publishes when it is held out.
 type MemberVisibility struct {
@@ -503,13 +512,13 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("cluster members", membersErr))
 		} else {
 			for _, member := range members {
-				if member.DrainReason != "" {
+				if isDrainMarked(member.DrainReason) {
 					snapshot.DrainMarkedMembers = append(snapshot.DrainMarkedMembers, member.Name)
 				}
 				if member.Online {
 					continue
 				}
-				if member.DrainReason != "" {
+				if isDrainMarked(member.DrainReason) {
 					snapshot.HeldOutMembers = append(snapshot.HeldOutMembers, member.Name)
 					visibilityDegraded = true
 					continue
