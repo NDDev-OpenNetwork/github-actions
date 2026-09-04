@@ -18,6 +18,9 @@ import (
 )
 
 const (
+	// 16 exports drain-marked members (online or offline) independently of
+	// held-out (offline) members, so a full online drain is observable rather
+	// than inferred from platform health staying up.
 	// 15 separates transient pre-JobAssigned correlation gaps from identities
 	// that remain incomplete beyond the bounded convergence window.
 	// 14 separates first-observed created-to-deleting inventory convergence from
@@ -27,7 +30,7 @@ const (
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion               = 15
+	SchemaVersion               = 16
 	queueCorrelationGracePeriod = 2 * time.Minute
 	// A running intent is retired by the cache broker's reclaim, which waits
 	// five minutes for the two ledgers to agree and then runs once a minute.
@@ -136,6 +139,15 @@ type JournalSource func(context.Context) (providerjournal.Journal, error)
 type ProviderRetrySource func(time.Time) (providerretry.Snapshot, error)
 type QueueIntentSource func(context.Context) (queueintent.Snapshot, error)
 type InstanceSource func(context.Context) ([]string, error)
+
+// drainReasonPrefix is the gate's authorized-hold marker. The provider only
+// copies a reason that already carries it; the observer requires the same
+// prefix so a pressure-closed or operator-typed string cannot look like a drain.
+const drainReasonPrefix = "drained: "
+
+func isDrainMarked(reason string) bool {
+	return strings.HasPrefix(reason, drainReasonPrefix)
+}
 
 // MemberVisibility is one cluster member as the collector needs it: name,
 // availability, and the drain reason its gate publishes when it is held out.
@@ -251,6 +263,12 @@ type Snapshot struct {
 	// is held out, inventory gap counts are unattributable and move to their
 	// *_unattributable fields rather than paging.
 	HeldOutMembers []string `json:"held_out_members,omitempty"`
+	// DrainMarkedMembers are cluster members whose published gate reason
+	// carries the drain prefix, online or offline. HeldOutMembers is the
+	// offline subset: only those make the listing partial. A full online
+	// drain leaves HeldOutMembers empty and DrainMarkedMembers equal to the
+	// reported cluster.
+	DrainMarkedMembers []string `json:"drain_marked_members,omitempty"`
 }
 
 type DiagnosticExportSync struct {
@@ -482,24 +500,25 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	//
 	// An online drain is different: the listing is complete (empty on that
 	// member is the truth), so HeldOutMembers stays empty and queue/assigned
-	// pages still fire. If every member is drain-marked, there is no eligible
-	// placement left on purpose; uncovered-beyond-grace must not fail platform
-	// health, or an authorized bake drain pages fleet_platform_unhealthy.
+	// pages still fire. DrainMarkedMembers still names every drained member so
+	// the authorized hold is observable. If every member is drain-marked, there
+	// is no eligible placement left on purpose; uncovered-beyond-grace must not
+	// fail platform health, or an authorized bake drain pages
+	// fleet_platform_unhealthy.
 	visibilityDegraded := false
 	allMembersDrainMarked := false
 	if c.Members != nil {
 		if membersErr != nil {
 			snapshot.CollectionErrors = append(snapshot.CollectionErrors, safeError("cluster members", membersErr))
 		} else {
-			marked := 0
 			for _, member := range members {
-				if member.DrainReason != "" {
-					marked++
+				if isDrainMarked(member.DrainReason) {
+					snapshot.DrainMarkedMembers = append(snapshot.DrainMarkedMembers, member.Name)
 				}
 				if member.Online {
 					continue
 				}
-				if member.DrainReason != "" {
+				if isDrainMarked(member.DrainReason) {
 					snapshot.HeldOutMembers = append(snapshot.HeldOutMembers, member.Name)
 					visibilityDegraded = true
 					continue
@@ -507,8 +526,9 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 				snapshot.CollectionErrors = append(snapshot.CollectionErrors,
 					"incus: cluster member "+member.Name+" is offline without a drain")
 			}
-			allMembersDrainMarked = len(members) > 0 && marked == len(members)
+			allMembersDrainMarked = len(members) > 0 && len(snapshot.DrainMarkedMembers) == len(members)
 			sort.Strings(snapshot.HeldOutMembers)
+			sort.Strings(snapshot.DrainMarkedMembers)
 		}
 	}
 

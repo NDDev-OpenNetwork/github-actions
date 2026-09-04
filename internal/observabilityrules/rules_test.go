@@ -31,8 +31,9 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 		"compute_pressure_state_stale":      "gha_fleet_pressure_observer_up",
 		"compute_root_disk_low":             "gha_fleet_host_root_free_percent",
 		"kernel_slab_unreclaimable":         "gha_fleet_host_slab_unreclaimable_attributed_bytes",
-		"audit_suppression_burst":           `signal_class="audit_suppressed"`,
-		"kernel_workqueue_hog":              `signal_class="kernel_workqueue_hog"`,
+		"audit_suppression_burst":           `last_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed"`,
+		"kernel_workqueue_hog":              `last_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog"`,
+		"fleet_health_flapping":             "< bool 1",
 		"host_compliance_observer_missing":  "last_over_time(gha_fleet_host_compliance_observer_up[10m])",
 		"host_oom_detected":                 "round(max by (host_name) (last_over_time(gha_fleet_host_oom_kills_total[5m]) - min_over_time(gha_fleet_host_oom_kills_total[5m])))",
 		"lifecycle_inventory_gap":           "min_over_time(gha_fleet_journal_missing_instances[2m])",
@@ -128,8 +129,8 @@ func TestHostSignalSlowBurnsRemainVectorsForOpenObserveSubqueries(t *testing.T) 
 			// three series of 4, 4 and 3). Summing by host keeps the subject
 			// the notification prints and cannot collapse it to a scalar.
 			body := withoutSubject(alert.QueryCondition.PromQL)
-			if !strings.HasPrefix(body, "sum by (host_name) (max_over_time(") {
-				t.Fatalf("%s is not the windowed delta summed by host: %s", id, alert.QueryCondition.PromQL)
+			if !strings.HasPrefix(body, "sum by (host_name) (last_over_time(") {
+				t.Fatalf("%s is not the windowed last-min delta summed by host: %s", id, alert.QueryCondition.PromQL)
 			}
 			if !strings.Contains(body, "- min_over_time(") {
 				t.Fatalf("%s lost the min_over_time half of its delta: %s", id, alert.QueryCondition.PromQL)

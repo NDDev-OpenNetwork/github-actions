@@ -136,25 +136,25 @@ dashboards:
       - id: all_host_signals
         title: Host signals by class and member
         kind: timeseries
-        query: sum by (host_name, signal_class) (max_over_time(gha_fleet_host_signal_events{aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
+        query: sum by (host_name, signal_class) (last_over_time(gha_fleet_host_signal_events{aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
         unit: count
         description: OTEL-classified host events observed in each rolling hour without retaining duplicate raw logs.
       - id: audit_suppression
         title: Audit callback suppressions
         kind: timeseries
-        query: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
+        query: sum by (host_name) (last_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="audit_suppressed",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
         unit: count
         description: Kernel notices that audit callbacks were suppressed during high event volume.
       - id: kernel_workqueue_hog
         title: Kernel workqueue hog events
         kind: timeseries
-        query: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[24h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[24h]))
+        query: sum by (host_name) (last_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[24h]) - min_over_time(gha_fleet_host_signal_events{signal_class="kernel_workqueue_hog",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[24h]))
         unit: count
         description: Kernel workqueue CPU-hog signals that may precede host latency or pressure.
       - id: ufw_blocks
         title: UFW block events
         kind: timeseries
-        query: sum by (host_name) (max_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
+        query: sum by (host_name) (last_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]) - min_over_time(gha_fleet_host_signal_events{signal_class="ufw_block",aggregation_temporality="AGGREGATION_TEMPORALITY_CUMULATIVE"}[1h]))
         unit: count
         description: Firewall block volume retained as an OTEL metric rather than repeated kernel log records.
   - id: host_utilization

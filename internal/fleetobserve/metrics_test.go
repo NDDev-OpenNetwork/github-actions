@@ -1,6 +1,7 @@
 package fleetobserve
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,8 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		"gha_fleet_queue_terminal_tombstone_next_expiry_seconds 0\n",
 		"gha_fleet_queue_intents_in_flight 0\n",
 		"gha_fleet_queue_uncovered_running 0\n",
+		"gha_fleet_visibility_held_out_members 0\n",
+		"gha_fleet_visibility_drain_marked_members 0\n",
 		"gha_fleet_queue_missing_runner_request_id 0\n",
 		"gha_fleet_queue_direct_jit_without_runner_request_id 0\n",
 		"gha_fleet_queue_unbound_repository_beyond_grace 0\n",
@@ -148,6 +151,35 @@ func TestRenderPrometheusFailsClosedForFutureSample(t *testing.T) {
 	if !strings.Contains(metrics, "gha_fleet_observer_up 0\n") ||
 		!strings.Contains(metrics, "gha_fleet_snapshot_stale 1\n") {
 		t.Fatalf("future sample was accepted\n%s", metrics)
+	}
+}
+
+func TestRenderPrometheusExposesDrainMarkedIndependentlyOfHeldOut(t *testing.T) {
+	collector := strandedUncoveredCollector(t)
+	collector.Members = func(context.Context) ([]MemberVisibility, error) {
+		return []MemberVisibility{
+			{Name: "gha-runner-1", Online: true, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-2", Online: true, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-3", Online: true, DrainReason: "drained: image bake"},
+			{Name: "gha-runner-4", Online: true, DrainReason: "drained: image bake"},
+		}, nil
+	}
+	metrics := RenderPrometheus(collector.Collect(t.Context()), observationTime, 45*time.Second)
+	for _, wanted := range []string{
+		"gha_fleet_platform_healthy 1\n",
+		"gha_fleet_visibility_held_out_members 0\n",
+		"gha_fleet_visibility_drain_marked_members 4\n",
+		`gha_fleet_visibility_drain_marked{member="gha-runner-1"} 1`,
+		`gha_fleet_visibility_drain_marked{member="gha-runner-2"} 1`,
+		`gha_fleet_visibility_drain_marked{member="gha-runner-3"} 1`,
+		`gha_fleet_visibility_drain_marked{member="gha-runner-4"} 1`,
+	} {
+		if !strings.Contains(metrics, wanted) {
+			t.Errorf("drain-marked metrics missing %q\n%s", wanted, metrics)
+		}
+	}
+	if strings.Contains(metrics, "gha_fleet_visibility_degraded{") {
+		t.Fatalf("online drain leaked a held-out series\n%s", metrics)
 	}
 }
 

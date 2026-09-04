@@ -29,13 +29,15 @@ The reconciler owns only dashboards carrying the versioned `managed-by:gds`
 description marker. It preserves manually created dashboards, uses OpenObserve
 hash preconditions for updates, and requires a clean post-apply read-back.
 
-The nine managed dashboards cover:
+The eleven managed dashboards cover:
 
 - capacity and pressure;
 - correlation integrity;
 - diagnostic storage retention;
 - host package, reboot, kernel and SRSO compliance;
 - classified host signals without duplicate raw-log storage;
+- host CPU, RAM, swap occupancy and major paging;
+- job lifecycle transitions;
 - lifecycle phase latency;
 - provider reliability;
 - priority/class fairness;
@@ -47,6 +49,6 @@ human decision surfaces used by alert response and CD health verification; a
 private deployment must not silently edit them.
 
 Dashboards do not prove alerts deliver. `config/observability-rules.yaml` owns
-the twenty-five-rule separately tested alert contract, and a real backend lifecycle record must
+the thirty-one-rule separately tested alert contract, and a real backend lifecycle record must
 prove Collector buffering, recovered records and explicit loss counters before
 the observability product is accepted.
