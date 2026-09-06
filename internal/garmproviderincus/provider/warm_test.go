@@ -164,6 +164,42 @@ func TestReconcileWarmBuildsCapacityWhileJobsAreQueued(t *testing.T) {
 	cli.AssertExpectations(t)
 }
 
+type yieldingAdmission struct {
+	allowAllAdmission
+}
+
+func (yieldingAdmission) WarmYieldsToJobs(context.Context, string, int) (bool, error) {
+	return true, nil
+}
+
+// A 4 GiB warm cannot be claimed by an 8 GiB job. Refilling the smaller class
+// while the larger waits occupies the member that would take the 8 GiB JIT.
+// Observed 2026-09-06: gha-runner-2 held only a 4 GiB warm while linux-release
+// and priority-integration queued; draining it placed four 8 GiB jobs.
+func TestReconcileWarmYieldsReadyCapacityToLargerClass(t *testing.T) {
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	setWarmTarget(provider, "nddev-linux-standard", 1)
+	provider.admission = yieldingAdmission{}
+	ready := warmInstance("warm-standard-yield")
+	op := new(MockOperation)
+	op.On("WaitContext", mock.Anything).Return(nil)
+	cli.On("GetInstancesFull", api.InstanceTypeAny).Return([]api.InstanceFull{*ready}, nil).Once()
+	cli.On("GetInstanceFull", ready.Name).Return(ready, "", nil)
+	cli.On("UpdateInstanceState", ready.Name, api.InstanceStatePut{Action: "stop", Timeout: -1, Force: true}, "").
+		Return(op, nil).Once()
+	cli.On("DeleteInstance", ready.Name).Return(op, nil).Once()
+
+	result, err := provider.ReconcileWarm(context.Background(), "nddev-linux-standard", true)
+	require.NoError(t, err)
+	require.True(t, result.Yielded)
+	require.Equal(t, admission.ReasonLargerClassWaiting, result.DeferralReason)
+	require.Equal(t, []string{ready.Name}, result.DeletedExcess)
+	require.Zero(t, result.ReadyAfter)
+	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	cli.AssertExpectations(t)
+}
+
 func TestReconcileWarmStillFailsOnAdmissionEvaluationError(t *testing.T) {
 	cli := new(MockIncusServer)
 	provider := newTestProvider(cli)

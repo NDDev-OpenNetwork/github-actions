@@ -295,6 +295,15 @@ func (c Config) Pool(name string) (Pool, bool) {
 	return Pool{}, false
 }
 
+func (c Config) PoolByScaleSet(scaleSetName string) (Pool, bool) {
+	for _, pool := range c.Pools {
+		if pool.ScaleSetName == scaleSetName {
+			return pool, true
+		}
+	}
+	return Pool{}, false
+}
+
 func (c Config) Backend(name string) (Backend, bool) {
 	for _, backend := range c.Backends {
 		if backend.Name == name {

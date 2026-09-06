@@ -22,6 +22,10 @@ const (
 	// admission said yes: the placement scriptlet found no member with room.
 	// It defers exactly like a capacity refusal.
 	ReasonPlacementRefused Reason = "placement-refused"
+	// ReasonLargerClassWaiting is a 4 GiB warm yielding RAM to an 8 GiB job
+	// that cannot claim that warm. Refilling the smaller class while the
+	// larger waits occupies the only members that can take the larger job.
+	ReasonLargerClassWaiting Reason = "larger-class-waiting"
 )
 
 type HostSnapshot struct {
