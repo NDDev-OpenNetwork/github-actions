@@ -577,8 +577,36 @@ func TestSelfClearingRulesKeepTheShortDefault(t *testing.T) {
 			t.Errorf("page %s stays quiet for %ds", rule.ID, rule.RepeatSecs)
 		}
 	}
-	if widened > 6 {
-		t.Errorf("%d rules have widened their repeat cadence; that is a policy change, not four exceptions", widened)
+	if widened > 8 {
+		t.Errorf("%d rules have widened their repeat cadence; that is a policy change, not the standing and capacity-burst exceptions", widened)
+	}
+}
+
+func TestQueueSlowBurnTicketsRepeatOncePerBurst(t *testing.T) {
+	bundle, err := Load("../../config/observability-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{
+		"queue_started_wait_slow_burn": 14400,
+		"queue_wait_slow_burn":         14400,
+	}
+	seen := 0
+	for _, rule := range bundle.Rules {
+		repeat, ok := want[rule.ID]
+		if !ok {
+			continue
+		}
+		seen++
+		if rule.RepeatSecs != repeat {
+			t.Errorf("%s repeat_seconds=%d, want %d so one capacity burst is one ticket", rule.ID, rule.RepeatSecs, repeat)
+		}
+		if rule.Severity != "ticket" {
+			t.Errorf("%s is %s; a burst reminder is not a page", rule.ID, rule.Severity)
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("expected %d queue slow-burn rules, found %d", len(want), seen)
 	}
 }
 

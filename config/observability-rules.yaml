@@ -716,6 +716,12 @@ rules:
     threshold: 300
     evaluation_seconds: 300
     hold_seconds: 600
+    # One capacity burst is one ticket. Default fifteen-minute silence
+    # re-announced the same afternoon six times while no job was stuck --
+    # assigned age stayed under the page, queued wait stayed under thirty
+    # minutes. The stall pages still evaluate; this only stops the trend
+    # from occupying the channel.
+    repeat_seconds: 14400
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-operations
@@ -747,6 +753,10 @@ rules:
     threshold: 300
     evaluation_seconds: 300
     hold_seconds: 600
+    # Same episode cadence as queue_started_wait_slow_burn. The pair names
+    # which half of the wait grew; they must not independently refill the
+    # channel every silence window of a single burst.
+    repeat_seconds: 14400
     destination_ref: fleet_oncall
     enabled: true
     owner: fleet-performance
