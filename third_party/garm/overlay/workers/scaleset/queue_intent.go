@@ -404,8 +404,11 @@ func (c *queueIntentCoordinator) HasQueuedAvailable(scaleSet params.ScaleSet, jo
 }
 
 // AdmittedCapacityTarget is the exact current runner target from durable queue
-// ownership. Desired runner count can lag cancellations, so it may only be an
-// upper bound on this count.
+// ownership. GitHub DesiredRunnerCount is not an upper bound: it drops to zero
+// while JobAssigned waiters still need a runner, which is the
+// assigned-without-instance stall. Cancellations leave the journal, so this
+// count already clips stale-high desired. Cap it with MaxRunners at the
+// scale-up call site via admittedScaleUpTarget.
 func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet, entity params.ForgeEntity) (int, error) {
 	config, err := c.loadConfig()
 	if err != nil {
@@ -425,6 +428,32 @@ func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet
 		return nil
 	})
 	return target, err
+}
+
+// admittedScaleUpTarget is how many runners a scale set should have from
+// durable admitted ownership, capped by MaxRunners.
+func admittedScaleUpTarget(intentTarget, maxRunners int) int {
+	if intentTarget < 1 || maxRunners < 1 {
+		return 0
+	}
+	if intentTarget > maxRunners {
+		return maxRunners
+	}
+	return intentTarget
+}
+
+// shouldScaleUp is true when GitHub desired or durable admitted ownership
+// still needs a runner. Admitted is the floor that GitHub TotalAssignedJobs
+// does not provide after the runner for a sibling job is deleted.
+func shouldScaleUp(current, githubDesired, admitted int) bool {
+	return current < admitted || current < githubDesired
+}
+
+// shouldScaleDown is true only when both GitHub desired and admitted ownership
+// are below the current runner count. Scaling down against GitHub desired
+// alone would delete the runner an assigned-without-instance waiter needs.
+func shouldScaleDown(current, githubDesired, admitted int) bool {
+	return current > githubDesired && current > admitted
 }
 
 // SelectForAcquire reserves every globally eligible candidate in this message.

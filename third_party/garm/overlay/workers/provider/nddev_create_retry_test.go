@@ -288,6 +288,59 @@ func TestNDDevUniqueActiveIntentOwnerFailsClosedOnTenantAmbiguity(t *testing.T) 
 	}
 }
 
+func TestNDDevUniqueOwnerFallsBackToQueuedNonTerminalIntents(t *testing.T) {
+	now := time.Date(2026, 9, 6, 16, 5, 20, 0, time.UTC)
+	originalNow := nddevRetryNow
+	nddevRetryNow = func() time.Time { return now }
+	t.Cleanup(func() { nddevRetryNow = originalNow })
+	directory := t.TempDir()
+	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
+	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	expires := now.Add(time.Hour).Format(time.RFC3339Nano)
+	queuedAt := now.Add(-time.Minute).Format(time.RFC3339Nano)
+	queue := fmt.Sprintf(`{"schema_version":6,"intents":{"live":{"key":"live","job_id":"live-job","scale_set_id":4,"scale_set_name":"example-standard","owner":"example-org","state":"queued","queue_time":%q,"expires_at":%q},"dead":{"key":"dead","job_id":"dead-job","scale_set_id":4,"scale_set_name":"example-standard","owner":"other-org","state":"queued","queue_time":%q,"expires_at":%q}},"terminal_jobs":{"dead-job":%q}}`,
+		queuedAt, expires, queuedAt, expires, now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := nddevReserveProviderRetryKey(
+		context.Background(), params.Instance{Name: "runner-prejob"},
+		params.ScaleSet{ScaleSetID: 4, Name: "example-standard"},
+		params.ForgeEntity{ID: "entity-one"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "scale-set:entity-one:4:job:live-job" {
+		t.Fatalf("pre-job create bound %q, want live queued job", key)
+	}
+}
+
+func TestNDDevActiveQueueInventoryOmitsTerminalLineage(t *testing.T) {
+	now := time.Date(2026, 9, 6, 16, 30, 0, 0, time.UTC)
+	directory := t.TempDir()
+	queuePath := filepath.Join(directory, "queue.json")
+	t.Setenv(nddevQueueIntentFileEnv, queuePath)
+	expires := now.Add(time.Hour).Format(time.RFC3339Nano)
+	queue := fmt.Sprintf(`{"schema_version":6,"intents":{"dead":{"key":"dead","job_id":"dead-job","scale_set_id":9,"scale_set_name":"example-release","owner":"example-org","state":"queued","queue_time":%q,"expires_at":%q},"live":{"key":"live","job_id":"live-job","scale_set_id":4,"scale_set_name":"example-standard","owner":"example-org","state":"assigned","queue_time":%q,"expires_at":%q}},"terminal_jobs":{"dead-job":%q}}`,
+		now.Add(-time.Hour).Format(time.RFC3339Nano), expires, now.Format(time.RFC3339Nano), expires, now.Add(time.Hour).Format(time.RFC3339Nano))
+	if err := os.WriteFile(queuePath, []byte(queue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, configured, err := nddevReadActiveQueueInventory(now)
+	if err != nil || !configured {
+		t.Fatalf("inventory configured=%v err=%v", configured, err)
+	}
+	if inventory.JobIDs["dead-job"] || inventory.ScaleSets[nddevOwnerScaleSetKey("example-org", "example-release")] {
+		t.Fatalf("terminal lineage stayed active: %#v", inventory)
+	}
+	if !inventory.JobIDs["live-job"] || !inventory.ScaleSets[nddevOwnerScaleSetKey("example-org", "example-standard")] {
+		t.Fatalf("live assigned intent missing: %#v", inventory)
+	}
+}
+
 func TestNDDevRetryOwnerReconstructsOrganizationAndRepositoryEntities(t *testing.T) {
 	for _, test := range []struct {
 		name   string

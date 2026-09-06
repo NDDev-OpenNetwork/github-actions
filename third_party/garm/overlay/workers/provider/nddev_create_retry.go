@@ -132,6 +132,13 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		}
 		if owner == "" {
 			owner, err = nddevUniqueActiveIntentOwner(intents, scaleSet)
+			if err != nil && strings.Contains(err.Error(), "got 0") {
+				queued, queuedErr := nddevQueuedNonTerminalIntents(now)
+				if queuedErr != nil {
+					return queuedErr
+				}
+				owner, err = nddevUniqueActiveIntentOwner(append(append([]nddevQueueRetryIntent{}, intents...), queued...), scaleSet)
+			}
 			if err != nil {
 				return err
 			}
@@ -140,21 +147,13 @@ func nddevReserveProviderRetryKey(ctx context.Context, instance params.Instance,
 		for _, reservation := range journal.Reservations {
 			claimed[reservation.RetryKey] = true
 		}
-		candidates := make([]nddevQueueRetryIntent, 0)
-		for _, intent := range intents {
-			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name ||
-				(intent.Owner != "" && intent.Owner != owner) {
-				continue
+		candidates := nddevRetryCandidates(intents, scaleSet, owner, domain, claimed, journal, now)
+		if len(candidates) == 0 {
+			queued, queuedErr := nddevQueuedNonTerminalIntents(now)
+			if queuedErr != nil {
+				return queuedErr
 			}
-			retryKey := domain + ":job:" + strings.TrimSpace(intent.JobID)
-			if intent.JobID == "" || claimed[retryKey] {
-				continue
-			}
-			if record, exists := journal.Records[retryKey]; exists &&
-				(record.TerminalUntil.After(now) || record.NextAllowedAt.After(now)) {
-				continue
-			}
-			candidates = append(candidates, intent)
+			candidates = nddevRetryCandidates(queued, scaleSet, owner, domain, claimed, journal, now)
 		}
 		sort.Slice(candidates, func(left, right int) bool {
 			if !candidates[left].QueueTime.Equal(candidates[right].QueueTime) {
@@ -203,6 +202,33 @@ func nddevUniqueActiveIntentOwner(intents []nddevQueueRetryIntent, scaleSet para
 		return owner, nil
 	}
 	panic("unreachable unique owner state")
+}
+
+func nddevRetryCandidates(
+	intents []nddevQueueRetryIntent,
+	scaleSet params.ScaleSet,
+	owner, domain string,
+	claimed map[string]bool,
+	journal *nddevRetryJournal,
+	now time.Time,
+) []nddevQueueRetryIntent {
+	candidates := make([]nddevQueueRetryIntent, 0)
+	for _, intent := range intents {
+		if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name ||
+			(intent.Owner != "" && intent.Owner != owner) {
+			continue
+		}
+		retryKey := domain + ":job:" + strings.TrimSpace(intent.JobID)
+		if intent.JobID == "" || claimed[retryKey] {
+			continue
+		}
+		if record, exists := journal.Records[retryKey]; exists &&
+			(record.TerminalUntil.After(now) || record.NextAllowedAt.After(now)) {
+			continue
+		}
+		candidates = append(candidates, intent)
+	}
+	return candidates
 }
 
 func nddevReleaseProviderRetryReservation(ctx context.Context, instanceName string) error {
@@ -657,7 +683,7 @@ func nddevActiveQueueIntents(now time.Time) ([]nddevQueueRetryIntent, error) {
 }
 
 func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, error) {
-	queue, configured, err := nddevReadQueueRetryIntentMap()
+	queue, terminals, configured, err := nddevReadQueueRetryJournal()
 	if err != nil || !configured {
 		return nil, configured, err
 	}
@@ -668,7 +694,7 @@ func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, e
 			if intent.Key == "" {
 				intent.Key = key
 			}
-			if intent.ExpiresAt.After(now) {
+			if intent.ExpiresAt.After(now) && !nddevRetryJobIsTerminal(intent.JobID, terminals, now) {
 				active = append(active, intent)
 			}
 		}
@@ -676,8 +702,29 @@ func nddevReadQueueRetryIntents(now time.Time) ([]nddevQueueRetryIntent, bool, e
 	return active, true, nil
 }
 
+func nddevQueuedNonTerminalIntents(now time.Time) ([]nddevQueueRetryIntent, error) {
+	queue, terminals, configured, err := nddevReadQueueRetryJournal()
+	if err != nil {
+		return nil, err
+	}
+	if !configured {
+		return nil, fmt.Errorf("queue intent path is required for pre-job retry identity")
+	}
+	queued := make([]nddevQueueRetryIntent, 0)
+	for key, intent := range queue {
+		if intent.State != "queued" || !intent.ExpiresAt.After(now) || nddevRetryJobIsTerminal(intent.JobID, terminals, now) {
+			continue
+		}
+		if intent.Key == "" {
+			intent.Key = key
+		}
+		queued = append(queued, intent)
+	}
+	return queued, nil
+}
+
 func nddevReadActiveQueueInventory(now time.Time) (nddevActiveQueueInventory, bool, error) {
-	queue, configured, err := nddevReadQueueRetryIntentMap()
+	queue, terminals, configured, err := nddevReadQueueRetryJournal()
 	if err != nil || !configured {
 		return nddevActiveQueueInventory{}, configured, err
 	}
@@ -691,9 +738,6 @@ func nddevReadActiveQueueInventory(now time.Time) (nddevActiveQueueInventory, bo
 			if !intent.ExpiresAt.After(now) {
 				continue
 			}
-			if name, owner := strings.TrimSpace(intent.ScaleSetName), strings.TrimSpace(intent.Owner); name != "" {
-				inventory.ScaleSets[nddevOwnerScaleSetKey(owner, name)] = true
-			}
 			jobID := strings.TrimSpace(intent.JobID)
 			if jobID == "" {
 				const prefix = "github-scale-set-job:v2:"
@@ -702,6 +746,12 @@ func nddevReadActiveQueueInventory(now time.Time) (nddevActiveQueueInventory, bo
 						jobID = strings.TrimSpace(key[separator+1:])
 					}
 				}
+			}
+			if nddevRetryJobIsTerminal(jobID, terminals, now) {
+				continue
+			}
+			if name, owner := strings.TrimSpace(intent.ScaleSetName), strings.TrimSpace(intent.Owner); name != "" {
+				inventory.ScaleSets[nddevOwnerScaleSetKey(owner, name)] = true
 			}
 			if jobID != "" {
 				inventory.JobIDs[jobID] = true
@@ -715,34 +765,43 @@ func nddevOwnerScaleSetKey(owner, scaleSetName string) string {
 	return strings.TrimSpace(owner) + "\x00" + strings.TrimSpace(scaleSetName)
 }
 
-func nddevReadQueueRetryIntentMap() (map[string]nddevQueueRetryIntent, bool, error) {
+func nddevReadQueueRetryJournal() (map[string]nddevQueueRetryIntent, map[string]time.Time, bool, error) {
 	path := strings.TrimSpace(os.Getenv(nddevQueueIntentFileEnv))
 	if path == "" {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	if !nddevBoundedAbsolutePath(path) {
-		return nil, true, fmt.Errorf("queue intent path is unavailable or unsafe")
+		return nil, nil, true, fmt.Errorf("queue intent path is unavailable or unsafe")
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, true, fmt.Errorf("open queue intent journal: %w", err)
+		return nil, nil, true, fmt.Errorf("open queue intent journal: %w", err)
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return nil, true, fmt.Errorf("queue intent journal must be a private regular file")
+		return nil, nil, true, fmt.Errorf("queue intent journal must be a private regular file")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, nddevRetryMaximumBytes+1))
 	if err != nil || len(data) > nddevRetryMaximumBytes {
-		return nil, true, fmt.Errorf("read queue intent journal: invalid bounded content")
+		return nil, nil, true, fmt.Errorf("read queue intent journal: invalid bounded content")
 	}
 	var queue struct {
-		Intents map[string]nddevQueueRetryIntent `json:"intents"`
+		Intents      map[string]nddevQueueRetryIntent `json:"intents"`
+		TerminalJobs map[string]time.Time             `json:"terminal_jobs"`
 	}
 	if err := json.Unmarshal(data, &queue); err != nil {
-		return nil, true, fmt.Errorf("decode queue intent journal: %w", err)
+		return nil, nil, true, fmt.Errorf("decode queue intent journal: %w", err)
 	}
-	return queue.Intents, true, nil
+	if queue.TerminalJobs == nil {
+		queue.TerminalJobs = map[string]time.Time{}
+	}
+	return queue.Intents, queue.TerminalJobs, true, nil
+}
+
+func nddevRetryJobIsTerminal(jobID string, terminals map[string]time.Time, now time.Time) bool {
+	expiry, ok := terminals[strings.TrimSpace(jobID)]
+	return ok && expiry.After(now)
 }
 
 func nddevRetryDelay(key string, attempt int) time.Duration {

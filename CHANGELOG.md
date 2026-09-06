@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Scale up from durable admitted queue ownership, not GitHub
+  `DesiredRunnerCount`. After a sibling runner is deleted, GitHub reports
+  zero assigned jobs while `JobAssigned` waiters still need a runner, so
+  autoscale never called create and Almaty `Candidate certified` cycled a
+  new UUID every five minutes with the scale set at 0. Pre-job creates
+  also bind a queued non-terminal waiter when the journal is not yet
+  assigned, and terminal lineage is omitted from retry inventory. This is
+  GARM `v0.2.1-nddev.91`.
+
+- Pack 4 GiB workers onto the member with the least remaining memory that
+  still fits, instead of spreading onto empty 16 GiB hosts. The emptiest-
+  member tie-break is what parked 4 GiB warms on `gha-runner-2` and left
+  8 GiB Almaty JIT with nowhere to land. This is `v0.1.5-nddev.129`.
+
 - Yield 4 GiB warm refill while an 8 GiB job is waiting. A 4 GiB warm cannot
   be claimed by linux-release or priority-integration, and placing it on an
   empty 16 GiB member is what kept Almaty 8 GiB JIT queued. ReconcileWarm
