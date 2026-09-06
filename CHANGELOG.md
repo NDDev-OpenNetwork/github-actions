@@ -11,7 +11,7 @@
   an independent stop-plus-delete budget so a near-spent create context
   cannot abort the reclaim as a timeout, and the returned error names
   `insufficient-memory` so the live GARM classifier agrees before a GARM
-  rebuild copies the overlay.
+  rebuild copies the overlay. This is `v0.1.5-nddev.124`.
 
 - Repeat `queue_wait_slow_burn` and `queue_started_wait_slow_burn` every
   four hours while the burst lasts. Default fifteen-minute silence
