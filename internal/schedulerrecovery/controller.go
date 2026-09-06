@@ -3,6 +3,7 @@ package schedulerrecovery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -75,7 +76,7 @@ func (controller Controller) Tick(ctx context.Context) (Decision, Result, error)
 	observation.HeartbeatAt = heartbeat.At
 	decision := Evaluate(controller.Policy, observation)
 	state := "healthy"
-	if decision.Recover {
+	if decision.Recover || strings.HasPrefix(decision.Reason, "recovery-blocked:") {
 		state = "unhealthy"
 	}
 	if err := controller.emit(ctx, Event{At: observation.ObservedAt, State: state, Reason: decision.Reason, Stuck: decision.Stuck}); err != nil {
@@ -83,6 +84,9 @@ func (controller Controller) Tick(ctx context.Context) (Decision, Result, error)
 	}
 	if !decision.Recover {
 		return decision, Result{}, nil
+	}
+	if err := validateProgress(decision.Stuck, nil, decision.Stuck); err != nil {
+		return decision, Result{}, fmt.Errorf("invalid recovery identities: %w", err)
 	}
 	attempt := NewAttempt(observation.ObservedAt, decision.Stuck)
 	acquired, err := controller.Attempts.Begin(ctx, attempt)
