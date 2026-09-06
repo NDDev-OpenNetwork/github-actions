@@ -1,0 +1,44 @@
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -859,7 +859,7 @@
+ 		slog.ErrorContext(w.ctx, "queue intent preflight failed closed", "error", err)
+ 		return
+ 	}
+-	current, target := w.runnerCount(), min(w.targetRunners(), intentTarget)
++	current, target := w.runnerCount(), admittedScaleUpTarget(intentTarget, int(w.scaleSet.MaxRunners))
+ 	if target <= current {
+ 		slog.DebugContext(w.ctx, "target is less than or equal to current; not scaling up")
+ 		return
+@@ -1099,17 +1099,26 @@
+ 			}
+ 		}
+ 
+-		if w.runnerCount() == w.targetRunners() {
+-			lastMsgDebugLog("desired runner count reached", w.targetRunners(), w.runnerCount())
++		intentTarget, err := newQueueIntentCoordinatorFromEnvironment().AdmittedCapacityTarget(w.scaleSet, w.entity)
++		if err != nil {
++			slog.ErrorContext(w.ctx, "queue intent preflight failed closed", "error", err)
++			w.mux.Unlock()
++			continue
++		}
++		current := w.runnerCount()
++		githubDesired := w.targetRunners()
++		admitted := admittedScaleUpTarget(intentTarget, int(w.scaleSet.MaxRunners))
++		if !shouldScaleUp(current, githubDesired, admitted) && !shouldScaleDown(current, githubDesired, admitted) {
++			lastMsgDebugLog("desired runner count reached", admitted, current)
+ 			w.mux.Unlock()
+ 			continue
+ 		}
+ 
+-		if w.runnerCount() < w.targetRunners() {
+-			lastMsgDebugLog("scaling up", w.targetRunners(), w.runnerCount())
++		if shouldScaleUp(current, githubDesired, admitted) {
++			lastMsgDebugLog("scaling up", admitted, current)
+ 			w.handleScaleUp()
+ 		} else {
+-			lastMsgDebugLog("attempting to scale down", w.targetRunners(), w.runnerCount())
++			lastMsgDebugLog("attempting to scale down", githubDesired, current)
+ 			w.handleScaleDown()
+ 		}
+ 		w.mux.Unlock()

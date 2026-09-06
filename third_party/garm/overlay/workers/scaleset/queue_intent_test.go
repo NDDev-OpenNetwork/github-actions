@@ -50,6 +50,48 @@ func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
 	}
 }
 
+func TestAdmittedScaleUpTargetCapsAtMaxRunners(t *testing.T) {
+	t.Parallel()
+	if got := admittedScaleUpTarget(0, 8); got != 0 {
+		t.Fatalf("empty admitted = %d", got)
+	}
+	if got := admittedScaleUpTarget(1, 0); got != 0 {
+		t.Fatalf("zero max = %d", got)
+	}
+	if got := admittedScaleUpTarget(1, 8); got != 1 {
+		t.Fatalf("one waiter = %d", got)
+	}
+	if got := admittedScaleUpTarget(4, 1); got != 1 {
+		t.Fatalf("linux-release cap = %d", got)
+	}
+}
+
+func TestScaleUpUsesAdmittedWhenGitHubDesiredIsZero(t *testing.T) {
+	t.Parallel()
+	// Live 2026-09-06: Candidate certified sat assigned-without-instance for
+	// 17 minutes because handleAutoScale compared runnerCount to GitHub
+	// DesiredRunnerCount (0 after the sibling runner was deleted) and never
+	// called handleScaleUp.
+	if !shouldScaleUp(0, 0, 1) {
+		t.Fatal("assigned-without-instance must scale up when GitHub desired is 0")
+	}
+	if shouldScaleDown(0, 0, 1) {
+		t.Fatal("empty pool with an admitted waiter must not scale down")
+	}
+	if shouldScaleDown(1, 0, 1) {
+		t.Fatal("the runner an admitted waiter needs must not scale down against GitHub desired 0")
+	}
+	if !shouldScaleDown(2, 0, 1) {
+		t.Fatal("extra runners above admitted and GitHub desired must scale down")
+	}
+	if shouldScaleUp(1, 0, 1) {
+		t.Fatal("matching admitted count must not keep scaling up")
+	}
+	if !shouldScaleUp(0, 2, 0) {
+		t.Fatal("stale-high GitHub desired still enters handleScaleUp, which no-ops when admitted is 0")
+	}
+}
+
 func TestCompletedJobCannotBeResurrectedByDelayedAssignedRedelivery(t *testing.T) {
 	now := time.Date(2026, 8, 26, 13, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
