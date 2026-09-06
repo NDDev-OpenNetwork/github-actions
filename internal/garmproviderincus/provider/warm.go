@@ -59,6 +59,10 @@ type WarmPoolResult struct {
 	Abandoned     []string `json:"abandoned_during_create,omitempty"`
 	Promoted      []string `json:"promoted"`
 	DeletedExcess []string `json:"deleted_excess"`
+	// Yielded is true when this pool gave up ready capacity because a
+	// waiting job of a larger memory class, or of the same class in a
+	// different pool, cannot claim these warms.
+	Yielded bool `json:"yielded,omitempty"`
 }
 
 type WarmDrainResult struct {
@@ -200,6 +204,17 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 	sort.Strings(ready)
 	result.ReadyBefore = len(ready)
 	result.Preparing = len(preparing)
+	yield, err := l.admission.WarmYieldsToJobs(ctx, flavor, pool.Resources.MemoryMiB)
+	if err != nil {
+		return result, errors.Wrap(err, "evaluating warm yield")
+	}
+	effectiveTarget := pool.Warm.TargetReady
+	if yield {
+		effectiveTarget = 0
+		result.Yielded = true
+		result.Deferred = true
+		result.DeferralReason = admission.ReasonLargerClassWaiting
+	}
 	if apply {
 		for _, name := range preparing {
 			promoted, err := l.promoteWarmReady(ctx, name, flavor)
@@ -225,7 +240,31 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 	// authorising a destructive converge showed an empty list precisely when it
 	// was being consulted. The name is recorded either way; only the deletion
 	// is conditional.
-	for len(ready) > pool.Warm.TargetReady {
+	if yield && apply {
+		stillPreparing := preparing
+		if len(result.Promoted) > 0 {
+			promoted := make(map[string]struct{}, len(result.Promoted))
+			for _, name := range result.Promoted {
+				promoted[name] = struct{}{}
+			}
+			stillPreparing = stillPreparing[:0]
+			for _, name := range preparing {
+				if _, done := promoted[name]; !done {
+					stillPreparing = append(stillPreparing, name)
+				}
+			}
+		}
+		for _, name := range stillPreparing {
+			if err := l.DeleteInstance(ctx, name); err != nil {
+				return result, errors.Wrap(err, "deleting yielded preparing warm instance")
+			}
+			result.DeletedExcess = append(result.DeletedExcess, name)
+		}
+		preparing = nil
+		result.Preparing = 0
+	}
+
+	for len(ready) > effectiveTarget {
 		name := ready[len(ready)-1]
 		ready = ready[:len(ready)-1]
 		if apply {
@@ -236,7 +275,7 @@ func (l *Incus) ReconcileWarm(ctx context.Context, flavor string, apply bool) (W
 		result.DeletedExcess = append(result.DeletedExcess, name)
 	}
 
-	deficit := pool.Warm.TargetReady - len(ready) - (len(preparing) - len(result.Promoted))
+	deficit := effectiveTarget - len(ready) - (len(preparing) - len(result.Promoted))
 	if deficit > 0 && apply {
 		for range deficit {
 			name, consumed, decision, err := l.createWarm(ctx, flavor)

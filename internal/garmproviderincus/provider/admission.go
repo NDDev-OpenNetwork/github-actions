@@ -35,6 +35,7 @@ type admissionController interface {
 	Resolve(context.Context, string) (string, error)
 	AdmitWarm(context.Context, InstanceServerInterface, string, string) (admission.Decision, error)
 	AuthorizeWarmDrain(context.Context, string) error
+	WarmYieldsToJobs(context.Context, string, int) (bool, error)
 }
 
 type repositoryResolver interface {
@@ -52,6 +53,34 @@ func (n *nddevAdmission) ResolveRepository(ctx context.Context, bootstrap params
 
 func (n *nddevAdmission) AuthorizeWarmDrain(ctx context.Context, instanceName string) error {
 	return n.controller.AuthorizeWarmDrain(ctx, instanceName)
+}
+
+func (n *nddevAdmission) WarmYieldsToJobs(ctx context.Context, poolName string, memoryMiB int) (bool, error) {
+	if _, exists := n.platform.Pool(poolName); !exists {
+		return false, fmt.Errorf("pool policy %q does not exist", poolName)
+	}
+	snapshot, err := n.queueIntents.ReadActive(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read queue intents for warm yield: %w", err)
+	}
+	for _, intent := range snapshot.Active {
+		switch intent.State {
+		case queueintent.StateQueued, queueintent.StateAcquiring, queueintent.StateAcquired, queueintent.StateAssigned:
+		default:
+			continue
+		}
+		other, exists := n.platform.PoolByScaleSet(intent.ScaleSetName)
+		if !exists {
+			continue
+		}
+		if other.Resources.MemoryMiB > memoryMiB {
+			return true, nil
+		}
+		if other.Resources.MemoryMiB == memoryMiB && other.Name != poolName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type nddevAdmission struct {

@@ -222,6 +222,9 @@ func (allowAllAdmission) AdmitWarm(context.Context, InstanceServerInterface, str
 	return admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}, nil
 }
 func (allowAllAdmission) AuthorizeWarmDrain(context.Context, string) error { return nil }
+func (allowAllAdmission) WarmYieldsToJobs(context.Context, string, int) (bool, error) {
+	return false, nil
+}
 
 func (r *recordingAdmission) Release(_ context.Context, instance string) error {
 	r.released = append(r.released, instance)
@@ -293,6 +296,9 @@ func (w *warmAdmission) AdmitWarm(context.Context, InstanceServerInterface, stri
 	return admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}, nil
 }
 func (w *warmAdmission) AuthorizeWarmDrain(context.Context, string) error { return nil }
+func (w *warmAdmission) WarmYieldsToJobs(context.Context, string, int) (bool, error) {
+	return false, nil
+}
 
 func defaultTenantRepositoryURL() string {
 	selected, err := tenant.ByID(tenant.DefaultID)

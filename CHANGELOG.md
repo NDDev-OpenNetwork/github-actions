@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Yield 4 GiB warm refill while an 8 GiB job is waiting. A 4 GiB warm cannot
+  be claimed by linux-release or priority-integration, and placing it on an
+  empty 16 GiB member is what kept Almaty 8 GiB JIT queued. ReconcileWarm
+  treats the smaller class target as zero until the larger wait clears, and
+  the same-size warms of a different pool yield too. This is
+  `v0.1.5-nddev.128`.
+
 - Do not count terminal queue lineage as live wait. A completed or cancelled
   GitHub job is retained so a replacement UUID can inherit FirstQueuedAt, but
   observer oldest-queued metrics treated those markers as GitHub-queued work.
