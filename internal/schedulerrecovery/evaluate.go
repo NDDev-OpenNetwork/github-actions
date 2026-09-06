@@ -1,6 +1,10 @@
 package schedulerrecovery
 
-import "time"
+import (
+	"slices"
+	"strings"
+	"time"
+)
 
 type Policy struct {
 	MinimumStuckAge time.Duration
@@ -39,6 +43,7 @@ type Observation struct {
 	PendingCreates       []PendingCreate
 	OverdueRetries       []ProviderRetry
 	StaleAssigned        []AssignedIntent
+	RestartBlockers      []string
 	CapacityBackpressure bool
 	ManagerUptime        time.Duration
 	LastRecoveryAt       time.Time
@@ -81,6 +86,11 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	}
 	if len(stuck) == 0 {
 		return Decision{Reason: "no-stale-undispatched-instance"}
+	}
+	slices.Sort(stuck)
+	stuck = slices.Compact(stuck)
+	if len(observation.RestartBlockers) > 0 {
+		return Decision{Reason: "restart-ineligible:" + strings.Join(observation.RestartBlockers, ","), Stuck: stuck}
 	}
 	// A process-wide heartbeat proves only that some dispatcher work advanced.
 	// It cannot clear an exact retry that is already overdue: production has

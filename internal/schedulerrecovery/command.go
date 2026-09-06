@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,12 @@ func (executor CommandExecutor) AwaitProgress(ctx context.Context, attempt Attem
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&progress); err != nil {
 		return nil, nil, fmt.Errorf("decode progress output: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, nil, fmt.Errorf("progress output must contain exactly one JSON object")
+	}
+	if err := validateProgress(attempt.Stuck, progress.Progressed, progress.Remaining); err != nil {
+		return nil, nil, fmt.Errorf("invalid progress output: %w", err)
 	}
 	return progress.Progressed, progress.Remaining, nil
 }

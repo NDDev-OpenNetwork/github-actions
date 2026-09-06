@@ -92,7 +92,20 @@ type AttemptStore interface {
 
 func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
 	progressed, remaining, progressErr := executor.AwaitProgress(ctx, attempt)
-	if progressErr == nil && len(remaining) == 0 {
+	if progressErr == nil {
+		progressErr = validateProgress(attempt.Stuck, progressed, remaining)
+	}
+	if progressErr != nil {
+		// Unknown progress cannot authorize another manager-wide restart. Keep
+		// every identity unresolved and finish the failed attempt for cooldown.
+		result := Result{AttemptID: attempt.ID, Remaining: slices.Clone(attempt.Stuck),
+			FinishedAt: now().UTC(), Error: fmt.Sprintf("verify resumed progress: %v", progressErr)}
+		if err := store.Finish(ctx, result); err != nil {
+			return result, fmt.Errorf("finish resumed recovery attempt: %w", err)
+		}
+		return result, fmt.Errorf("verify resumed progress: %w", progressErr)
+	}
+	if len(remaining) == 0 {
 		result := Result{
 			AttemptID: attempt.ID, Progressed: slices.Clone(progressed), Recovered: true,
 			FinishedAt: now().UTC(),
@@ -102,13 +115,10 @@ func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, ex
 		}
 		return result, nil
 	}
-	// The previous process may have died before or during the manager restart.
-	// Re-running the checkpoint-first sequence is idempotent; restricting it to
-	// the still-stuck identities avoids replaying work already proven progressed.
-	if len(remaining) > 0 {
-		attempt.Stuck = slices.Clone(remaining)
-	}
-	return recoverAcquired(ctx, attempt, store, executor, now)
+	// Re-checkpoint only unresolved work, but retain the original attempt's
+	// already verified progress in the durable completion receipt.
+	attempt.Stuck = slices.Clone(remaining)
+	return recoverUnresolved(ctx, attempt, progressed, store, executor, now)
 }
 
 type Executor interface {
@@ -129,6 +139,9 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 	if !decision.Recover {
 		return Result{}, fmt.Errorf("recovery refused: %s", decision.Reason)
 	}
+	if err := validateProgress(decision.Stuck, nil, decision.Stuck); err != nil {
+		return Result{}, err
+	}
 	attempt := NewAttempt(observedAt, decision.Stuck)
 	acquired, err := store.Begin(ctx, attempt)
 	if err != nil {
@@ -141,7 +154,11 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 }
 
 func recoverAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
-	result := Result{AttemptID: attempt.ID}
+	return recoverUnresolved(ctx, attempt, nil, store, executor, now)
+}
+
+func recoverUnresolved(ctx context.Context, attempt Attempt, alreadyProgressed []string, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
+	result := Result{AttemptID: attempt.ID, Progressed: slices.Clone(alreadyProgressed), Remaining: slices.Clone(attempt.Stuck)}
 	finish := func(operationErr error) (Result, error) {
 		result.FinishedAt = now().UTC()
 		if operationErr != nil {
@@ -161,11 +178,14 @@ func recoverAcquired(ctx context.Context, attempt Attempt, store AttemptStore, e
 		return finish(fmt.Errorf("restart dispatcher: %w", err))
 	}
 	progressed, remaining, err := executor.AwaitProgress(ctx, attempt)
-	result.Progressed = slices.Clone(progressed)
-	result.Remaining = slices.Clone(remaining)
+	if err == nil {
+		err = validateProgress(attempt.Stuck, progressed, remaining)
+	}
 	if err != nil {
 		return finish(fmt.Errorf("verify dispatcher progress: %w", err))
 	}
+	result.Progressed = append(result.Progressed, progressed...)
+	result.Remaining = slices.Clone(remaining)
 	result.Recovered = len(remaining) == 0
 	if !result.Recovered {
 		return finish(fmt.Errorf("recovery incomplete: %d stuck instances remain", len(remaining)))

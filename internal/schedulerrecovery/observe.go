@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ type observationOutput struct {
 	PendingCreates       []PendingCreate  `json:"pending_creates"`
 	OverdueRetries       []ProviderRetry  `json:"overdue_provider_retries"`
 	StaleAssigned        []AssignedIntent `json:"stale_assigned_intents"`
+	RestartBlockers      []string         `json:"restart_blockers,omitempty"`
 	CapacityBackpressure bool             `json:"capacity_backpressure"`
 	ManagerUptimeSeconds int64            `json:"manager_uptime_seconds"`
 	LastRecoveryAt       time.Time        `json:"last_recovery_at"`
@@ -63,6 +65,17 @@ func (observer CommandObserver) Observe(ctx context.Context) (Observation, error
 	if err := decoder.Decode(&decoded); err != nil {
 		return Observation{}, fmt.Errorf("decode scheduler observation: %w", err)
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return Observation{}, fmt.Errorf("scheduler observation must contain exactly one JSON object")
+	}
+	if len(decoded.RestartBlockers) > 16 {
+		return Observation{}, fmt.Errorf("too many restart blockers")
+	}
+	for _, blocker := range decoded.RestartBlockers {
+		if blocker == "" || len(blocker) > 96 || strings.Trim(blocker, "abcdefghijklmnopqrstuvwxyz0123456789-") != "" {
+			return Observation{}, fmt.Errorf("scheduler observation contains an invalid restart blocker")
+		}
+	}
 	if decoded.ObservedAt.IsZero() || decoded.ActiveIntents < 0 || decoded.ManagerUptimeSeconds < 0 {
 		return Observation{}, fmt.Errorf("scheduler observation contains invalid values")
 	}
@@ -84,8 +97,8 @@ func (observer CommandObserver) Observe(ctx context.Context) (Observation, error
 	return Observation{
 		ObservedAt: decoded.ObservedAt, ActiveIntents: decoded.ActiveIntents,
 		PendingCreates: decoded.PendingCreates, OverdueRetries: decoded.OverdueRetries, StaleAssigned: decoded.StaleAssigned,
-		CapacityBackpressure: decoded.CapacityBackpressure,
-		ManagerUptime:        time.Duration(decoded.ManagerUptimeSeconds) * time.Second,
-		LastRecoveryAt:       decoded.LastRecoveryAt, RecoveryRunning: decoded.RecoveryRunning,
+		CapacityBackpressure: decoded.CapacityBackpressure, RestartBlockers: decoded.RestartBlockers,
+		ManagerUptime:  time.Duration(decoded.ManagerUptimeSeconds) * time.Second,
+		LastRecoveryAt: decoded.LastRecoveryAt, RecoveryRunning: decoded.RecoveryRunning,
 	}, nil
 }
