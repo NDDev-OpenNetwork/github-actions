@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Classify warm-preemption and instance-delete waits as capacity, not
+  timeout. A create that reclaims a warm slot and hits `context deadline
+  exceeded` or Incus `instance is busy running a start` used to page
+  `provider_retry_error_persistent` and could open a 24-hour circuit after
+  three attempts, while the same create refused for insufficient-memory is
+  a ticket. Bare provider deadlines still page. Preemption now deletes with
+  an independent stop-plus-delete budget so a near-spent create context
+  cannot abort the reclaim as a timeout, and the returned error names
+  `insufficient-memory` so the live GARM classifier agrees before a GARM
+  rebuild copies the overlay. This is `v0.1.5-nddev.124` and GARM
+  `v0.2.1-nddev.89`.
+
+- Repeat `queue_wait_slow_burn` and `queue_started_wait_slow_burn` every
+  four hours while the burst lasts. Default fifteen-minute silence
+  re-announced one afternoon of memory-bound priority work six times with
+  no stuck job: assigned age stayed under the page and queued wait stayed
+  under thirty minutes. `lifecycle_queued_delivery_stall` and
+  `lifecycle_assigned_stall` still evaluate on their own cadence.
+
 - Export drain-marked cluster members as their own snapshot field and
   Prometheus series, independent of held-out (offline) members. A full
   online drain keeps platform health up and still fires queue and assigned

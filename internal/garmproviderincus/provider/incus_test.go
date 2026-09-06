@@ -1124,6 +1124,72 @@ func TestCreateInstanceDeletesReservedWarmCapacityBeforeColdLaunch(t *testing.T)
 	cli.AssertExpectations(t)
 }
 
+func TestCreateInstancePreemptsWarmAfterCreateContextDeadline(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	control := &preemptingAdmission{}
+	provider.admission = control
+	prepareCreateMocks(cli, testImageDigest)
+
+	warm := warmInstance("warm-standard-preempt")
+	stopOperation := new(MockOperation)
+	stopOperation.On("WaitContext", mock.Anything).Return(nil).Once()
+	deleteOperation := new(MockOperation)
+	deleteOperation.On("WaitContext", mock.Anything).Return(nil).Once()
+	createOperation := new(MockOperation)
+	createOperation.On("WaitContext", mock.Anything).Return(nil).Twice()
+
+	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
+	cli.On("GetInstanceFull", warm.Name).Return(warm, "", nil).Twice()
+	cli.On("UpdateInstanceState", warm.Name, api.InstanceStatePut{Action: "stop", Timeout: -1, Force: true}, "").
+		Return(stopOperation, nil).Once()
+	cli.On("DeleteInstance", warm.Name).Return(deleteOperation, nil).Once()
+	cli.On("CreateInstance", mock.Anything).Return(createOperation, nil).Once()
+	cli.On("UpdateInstanceState", "runner-test-instance", api.InstanceStatePut{Action: "start", Timeout: -1}, "").
+		Return(createOperation, nil).Once()
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
+
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := provider.CreateInstance(expired, validBootstrap())
+	require.NoError(t, err)
+	require.Equal(t, "runner-test-instance", got.ProviderID)
+	require.Equal(t, []string{warm.Name}, control.markedDeleting)
+	cli.AssertCalled(t, "DeleteInstance", warm.Name)
+	cli.AssertExpectations(t)
+}
+
+func TestCreateInstancePreemptionDeleteTimeoutNamesCapacity(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	control := &preemptingAdmission{}
+	provider.admission = control
+	prepareCreateMocks(cli, testImageDigest)
+
+	warm := warmInstance("warm-standard-preempt")
+	stopOperation := new(MockOperation)
+	stopOperation.On("WaitContext", mock.Anything).Return(nil).Once()
+	deleteOperation := new(MockOperation)
+	deleteOperation.On("WaitContext", mock.Anything).Return(context.DeadlineExceeded).Once()
+
+	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
+	cli.On("GetInstanceFull", warm.Name).Return(warm, "", nil).Twice()
+	cli.On("UpdateInstanceState", warm.Name, api.InstanceStatePut{Action: "stop", Timeout: -1, Force: true}, "").
+		Return(stopOperation, nil).Once()
+	cli.On("DeleteInstance", warm.Name).Return(deleteOperation, nil).Once()
+
+	_, err := provider.CreateInstance(context.Background(), validBootstrap())
+	require.ErrorContains(t, err, "preempting warm instance")
+	require.ErrorContains(t, err, "insufficient-memory")
+	require.ErrorContains(t, err, "waiting for instance deletion")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	cli.AssertExpectations(t)
+}
+
 func TestCreateInstanceReleasesColdReservationWhenPostPreemptionAdmissionFails(t *testing.T) {
 	stubCloudConfig(t)
 	cli := new(MockIncusServer)

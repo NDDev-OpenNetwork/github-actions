@@ -102,9 +102,14 @@ gha-fleet reconcile-openobserve-alerts \
 - Persistent provider-retry pages: ignore capacity backpressure and retained
   history; inspect only the current non-capacity deferred class, correlate its
   exact private journal identity, repair the cause, and preserve the record
-  until normal successful consolidation removes or supersedes it.
+  until normal successful consolidation removes or supersedes it. A warm
+  preemption that timed out waiting for Incus delete is capacity, not this
+  page -- `insufficient-memory` and `preempting warm` share the retry class.
 - Slow-burn tickets: inspect class/tenant percentiles and capacity evidence;
-  do not page an operator for a trend without an immediate action.
+  do not page an operator for a trend without an immediate action. Queue
+  wait and started-wait tickets repeat every four hours for one burst; a
+  job that crosses thirty minutes queued or five minutes assigned still
+  pages on `lifecycle_queued_delivery_stall` or `lifecycle_assigned_stall`.
 - Platform-health pages during an authorized full-fleet drain: if every
   reported cluster member carries a drain reason, including an online drain,
   uncovered-beyond-grace does not zero `gha_fleet_platform_healthy`.
