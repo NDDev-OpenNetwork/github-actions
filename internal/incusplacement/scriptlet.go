@@ -210,6 +210,11 @@ def instance_placement(request, candidate_members):
         member_score = member_load
         if projected_cpu > member_score:
             member_score = projected_cpu
+        # Pack onto the member with the least remaining memory that still
+        # fits. Spreading onto the emptiest member (remaining > chosen)
+        # parked 4 GiB warms and JIT on empty 16 GiB hosts and left 8 GiB
+        # Almaty jobs with nowhere to land. CPU score still wins first, so
+        # this only breaks remaining-memory ties.
         better = False
         if chosen == "":
             better = True
@@ -220,7 +225,7 @@ def instance_placement(request, candidate_members):
                 better = True
             elif projected_cpu == chosen_projected_cpu and member_load < chosen_load:
                 better = True
-            elif projected_cpu == chosen_projected_cpu and member_load == chosen_load and remaining > chosen_remaining:
+            elif projected_cpu == chosen_projected_cpu and member_load == chosen_load and remaining < chosen_remaining:
                 better = True
             elif projected_cpu == chosen_projected_cpu and member_load == chosen_load and remaining == chosen_remaining and pending_count < chosen_count:
                 better = True

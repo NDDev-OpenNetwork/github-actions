@@ -27,7 +27,7 @@ func TestRenderCPUAwarePlacementFromPortablePolicy(t *testing.T) {
 		"def committed_cpu_units(instances, pending_count)",
 		"projected_cpu = float(committed_cpu + want_cpu_units) / float(cores)",
 		"member_score < chosen_score - LOAD_TIE_EPSILON",
-		"remaining > chosen_remaining", "pending_count < chosen_count",
+		"remaining < chosen_remaining", "pending_count < chosen_count",
 		"user.gha_pressure.state", "get_instances_count(PROJECT, name, True)",
 		"insufficient-memory: no fleet member has room for this worker",
 	} {
