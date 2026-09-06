@@ -1,0 +1,32 @@
+name: Reusable CI feedback
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        required: true
+        type: string
+      run-attempt:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: ci-feedback-${{ github.repository_id }}-${{ inputs.run-id }}-${{ inputs.run-attempt }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Publish agent repair evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # Trusted immutable action code only. No checkout of the triggering PR.
+      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@5ee031753c583e090c82f41347f6377f214dfa21
+        with:
+          run-id: ${{ inputs.run-id }}
+          run-attempt: ${{ inputs.run-attempt }}
+          token: ${{ github.token }}
