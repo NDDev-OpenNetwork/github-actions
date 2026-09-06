@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Release a warm worker's exact memory reservation when placement refuses
+  creation. Successful capacity deferrals previously skipped cleanup and
+  retained uncreated workers until the admission lease expired. Early
+  argument failures now preserve the cleanup identity, cleanup failures are
+  reported, and ambiguous create responses retain their reservation for
+  authoritative reconciliation.
+
 - Classify warm-preemption and instance-delete waits as capacity, not
   timeout. A create that reclaims a warm slot and hits `context deadline
   exceeded` or Incus `instance is busy running a start` used to page

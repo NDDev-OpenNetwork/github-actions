@@ -288,33 +288,42 @@ func (l *Incus) createWarm(ctx context.Context, flavor string) (name string, con
 	if !decision.Admitted {
 		return "", false, &decision, nil
 	}
+	reservedName := name
 	created := false
+	launchAttempted := false
 	defer func() {
-		if err == nil {
+		if err == nil && deferred == nil {
+			return
+		}
+		// An uncertain create can still complete in Incus. Its reservation
+		// belongs to inventory reconciliation until existence is established.
+		if launchAttempted && !created && deferred == nil {
 			return
 		}
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		var cleanupErr error
 		if created {
-			cleanupErr = l.DeleteInstance(cleanupContext, name)
+			cleanupErr = l.DeleteInstance(cleanupContext, reservedName)
 		} else {
-			cleanupErr = l.admission.Release(cleanupContext, name)
+			cleanupErr = l.admission.Release(cleanupContext, reservedName)
 		}
 		if cleanupErr != nil {
-			err = errors.Wrapf(err, "cleaning failed warm instance %q: %v", name, cleanupErr)
+			err = errors2.Join(err, errors.Wrapf(cleanupErr, "cleaning failed warm instance %q", reservedName))
 		}
 	}()
 	args, err := l.getWarmCreateArgs(ctx, flavor, name)
 	if err != nil {
 		return "", false, nil, err
 	}
+	launchAttempted = true
 	if err = l.launchInstance(ctx, args); err != nil {
 		if isPlacementRefusal(err) {
 			// The scriptlet is the per-member truth and fleet-level admission
 			// is the ledger; when they disagree under load, the member that
 			// had ledger room lacked live room. That is a capacity deferral,
-			// not a failed reconcile.
+			// not a failed reconcile. Cleanup must still release the exact
+			// reservation: named return values clear both name and err here.
 			return "", false, &admission.Decision{Admitted: false, Reason: admission.ReasonPlacementRefused, Pool: flavor}, nil
 		}
 		return "", false, nil, errors.Wrap(err, "launching warm instance")
