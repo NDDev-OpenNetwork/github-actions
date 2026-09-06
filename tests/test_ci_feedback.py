@@ -1,0 +1,150 @@
+"""Run the real publisher with isolated API fixtures, no token or network."""
+import copy
+import importlib.util
+import json
+import pathlib
+import unittest
+from unittest import mock
+
+PATH = pathlib.Path(__file__).resolve().parents[1] / "actions/ci-feedback/feedback.py"
+SPEC = importlib.util.spec_from_file_location("feedback", PATH)
+feedback = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(feedback)
+REPO = "example-org/project"
+RUN = {"id": 100, "run_attempt": 2, "repository": {"id": 10, "full_name": REPO},
+       "status": "completed", "conclusion": "failure", "head_sha": "a" * 40,
+       "workflow_id": 50, "created_at": "2026-09-07T00:00:00Z"}
+
+
+class API:
+    def __init__(self):
+        self.run = copy.deepcopy(RUN)
+        self.issues = []
+        self.jobs = [{"id": 101, "run_id": 100, "conclusion": "failure", "name": "untrusted $(payload)"}]
+        self.calls = []
+        self.posts = []
+
+    def request(self, path, data=None):
+        self.calls.append(path)
+        if data is not None:
+            self.posts.append(data)
+            return {"number": 1}
+        if "/issues?" in path:
+            return self.issues
+        if "/jobs?" in path:
+            return {"jobs": self.jobs, "total_count": len(self.jobs)}
+        return self.run
+
+
+class FeedbackTests(unittest.TestCase):
+    def publish(self, api):
+        return feedback.publish(api, REPO, 10, 100, 2)
+
+    def test_failure_is_exact_and_has_no_project_text(self):
+        api = API()
+        self.assertEqual(self.publish(api), {"status": "published", "issue_number": 1})
+        body = api.posts[0]["body"]
+        evidence = json.loads(body.split("```json\n")[1].split("\n```")[0])
+        self.assertEqual(evidence["source"]["run_attempt"], 2)
+        self.assertEqual(evidence["source"]["head_sha"], "a" * 40)
+        self.assertFalse(evidence["blocking"])
+        self.assertEqual(evidence["delivery_state"], "pending-agent-consumption")
+        self.assertNotIn("untrusted $(payload)", body)
+        self.assertIn("/attempts/2/jobs", " ".join(api.calls))
+
+    def test_large_failure_set_is_explicitly_bounded(self):
+        api = API()
+        api.jobs = [{"id": n, "run_id": 100, "conclusion": "failure"} for n in range(1000, 1101)]
+        self.publish(api)
+        evidence = json.loads(api.posts[0]["body"].split("```json\n")[1].split("\n```")[0])
+        self.assertEqual(len(evidence["failed_jobs"]), 100)
+        self.assertEqual(evidence["failed_jobs_total"], 101)
+        self.assertEqual(evidence["failed_jobs_omitted"], 1)
+
+    def test_cancelled_and_successful_runs_create_no_work(self):
+        for conclusion in feedback.NON_FAILURES:
+            api = API()
+            api.run["conclusion"] = conclusion
+            self.assertEqual(self.publish(api)["status"], "not-a-failure")
+            self.assertEqual(len(api.calls), 1)
+            self.assertEqual(api.posts, [])
+
+    def test_wrong_repository_attempt_sha_and_incomplete_run_are_rejected(self):
+        for updates in ({"run_attempt": 3}, {"repository": {"id": 11, "full_name": REPO}},
+                        {"repository": {"id": 10, "full_name": "elsewhere/private"}},
+                        {"head_sha": "bad"}, {"status": "in_progress"}, {"conclusion": "unknown"}):
+            api = API()
+            api.run.update(updates)
+            with self.assertRaises((ValueError, RuntimeError)):
+                self.publish(api)
+            self.assertEqual(api.posts, [])
+
+    def test_duplicate_including_closed_issue_is_not_republished(self):
+        api = API()
+        api.issues = [{"number": 9, "state": "closed", "user": {"login": "github-actions[bot]"},
+                       "body": "<!-- ci-feedback:v1:10:100:2 -->\nprevious evidence"}]
+        self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 9})
+        self.assertEqual(api.posts, [])
+
+    def test_user_authored_marker_cannot_suppress_feedback(self):
+        api = API()
+        api.issues = [{"number": 9, "user": {"login": "other"}, "body": "<!-- ci-feedback:v1:10:100:2 -->\n"}]
+        self.assertEqual(self.publish(api)["status"], "published")
+
+    def test_foreign_and_duplicate_jobs_rejected(self):
+        for jobs in ([{"id": 101, "run_id": 999}], [{"id": 101, "run_id": 100}] * 2):
+            api = API()
+            api.jobs = jobs
+            with self.assertRaises(RuntimeError):
+                self.publish(api)
+            self.assertEqual(api.posts, [])
+
+    def test_run_level_failure_without_jobs_remains_failure(self):
+        api = API()
+        api.jobs = []
+        api.run["conclusion"] = "startup_failure"
+        self.assertEqual(self.publish(api)["status"], "published")
+        self.assertIn('"jobs_observed": 0', api.posts[0]["body"])
+        self.assertIn('"conclusion": "startup_failure"', api.posts[0]["body"])
+
+    def test_bounded_dedup_never_assumes_absence(self):
+        api = API()
+        api.issues = [{"number": n} for n in range(100)]
+        with self.assertRaises(RuntimeError):
+            self.publish(api)
+        self.assertEqual(api.posts, [])
+
+    def test_incomplete_jobs_do_not_publish_partial_evidence(self):
+        api = API()
+        real = api.request
+        def request(path, data=None):
+            if "/jobs?" in path:
+                return {"total_count": 2, "jobs": []}
+            return real(path, data)
+        api.request = request
+        with self.assertRaises(RuntimeError):
+            self.publish(api)
+        self.assertEqual(api.posts, [])
+
+    def test_token_is_not_forwarded_to_other_origin_or_mutation(self):
+        api = feedback.GitHubAPI(REPO, "synthetic-token")
+        with mock.patch.object(api.opener, "open") as opened:
+            for path, data in (("https://elsewhere.invalid", None), ("/repos/other/private/issues", None),
+                               ("/repos/example-org/project/actions/runs/100/cancel", {})):
+                with self.assertRaises(ValueError):
+                    api.request(path, data)
+            opened.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            feedback.NoRedirect().redirect_request(None, None, 302, "", {}, "https://elsewhere.invalid")
+
+    def test_invalid_ids_and_repository_paths_rejected(self):
+        for value in (True, 0, -1, "1/2", "1\n", "", " 1", "1;id"):
+            with self.assertRaises(ValueError):
+                feedback.positive_id(value)
+        for value in ("../repo", "org/..", "org/repo/extra", "org/repo?token=x"):
+            with self.assertRaises(ValueError):
+                feedback.repository_name(value)
+
+
+if __name__ == "__main__":
+    unittest.main()

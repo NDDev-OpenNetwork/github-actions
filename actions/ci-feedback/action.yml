@@ -1,0 +1,23 @@
+name: CI feedback
+description: Publish exact-attempt background CI evidence to a repository-local repair issue.
+inputs:
+  run-id:
+    description: Completed GitHub Actions run ID in the caller repository.
+    required: true
+  run-attempt:
+    description: Exact completed run attempt, never implicitly the latest attempt.
+    required: true
+  token:
+    description: Repository token with actions read and issues write permissions.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Publish bounded CI feedback
+      shell: bash
+      env:
+        FEEDBACK_ACTION_PATH: ${{ github.action_path }}
+        FEEDBACK_RUN_ID: ${{ inputs.run-id }}
+        FEEDBACK_RUN_ATTEMPT: ${{ inputs.run-attempt }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: python3 "${FEEDBACK_ACTION_PATH}/feedback.py"
