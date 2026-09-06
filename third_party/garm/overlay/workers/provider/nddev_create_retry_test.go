@@ -483,7 +483,7 @@ func TestNDDevProviderCapacityBackpressureNeverOpensCircuit(t *testing.T) {
 	}
 }
 
-func TestNDDevJobCapacityFailureStopsAfterTwoRetries(t *testing.T) {
+func TestNDDevJobCapacityFailureNeverOpensCircuit(t *testing.T) {
 	now := time.Date(2026, 8, 24, 7, 0, 0, 0, time.UTC)
 	originalNow := nddevRetryNow
 	nddevRetryNow = func() time.Time { return now }
@@ -492,30 +492,36 @@ func TestNDDevJobCapacityFailureStopsAfterTwoRetries(t *testing.T) {
 	t.Setenv(nddevRetryFileEnv, filepath.Join(directory, "retry.json"))
 	t.Setenv(nddevRetryLockEnv, filepath.Join(directory, "retry.lock"))
 	key := "scale-set:example-entity:17:job:example-job"
+	domainKey := "scale-set:example-entity:17"
 
-	for attempt := 1; attempt <= nddevRetryMaximum; attempt++ {
+	for attempt := 0; attempt < 32; attempt++ {
 		if err := nddevBeforeProviderCreate(context.Background(), key); err != nil {
-			t.Fatalf("attempt %d preflight: %v", attempt, err)
+			t.Fatalf("job capacity attempt %d preflight: %v", attempt, err)
 		}
 		if err := nddevRecordProviderCreateFailure(context.Background(), key, errors.New("provider admission rejected pool: insufficient-memory")); err != nil {
-			t.Fatalf("attempt %d failure: %v", attempt, err)
+			t.Fatalf("job capacity attempt %d failure: %v", attempt, err)
 		}
 		journal, err := nddevReadRetryJournal(os.Getenv(nddevRetryFileEnv))
 		if err != nil {
 			t.Fatal(err)
 		}
+		for _, recordKey := range []string{key, domainKey, nddevCapacityDomainKey} {
+			record := journal.Records[recordKey]
+			if record.LastErrorClass != "capacity" || !record.TerminalUntil.IsZero() {
+				t.Fatalf("job capacity record %q opened a circuit: %#v", recordKey, record)
+			}
+		}
 		record := journal.Records[key]
-		if record.Attempts != attempt || record.LastErrorClass != "capacity" {
-			t.Fatalf("attempt %d record=%#v", attempt, record)
+		if record.Attempts != min(attempt+1, nddevRetryMaximum) {
+			t.Fatalf("job capacity attempts=%d want=%d record=%#v", record.Attempts, min(attempt+1, nddevRetryMaximum), record)
 		}
-		if attempt < nddevRetryMaximum {
-			now = record.NextAllowedAt
-		} else if record.TerminalUntil.IsZero() {
-			t.Fatalf("third capacity failure did not terminate the job record: %#v", record)
+		now = journal.Records[key].NextAllowedAt
+		if domainNext := journal.Records[domainKey].NextAllowedAt; domainNext.After(now) {
+			now = domainNext
 		}
-	}
-	if err := nddevBeforeProviderCreate(context.Background(), key); err == nil {
-		t.Fatal("fourth capacity attempt passed an open job circuit")
+		if sharedNext := journal.Records[nddevCapacityDomainKey].NextAllowedAt; sharedNext.After(now) {
+			now = sharedNext
+		}
 	}
 }
 

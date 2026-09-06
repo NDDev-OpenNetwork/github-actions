@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.89
+derivative_version: v0.2.1-nddev.90
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -93,17 +93,17 @@ patches:
     purpose: Treat a completed workflow run as authoritative over a queued child job so cancelled runs release their exact queue intent and cannot be resurrected during scale-set reconciliation.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: 675e114073f1673b013bb75fd48c2ed48d83ca8d9bd26cbf8d09314f7f599224
-    purpose: Fsync-backed central queue admission where a GitHub-replaced, never-started waiter inherits its exact workflow-job lineage and original queue time instead of starving behind every five-minute UUID replacement, while terminal execution suppression, repository binding, running rehydration and stable phase-entry semantics remain intact, and every intent carries an immutable first-queued stamp that reconciliation cannot move so a wait can be measured at all.
+    sha256: 509de591878bd7b2976233a668ae050032b936db29e0de3bdb23d484ffe93503
+    purpose: Fsync-backed central queue admission that demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, and FIFO-orders by FirstQueuedAt so a rewritten QueueTime cannot starve a GitHub-queued job behind a later UUID on the same label.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: 7670e2e2d5972fee177d3439bcb0f55fb1e39247e03520c4c69fab79135ee1d0
-    purpose: Deterministic terminal waiter lineage transfer and delayed-redelivery suppression, disabled-scale-set isolation, provisional bootstrap, authoritative repository enrichment, orphan-start rehydration, phase-entry and expiry, priority, fairness, width, idempotency, acknowledgement and concurrent-selection tests.
+    sha256: abbcd57768579f464f46f0d410a236f60c695fddc815232ed95002126b025446
+    purpose: Prove expired never-started assigned waiters keep FIFO over later JobAssigned tokens, queued waiters refresh until the execution horizon then drop, FirstQueuedAt wins when QueueTime moves, plus lineage transfer, bootstrap, fairness, width and acknowledgement coverage.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
-    sha256: a12afd7c9a12f52fd62f4f3eda6a88be3477d96d98cd6b03b765ce32ff6bb27e
-    purpose: Fsync-backed schema-v2 instance-to-intent reservations and per-job attempt leases, pruning inactive terminal jobs while retaining active state, and selecting the oldest eligible tenant-qualified retry domain so same-named scale sets cannot alias across forge owners.
+    sha256: f00d9ac5ecc2b79ab0584c56db8890e0ea8e116a608d7ed2ee26f00056bc0f69
+    purpose: Fsync-backed schema-v2 instance-to-intent reservations where job-keyed capacity refusals are cluster backpressure like instance-keyed capacity, never opening a 24-hour circuit, so a packed warm pool cannot strand a GitHub-queued job for a day after three placement failures.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
-    sha256: f523f68a24f5888ce907f1f5aa23cda0008b29b22e74c6583207daca7670f318
-    purpose: Prove unique-owner reconstruction, tenant-qualified shared-capacity ownership, stable per-job budgets, selective terminal pruning, blocked-intent preservation, next-eligible reservation, and fail-closed behavior when every exact intent is blocked or the queue journal is invalid.
+    sha256: 054941a9c78c82164b8d710450246d32e6fff84ada56ca4ebb12751fa9eb1dce
+    purpose: Prove a job-keyed capacity refusal never opens a 24-hour circuit across 32 attempts, unique-owner reconstruction, tenant-qualified shared-capacity ownership, selective terminal pruning, blocked-intent preservation, and fail-closed behavior when every exact intent is blocked.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -118,7 +118,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: c94249b642821e209e747c7117982a7704c7ce1cf413a66efd0dc25b969af168
+  binary_sha256: 8d55695cad2265d0cb2ad8dfaf9d49b88f61b3a9bef54539b7684c926145bf64
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true

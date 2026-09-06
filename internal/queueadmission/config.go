@@ -80,6 +80,8 @@ func (c Config) Validate() error {
 		c.DefaultWeight < 1 || c.DefaultWeight > 100 {
 		return fmt.Errorf("queue admission identity or count limits are invalid")
 	}
+	// 600s is the never-started refresh cadence, not the drop horizon.
+	// GitHub-queued waiters remain represented until ExecutionTTL.
 	if c.QueuedTTLSeconds != 600 || c.AcquiringTTLSeconds != 120 || c.AcquiredTTLSeconds != 600 ||
 		c.ExecutionTTLSeconds != 86400 || c.PriorityAgingSeconds != 300 ||
 		c.MaxRepositorySharePercent != 75 {
