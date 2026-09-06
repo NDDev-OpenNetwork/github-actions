@@ -805,7 +805,9 @@ func nddevProviderErrorClass(err error) string {
 		return "intent"
 	case strings.Contains(message, "provider identity"), strings.Contains(message, "provider-commit"):
 		return "identity"
-	case strings.Contains(message, "timeout"), strings.Contains(message, "deadline"):
+	case strings.Contains(message, "timeout"),
+		strings.Contains(message, "timed out"),
+		strings.Contains(message, "deadline"):
 		return "timeout"
 	default:
 		return "provider"

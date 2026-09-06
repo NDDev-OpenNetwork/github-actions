@@ -78,8 +78,11 @@ func TestNDDevTimeoutClassDoesNotCaptureWarmPreemptionDeadlines(t *testing.T) {
 	if got := nddevProviderErrorClass(errors.New("context deadline exceeded")); got != "timeout" {
 		t.Fatalf("bare deadline = %q, want timeout", got)
 	}
+	if got := nddevProviderErrorClass(errors.New("dial tcp 127.0.0.1:8443: i/o timeout")); got != "timeout" {
+		t.Fatalf("i/o timeout = %q, want timeout", got)
+	}
 	if got := nddevProviderErrorClass(errors.New("provider create timed out contacting Incus")); got != "timeout" {
-		t.Fatalf("provider timeout = %q, want timeout", got)
+		t.Fatalf("timed out = %q, want timeout", got)
 	}
 	wrapped := fmt.Errorf(
 		`preempting warm instance %q: waiting for instance deletion: %w`,
