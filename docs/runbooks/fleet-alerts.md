@@ -117,6 +117,12 @@ gha-fleet reconcile-openobserve-alerts \
   assigned pages still fire because an online drain leaves the listing
   complete (`gha_fleet_visibility_held_out_members` stays 0). A partial
   drain with an undrained sibling still fails platform health.
+- Platform-health pages while warm-pool timers are stopped: inactive (not
+  failed) `gha-warm-pool@*.timer` units are an authorized refill hold, not a
+  platform incident. `gha_fleet_warm_pool_timers_inactive` is the count;
+  `gha_fleet_service_up` for those timers stays 0. Restart the timers after
+  the packed 8 GiB jobs finish, or leave them stopped until that burst
+  completes. A failed timer still pages.
 - Visibility-degraded tickets: a drain-marked member that is offline makes
   the cluster listing partial by design. Inventory gap counts move to their
   `*_unattributable` snapshot fields and a loud listing failure moves to

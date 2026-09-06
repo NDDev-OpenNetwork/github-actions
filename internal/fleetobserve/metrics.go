@@ -119,6 +119,7 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 		metric(&output, "gha_fleet_visibility_degraded", map[string]string{"member": member}, 1)
 	}
 	gauge(&output, "gha_fleet_visibility_drain_marked_members", "Cluster members whose gate carries a drain reason, online or offline. Held-out members are the offline subset; an online drain leaves the listing complete.", float64(len(snapshot.DrainMarkedMembers)))
+	gauge(&output, "gha_fleet_warm_pool_timers_inactive", "Demanded warm-pool timers that are inactive rather than failed. An authorized refill hold does not zero platform health.", float64(snapshot.WarmPoolTimersInactive))
 	labeledGaugeHeader(&output, "gha_fleet_visibility_drain_marked", "One row per drain-marked member, for attribution.")
 	for _, member := range snapshot.DrainMarkedMembers {
 		metric(&output, "gha_fleet_visibility_drain_marked", map[string]string{"member": member}, 1)

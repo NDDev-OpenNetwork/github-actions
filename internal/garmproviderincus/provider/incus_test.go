@@ -143,6 +143,40 @@ type preemptingAdmission struct {
 	reconciled         int
 }
 
+type placementPreemptAdmission struct {
+	allowAllAdmission
+	preempted      []string
+	released       []string
+	markedDeleting []string
+	reconciled     int
+	preemptCalls   int
+}
+
+func (p *placementPreemptAdmission) PreemptForPlacement(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
+	p.preemptCalls++
+	result := provideradmission.AdmissionResult{Decision: admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}}
+	result.PreemptedWarmWorkers = append([]string(nil), p.preempted...)
+	if len(p.preempted) == 0 {
+		result.Decision = admission.Decision{Admitted: false, Reason: admission.ReasonPlacementRefused}
+	}
+	return result, nil
+}
+
+func (p *placementPreemptAdmission) MarkDeleting(_ context.Context, instance string) error {
+	p.markedDeleting = append(p.markedDeleting, instance)
+	return nil
+}
+
+func (p *placementPreemptAdmission) Release(_ context.Context, instance string) error {
+	p.released = append(p.released, instance)
+	return nil
+}
+
+func (p *placementPreemptAdmission) Reconcile(context.Context, InstanceServerInterface) error {
+	p.reconciled++
+	return nil
+}
+
 type noopDiagnostics struct{}
 
 func (noopDiagnostics) Capture(context.Context, InstanceServerInterface, *api.InstanceFull) (workerdiagnostics.Result, error) {
@@ -168,6 +202,9 @@ func (r *recordingDiagnostics) Capture(context.Context, InstanceServerInterface,
 
 func (allowAllAdmission) Admit(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
 	return provideradmission.AdmissionResult{Decision: admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}}, nil
+}
+func (allowAllAdmission) PreemptForPlacement(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
+	return provideradmission.AdmissionResult{}, nil
 }
 
 func (allowAllAdmission) Reconcile(context.Context, InstanceServerInterface) error { return nil }
@@ -227,6 +264,9 @@ func (p *preemptingAdmission) Reconcile(context.Context, InstanceServerInterface
 
 func (w *warmAdmission) Admit(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
 	return provideradmission.AdmissionResult{Decision: admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted}}, nil
+}
+func (w *warmAdmission) PreemptForPlacement(context.Context, InstanceServerInterface, commonParams.BootstrapInstance) (provideradmission.AdmissionResult, error) {
+	return provideradmission.AdmissionResult{}, nil
 }
 func (w *warmAdmission) Reconcile(context.Context, InstanceServerInterface) error { return nil }
 func (w *warmAdmission) MarkCreated(context.Context, string) error                { return nil }
@@ -1217,6 +1257,67 @@ func TestCreateInstanceReleasesColdReservationWhenPostPreemptionAdmissionFails(t
 	require.Equal(t, 1, control.reconciled)
 	require.Equal(t, []string{"runner-test-instance"}, control.released)
 	cli.AssertNotCalled(t, "CreateInstance", mock.Anything)
+	cli.AssertExpectations(t)
+}
+
+func TestCreateInstancePreemptsWarmAfterPlacementRefusal(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	control := &placementPreemptAdmission{preempted: []string{"warm-standard-preempt"}}
+	provider.admission = control
+	prepareCreateMocks(cli, testImageDigest)
+
+	warm := warmInstance("warm-standard-preempt")
+	stopOperation := new(MockOperation)
+	stopOperation.On("WaitContext", mock.Anything).Return(nil).Once()
+	deleteOperation := new(MockOperation)
+	deleteOperation.On("WaitContext", mock.Anything).Return(nil).Once()
+	createOperation := new(MockOperation)
+	createOperation.On("WaitContext", mock.Anything).Return(nil).Twice()
+
+	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
+	cli.On("CreateInstance", mock.Anything).Return(new(MockOperation), errors.New(
+		"Failed instance placement scriptlet: insufficient-memory: no fleet member has room for this worker",
+	)).Once()
+	cli.On("GetInstanceFull", warm.Name).Return(warm, "", nil).Twice()
+	cli.On("UpdateInstanceState", warm.Name, api.InstanceStatePut{Action: "stop", Timeout: -1, Force: true}, "").
+		Return(stopOperation, nil).Once()
+	cli.On("DeleteInstance", warm.Name).Return(deleteOperation, nil).Once()
+	cli.On("CreateInstance", mock.Anything).Return(createOperation, nil).Once()
+	cli.On("UpdateInstanceState", "runner-test-instance", api.InstanceStatePut{Action: "start", Timeout: -1}, "").
+		Return(createOperation, nil).Once()
+	cli.On("GetInstanceFull", "runner-test-instance").Return(ownedInstance("runner-test-instance"), "", nil)
+	expectImageIdentity(cli, "runner-test-instance", testImageDigest)
+
+	got, err := provider.CreateInstance(context.Background(), validBootstrap())
+	require.NoError(t, err)
+	require.Equal(t, "runner-test-instance", got.ProviderID)
+	require.Equal(t, 1, control.preemptCalls)
+	require.Equal(t, []string{warm.Name}, control.markedDeleting)
+	require.Empty(t, control.released)
+	cli.AssertExpectations(t)
+}
+
+func TestCreateInstanceReleasesReservationWhenPlacementRefusalHasNoWarmVictims(t *testing.T) {
+	stubCloudConfig(t)
+	cli := new(MockIncusServer)
+	provider := newTestProvider(cli)
+	control := &placementPreemptAdmission{}
+	provider.admission = control
+	prepareCreateMocks(cli, testImageDigest)
+
+	cli.On("GetInstanceFull", "runner-test-instance").Return((*api.InstanceFull)(nil), "", os.ErrNotExist).Once()
+	cli.On("CreateInstance", mock.Anything).Return(new(MockOperation), errors.New(
+		"Failed instance placement scriptlet: insufficient-memory: no fleet member has room for this worker",
+	)).Once()
+
+	_, err := provider.CreateInstance(context.Background(), validBootstrap())
+	require.ErrorContains(t, err, "insufficient-memory")
+	require.ErrorContains(t, err, "no fleet member has room")
+	require.Equal(t, 1, control.preemptCalls)
+	require.Equal(t, []string{"runner-test-instance"}, control.released)
+	cli.AssertNotCalled(t, "DeleteInstance", mock.Anything)
 	cli.AssertExpectations(t)
 }
 

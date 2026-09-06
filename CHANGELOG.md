@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Preempt unclaimed warm workers when Incus placement refuses a cold create
+  for `insufficient-memory`. Clustered fleet-sum admission can still admit
+  while every member is packed with warm-ready reservations, so the create
+  used to wrap the scriptlet error and loop. The job lease now marks
+  victims, deletes them, and retries launch once; a second refusal releases
+  the reservation as capacity. Same-pool warms are eligible on this path
+  because ClaimWarm already missed them. This is `v0.1.5-nddev.126`.
+
+- Keep platform health up when demanded warm-pool timers are inactive, not
+  failed. An authorized warm drain to free 8 GiB job envelopes was paging
+  `fleet_platform_unhealthy` from four stopped timers while collection
+  errors stayed empty. `gha_fleet_warm_pool_timers_inactive` is the count;
+  a failed timer still zeros health.
+
+- Do not bounce GARM for assigned-without-instance while capacity
+  backpressure is the reason those assigned jobs have no instance. The
+  adapter already filtered shared-capacity rows; Evaluate now also honors
+  `capacity_backpressure` so a leaked assigned row cannot restart the
+  manager during a packed create wave.
+
 - Keep a GitHub-queued job represented after its 600-second assigned TTL.
   Never-started assigned intents demote to queued instead of disappearing,
   queued waiters refresh until the 24-hour execution horizon, and FIFO

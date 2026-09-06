@@ -34,15 +34,16 @@ type AssignedIntent struct {
 }
 
 type Observation struct {
-	ObservedAt      time.Time
-	ActiveIntents   int
-	PendingCreates  []PendingCreate
-	OverdueRetries  []ProviderRetry
-	StaleAssigned   []AssignedIntent
-	ManagerUptime   time.Duration
-	LastRecoveryAt  time.Time
-	HeartbeatAt     time.Time
-	RecoveryRunning bool
+	ObservedAt           time.Time
+	ActiveIntents        int
+	PendingCreates       []PendingCreate
+	OverdueRetries       []ProviderRetry
+	StaleAssigned        []AssignedIntent
+	CapacityBackpressure bool
+	ManagerUptime        time.Duration
+	LastRecoveryAt       time.Time
+	HeartbeatAt          time.Time
+	RecoveryRunning      bool
 }
 
 type Decision struct {
@@ -92,6 +93,9 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	}
 	if !observation.LastRecoveryAt.IsZero() && observation.ObservedAt.Sub(observation.LastRecoveryAt) < policy.Cooldown {
 		return Decision{Reason: "recovery-cooldown", Stuck: stuck}
+	}
+	if staleAssigned && observation.CapacityBackpressure && !overdueRetry {
+		return Decision{Reason: "capacity-deferred-assigned", Stuck: stuck}
 	}
 	reason := "stale-pending-create-attempt-zero"
 	if overdueRetry {

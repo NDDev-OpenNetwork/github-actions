@@ -25,6 +25,7 @@ var runtimeHostname = os.Hostname
 
 type admissionController interface {
 	Admit(context.Context, InstanceServerInterface, params.BootstrapInstance) (provideradmission.AdmissionResult, error)
+	PreemptForPlacement(context.Context, InstanceServerInterface, params.BootstrapInstance) (provideradmission.AdmissionResult, error)
 	Reconcile(context.Context, InstanceServerInterface) error
 	MarkCreated(context.Context, string) error
 	MarkDeleting(context.Context, string) error
@@ -194,9 +195,29 @@ func (n *nddevAdmission) Admit(
 	if pool.Resources.VCPU <= 0 || pool.Resources.MemoryMiB <= 0 || pool.MaxRunning <= 0 {
 		return provideradmission.AdmissionResult{}, fmt.Errorf("pool policy %q has invalid resources", bootstrap.Flavor)
 	}
-	imagePolicy, exists := n.workerImages[bootstrap.Flavor]
+	observed, err := n.observedAllocations(ctx, cli)
+	if err != nil {
+		return provideradmission.AdmissionResult{}, err
+	}
+	host, err := fleetHostState(ctx, cli, n.platform, pool, n.pressurePolicy)
+	if err != nil {
+		return provideradmission.AdmissionResult{}, err
+	}
+	request, err := n.coldRequest(bootstrap)
+	if err != nil {
+		return provideradmission.AdmissionResult{}, err
+	}
+	return n.controller.AdmitPreemptible(ctx, host, observed, request)
+}
+
+func (n *nddevAdmission) PreemptForPlacement(
+	ctx context.Context,
+	cli InstanceServerInterface,
+	bootstrap params.BootstrapInstance,
+) (provideradmission.AdmissionResult, error) {
+	pool, exists := n.platform.Pool(bootstrap.Flavor)
 	if !exists {
-		return provideradmission.AdmissionResult{}, fmt.Errorf("pool %q has no pinned worker image", bootstrap.Flavor)
+		return provideradmission.AdmissionResult{}, fmt.Errorf("pool policy %q does not exist", bootstrap.Flavor)
 	}
 	observed, err := n.observedAllocations(ctx, cli)
 	if err != nil {
@@ -206,7 +227,23 @@ func (n *nddevAdmission) Admit(
 	if err != nil {
 		return provideradmission.AdmissionResult{}, err
 	}
-	return n.controller.AdmitPreemptible(ctx, host, observed, provideradmission.Request{
+	request, err := n.coldRequest(bootstrap)
+	if err != nil {
+		return provideradmission.AdmissionResult{}, err
+	}
+	return n.controller.PreemptForPlacement(ctx, host, observed, request)
+}
+
+func (n *nddevAdmission) coldRequest(bootstrap params.BootstrapInstance) (provideradmission.Request, error) {
+	pool, exists := n.platform.Pool(bootstrap.Flavor)
+	if !exists {
+		return provideradmission.Request{}, fmt.Errorf("pool policy %q does not exist", bootstrap.Flavor)
+	}
+	imagePolicy, exists := n.workerImages[bootstrap.Flavor]
+	if !exists {
+		return provideradmission.Request{}, fmt.Errorf("pool %q has no pinned worker image", bootstrap.Flavor)
+	}
+	return provideradmission.Request{
 		Allocation: provideradmission.Allocation{
 			InstanceName:      bootstrap.Name,
 			ControllerID:      n.controllerID,
@@ -218,7 +255,7 @@ func (n *nddevAdmission) Admit(
 			ImageFingerprint:  imagePolicy.Fingerprint,
 		},
 		QueueIntentAuthorized: true,
-	})
+	}, nil
 }
 
 func (n *nddevAdmission) AdmitWarm(ctx context.Context, cli InstanceServerInterface, flavor, instanceName string) (admission.Decision, error) {

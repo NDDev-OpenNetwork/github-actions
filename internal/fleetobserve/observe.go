@@ -269,6 +269,10 @@ type Snapshot struct {
 	// drain leaves HeldOutMembers empty and DrainMarkedMembers equal to the
 	// reported cluster.
 	DrainMarkedMembers []string `json:"drain_marked_members,omitempty"`
+	// WarmPoolTimersInactive is the count of demanded warm-pool timers that
+	// are inactive rather than failed. Stopping them is an authorized refill
+	// hold and must not zero platform health; failed is still an incident.
+	WarmPoolTimersInactive int `json:"warm_pool_timers_inactive"`
 }
 
 type DiagnosticExportSync struct {
@@ -707,6 +711,10 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snapshot.Incus.OrphanInstances == 0 && snapshot.Incus.MissingInstances == 0 &&
 		!uncoveredFailsHealth
 	for _, service := range snapshot.Services {
+		if inactiveWarmPoolTimer(service) {
+			snapshot.WarmPoolTimersInactive++
+			continue
+		}
 		if !service.Active {
 			snapshot.Healthy = false
 		}
@@ -1046,6 +1054,16 @@ func serviceHealthy(name, state string) bool {
 		return state == "active" || state == "activating" || state == "deactivating" || state == "inactive"
 	}
 	return state == "active"
+}
+
+func inactiveWarmPoolTimer(service ServiceStatus) bool {
+	if service.State != "inactive" {
+		return false
+	}
+	if service.Name == "gha-warm-pool.timer" {
+		return true
+	}
+	return strings.HasPrefix(service.Name, "gha-warm-pool@") && strings.HasSuffix(service.Name, ".timer")
 }
 
 func (c Collector) now() time.Time {

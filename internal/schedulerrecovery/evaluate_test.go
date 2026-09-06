@@ -73,3 +73,18 @@ func TestEvaluateRecoversStaleAssignedIntentDespiteCurrentSiblingHeartbeat(t *te
 		Recover: true, Reason: "stale-assigned-intent-without-instance", Stuck: []string{"intent-skipped"},
 	}, Evaluate(policy, observation))
 }
+
+func TestEvaluateDoesNotRecoverCapacityDeferredAssigned(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 6, 13, 33, 0, 0, time.UTC)
+	policy := Policy{MinimumStuckAge: 90 * time.Second, MinimumUptime: 2 * time.Minute, Cooldown: 10 * time.Minute, HeartbeatStale: time.Minute}
+	observation := Observation{
+		ObservedAt: now, ActiveIntents: 8, ManagerUptime: time.Hour,
+		HeartbeatAt:          now.Add(-10 * time.Second),
+		StaleAssigned:        []AssignedIntent{{ID: "intent-capacity", Age: 2 * time.Minute}},
+		CapacityBackpressure: true,
+	}
+	require.Equal(t, Decision{
+		Reason: "capacity-deferred-assigned", Stuck: []string{"intent-capacity"},
+	}, Evaluate(policy, observation))
+}
