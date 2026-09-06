@@ -1010,7 +1010,7 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	}
 	now := c.nowUTC()
 	migrateLegacyQueueIntentOwnership(&journal, config, now)
-	cleanupExpiredQueueIntents(&journal, now)
+	cleanupExpiredQueueIntents(&journal, config, now)
 	cleanupExpiredTerminalJobs(&journal, now)
 	// A restart can occur after JobAssigned was durably acknowledged but before
 	// the scale-up worker observed its provisional token. Promote from durable
@@ -1295,8 +1295,8 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		if leftRepository.Pass != rightRepository.Pass {
 			return leftRepository.Pass < rightRepository.Pass
 		}
-		if !candidates[left].QueueTime.Equal(candidates[right].QueueTime) {
-			return candidates[left].QueueTime.Before(candidates[right].QueueTime)
+		if leftWait, rightWait := queueWaitSince(candidates[left]), queueWaitSince(candidates[right]); !leftWait.Equal(rightWait) {
+			return leftWait.Before(rightWait)
 		}
 		return candidates[left].Key < candidates[right].Key
 	})
@@ -1331,11 +1331,23 @@ func queueBackgroundInFlight(journal *queueIntentJournal) int {
 }
 
 func effectiveQueuePriority(intent queueIntent, config queueAdmissionConfig, now time.Time) int {
-	if intent.Priority <= 1 || !now.After(intent.QueueTime) {
+	waitSince := queueWaitSince(intent)
+	if intent.Priority <= 1 || !now.After(waitSince) {
 		return intent.Priority
 	}
-	aged := int(now.Sub(intent.QueueTime) / (time.Duration(config.PriorityAgingSeconds) * time.Second))
+	aged := int(now.Sub(waitSince) / (time.Duration(config.PriorityAgingSeconds) * time.Second))
 	return maxQueuePriority(1, intent.Priority-aged)
+}
+
+// queueWaitSince is the FIFO clock. QueueTime is rewritten by authoritative
+// reconciliation from job.CreatedAt, and where that is absent it falls forward
+// to now, so a still-queued waiter can lose its place to a job that arrived
+// later. FirstQueuedAt is written once.
+func queueWaitSince(intent queueIntent) time.Time {
+	if !intent.FirstQueuedAt.IsZero() {
+		return intent.FirstQueuedAt
+	}
+	return intent.QueueTime
 }
 
 func queueInFlight(journal *queueIntentJournal) (int, map[string]int) {
@@ -1479,12 +1491,58 @@ func repositoryPolicy(config queueAdmissionConfig, repository string) queueRepos
 	return queueRepositoryPolicy{Weight: config.DefaultWeight, MaxInFlight: config.DefaultRepositoryLimit}
 }
 
-func cleanupExpiredQueueIntents(journal *queueIntentJournal, now time.Time) {
+func cleanupExpiredQueueIntents(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
 	for key, intent := range journal.Intents {
-		if !intent.ExpiresAt.After(now) {
-			delete(journal.Intents, key)
+		if intent.ExpiresAt.After(now) {
+			continue
+		}
+		if retainNeverStartedQueueIntent(&intent, config, now) {
+			journal.Intents[key] = intent
+			continue
+		}
+		delete(journal.Intents, key)
+	}
+}
+
+// retainNeverStartedQueueIntent keeps a GitHub-queued waiter in the journal
+// after its phase TTL. Deleting it was the skip/refill defect: GitHub still
+// had the job queued, JobAssigned had already been acknowledged, and a later
+// UUID on the same label took the slot. Assigned-without-a-request-id demotes
+// to queued so it stops charging capacity; queued waiters refresh until the
+// execution horizon. Started work and mid-acquire/acquired stalls still drop.
+func retainNeverStartedQueueIntent(intent *queueIntent, config queueAdmissionConfig, now time.Time) bool {
+	if intent == nil || intent.RunnerName != "" || intent.State == queueStateRunning {
+		return false
+	}
+	if intent.FirstQueuedAt.IsZero() {
+		intent.FirstQueuedAt = intent.QueueTime
+		if intent.FirstQueuedAt.IsZero() {
+			intent.FirstQueuedAt = now
 		}
 	}
+	horizon := intent.FirstQueuedAt.Add(time.Duration(config.ExecutionTTLSeconds) * time.Second)
+	if !horizon.After(now) {
+		return false
+	}
+	switch intent.State {
+	case queueStateAssigned:
+		if intent.RunnerRequestID != 0 {
+			return false
+		}
+		intent.State = queueStateQueued
+		intent.StateEnteredAt = now
+		intent.UpdatedAt = now
+	case queueStateQueued:
+		intent.UpdatedAt = now
+	default:
+		return false
+	}
+	next := expiryForState(config, queueStateQueued, now)
+	if next.After(horizon) {
+		next = horizon
+	}
+	intent.ExpiresAt = next
+	return true
 }
 
 func expiryForState(config queueAdmissionConfig, state queueIntentState, now time.Time) time.Time {
@@ -1501,7 +1559,9 @@ func expiryForState(config queueAdmissionConfig, state queueIntentState, now tim
 		// set. It can own a real cold provider create before JobAvailable exists;
 		// measured release/container registration crossed 150 seconds, so the
 		// 120-second API-call horizon expired valid ownership and hid running
-		// work. Use the bounded pre-start horizon, never the execution horizon.
+		// work. Use the bounded pre-start horizon for the capacity charge, never
+		// the execution horizon. Never-started assigned waiters demote to queued
+		// at this TTL instead of disappearing while GitHub still has the job.
 		seconds = config.AcquiredTTLSeconds
 	case queueStateRunning:
 		// Running is the one state that legitimately lasts as long as a job.

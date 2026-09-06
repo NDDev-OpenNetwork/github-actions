@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Keep a GitHub-queued job represented after its 600-second assigned TTL.
+  Never-started assigned intents demote to queued instead of disappearing,
+  queued waiters refresh until the 24-hour execution horizon, and FIFO
+  follows FirstQueuedAt so a rewritten QueueTime cannot skip an older job.
+  A `:job:` capacity refusal is cluster backpressure like an instance
+  refusal and no longer opens a 24-hour create circuit after three packed
+  warm-pool failures. This is GARM `v0.2.1-nddev.90`. Closes the skip/refill
+  class reported as public #406 and #407.
+
 - Release a warm worker's exact memory reservation when placement refuses
   creation. Successful capacity deferrals previously skipped cleanup and
   retained uncreated workers until the admission lease expired. Early

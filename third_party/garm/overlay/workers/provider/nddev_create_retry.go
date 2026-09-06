@@ -330,7 +330,7 @@ func nddevBeforeProviderCreate(ctx context.Context, key string, scaleSetNames ..
 		if record.NextAllowedAt.After(now) {
 			return fmt.Errorf("provider create retry is deferred until %s", record.NextAllowedAt.Format(time.RFC3339))
 		}
-		capacityBackpressure := record.LastErrorClass == "capacity" && !strings.Contains(key, ":job:")
+		capacityBackpressure := record.LastErrorClass == "capacity"
 		if record.Attempts >= nddevRetryMaximum && !capacityBackpressure && record.LastErrorClass != "intent" {
 			record.TerminalUntil = now.Add(nddevRetryExecutionTTL)
 			record.UpdatedAt = now
@@ -365,13 +365,13 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 		if record.LastErrorClass == "capacity" || record.LastErrorClass == "intent" {
 			// Saturation and a canceled job whose pre-AcquireJobs intent has
 			// already disappeared are bounded backpressure, not a broken provider.
-			// Capacity accumulates delay without ever opening a circuit; a completed
-			// provider deletion clears it immediately. Intent cancellation stays on
-			// the short fixed delay because no scarce resource must be awaited.
-			if record.LastErrorClass == "capacity" && strings.Contains(key, ":job:") && record.Attempts >= nddevRetryMaximum {
-				record.NextAllowedAt = now
-				record.TerminalUntil = now.Add(nddevRetryExecutionTTL)
-			} else if record.LastErrorClass == "capacity" {
+			// Capacity, including a job-keyed create that failed to place,
+			// accumulates delay without ever opening a 24h circuit; a completed
+			// provider deletion clears it immediately. Opening TerminalUntil on
+			// a job-keyed capacity refusal stranded GitHub-queued work for a day
+			// after three packed warm-pool refusals. Intent cancellation stays
+			// on the short fixed delay because no scarce resource must be awaited.
+			if record.LastErrorClass == "capacity" {
 				record.NextAllowedAt = now.Add(nddevCapacityRetryDelay(key, record.Attempts))
 				owner := record.Owner
 				if owner == "" {
@@ -384,9 +384,7 @@ func nddevRecordProviderCreateFailure(ctx context.Context, key string, providerE
 				record.Attempts = 1
 				record.NextAllowedAt = now.Add(nddevRetryBase)
 			}
-			if record.LastErrorClass != "capacity" || !strings.Contains(key, ":job:") || record.Attempts < nddevRetryMaximum {
-				record.TerminalUntil = time.Time{}
-			}
+			record.TerminalUntil = time.Time{}
 			journal.Records[key] = record
 			domainKey := nddevRetryDomainKey(key)
 			if domainKey != key {

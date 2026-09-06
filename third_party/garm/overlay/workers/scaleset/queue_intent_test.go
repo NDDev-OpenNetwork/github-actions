@@ -128,6 +128,149 @@ func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
 	}
 }
 
+func TestExpiredNeverStartedAssignedIsDemotedAndKeepsFIFO(t *testing.T) {
+	now := time.Date(2026, 9, 6, 8, 37, 30, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	older := testQueueJob(401, "example-owner", "example-repository", now)
+	older.MessageType = params.MessageTypeJobAssigned
+	older.RunnerRequestID = 0
+	older.RunnerName = ""
+	entity := testQueueEntityForJob(older)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{older}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	newer := testQueueJob(402, "example-owner", "example-repository", now)
+	newer.MessageType = params.MessageTypeJobAssigned
+	newer.RunnerRequestID = 0
+	newer.RunnerName = ""
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{newer}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	olderKey := queueIntentKey(int64(scaleSet.ScaleSetID), older.JobID)
+	newerKey := queueIntentKey(int64(scaleSet.ScaleSetID), newer.JobID)
+	if journal.Intents[olderKey].State != queueStateAssigned {
+		t.Fatalf("older waiter was not admitted: %#v", journal.Intents[olderKey])
+	}
+	if journal.Intents[newerKey].State != queueStateQueued {
+		t.Fatalf("newer waiter consumed the only slot: %#v", journal.Intents[newerKey])
+	}
+	olderFirst := journal.Intents[olderKey].FirstQueuedAt
+	olderQueue := journal.Intents[olderKey].QueueTime
+	now = now.Add(10 * time.Minute)
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	olderIntent, exists := journal.Intents[olderKey]
+	if !exists {
+		t.Fatal("expired never-started assigned waiter was deleted while GitHub still queued it")
+	}
+	if olderIntent.State != queueStateAssigned {
+		t.Fatalf("older waiter lost the slot after expiry: %#v", olderIntent)
+	}
+	if !olderIntent.FirstQueuedAt.Equal(olderFirst) || !olderIntent.QueueTime.Equal(olderQueue) {
+		t.Fatalf("older waiter lost its wait clock: %#v", olderIntent)
+	}
+	if journal.Intents[newerKey].State != queueStateQueued {
+		t.Fatalf("newer waiter skipped the expired original: %#v", journal.Intents[newerKey])
+	}
+}
+
+func TestExpiredQueuedWaiterRefreshesUntilExecutionHorizon(t *testing.T) {
+	now := time.Date(2026, 9, 6, 8, 37, 30, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	running := testQueueJob(501, "example-owner", "example-repository", now)
+	entity := testQueueEntityForJob(running)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{running}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, []params.ScaleSetJobMessage{running}, nil); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	waiter := testQueueJob(502, "example-owner", "example-repository", now)
+	waiter.MessageType = params.MessageTypeJobAssigned
+	waiter.RunnerRequestID = 0
+	waiter.RunnerName = ""
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{waiter}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiterKey := queueIntentKey(int64(scaleSet.ScaleSetID), waiter.JobID)
+	if journal.Intents[waiterKey].State != queueStateQueued {
+		t.Fatalf("waiter was admitted over a running job: %#v", journal.Intents[waiterKey])
+	}
+	firstQueued := journal.Intents[waiterKey].FirstQueuedAt
+	now = now.Add(10 * time.Minute)
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, exists := journal.Intents[waiterKey]
+	if !exists {
+		t.Fatal("queued waiter was dropped at the 600s cadence while GitHub still queued it")
+	}
+	if intent.State != queueStateQueued || !intent.ExpiresAt.After(now) || !intent.FirstQueuedAt.Equal(firstQueued) {
+		t.Fatalf("queued waiter was not refreshed: %#v", intent)
+	}
+	now = firstQueued.Add(24*time.Hour + time.Second)
+	if err := coordinator.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[waiterKey]; exists {
+		t.Fatalf("queued waiter survived the execution horizon: %#v", journal.Intents[waiterKey])
+	}
+}
+
+func TestQueueFIFOUsesFirstQueuedAtWhenQueueTimeMoves(t *testing.T) {
+	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
+	config := queueAdmissionConfig{
+		MaxInFlight: 2, MaxBackgroundInFlight: 2, DefaultRepositoryLimit: 2, DefaultWeight: 1,
+		MaxRepositorySharePercent: 75, PriorityAgingSeconds: 300,
+		ScaleSets:    testQueueScaleSetResourceMap(),
+		Repositories: map[string]queueRepositoryPolicy{},
+	}
+	journal := queueIntentJournal{
+		Intents: map[string]queueIntent{
+			"moved": {
+				Key: "moved", State: queueStateQueued, Repository: "owner/moved",
+				ScaleSetName: "nddev-linux-standard", Priority: 1,
+				QueueTime: now, FirstQueuedAt: now.Add(-15 * time.Minute),
+			},
+			"fresh": {
+				Key: "fresh", State: queueStateQueued, Repository: "owner/fresh",
+				ScaleSetName: "nddev-linux-standard", Priority: 1,
+				QueueTime: now.Add(-time.Minute), FirstQueuedAt: now.Add(-time.Minute),
+			},
+		},
+		Repositories: map[string]queueRepositoryState{},
+	}
+	candidates := eligibleQueueCandidates(&journal, config, map[string]int{}, now)
+	if len(candidates) != 2 || candidates[0].Key != "moved" {
+		t.Fatalf("FIFO followed rewritten QueueTime: %#v", candidates)
+	}
+}
+
 func TestAuthoritativeReconciliationReleasesOneExactIntentIdempotently(t *testing.T) {
 	now := time.Now().UTC()
 	coordinator := testQueueCoordinator(t, &now, nil)
