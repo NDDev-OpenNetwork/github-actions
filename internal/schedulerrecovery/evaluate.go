@@ -65,11 +65,13 @@ func Evaluate(policy Policy, observation Observation) Decision {
 		return Decision{Reason: "no-admitted-demand"}
 	}
 	stuck := make([]string, 0, len(observation.PendingCreates)+len(observation.OverdueRetries)+len(observation.StaleAssigned))
+	pendingStuck := false
 	overdueRetry := false
 	staleAssigned := false
 	for _, pending := range observation.PendingCreates {
 		if pending.CreateAttempt == 0 && pending.Age >= policy.MinimumStuckAge {
 			stuck = append(stuck, pending.ID)
+			pendingStuck = true
 		}
 	}
 	for _, retry := range observation.OverdueRetries {
@@ -89,8 +91,17 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	}
 	slices.Sort(stuck)
 	stuck = slices.Compact(stuck)
-	if len(observation.RestartBlockers) > 0 {
-		return Decision{Reason: "restart-ineligible:" + strings.Join(observation.RestartBlockers, ","), Stuck: stuck}
+	blockers := make([]string, 0, len(observation.RestartBlockers))
+	for _, blocker := range observation.RestartBlockers {
+		// This one scoped blocker preserves established exact-create recovery.
+		// Every unknown code remains a global blocker, not an implicit bypass.
+		if blocker == "assigned-only-active-provider-work" && (pendingStuck || overdueRetry) {
+			continue
+		}
+		blockers = append(blockers, blocker)
+	}
+	if len(blockers) > 0 {
+		return Decision{Reason: "restart-ineligible:" + strings.Join(blockers, ","), Stuck: stuck}
 	}
 	// A process-wide heartbeat proves only that some dispatcher work advanced.
 	// It cannot clear an exact retry that is already overdue: production has
@@ -104,7 +115,7 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	if !observation.LastRecoveryAt.IsZero() && observation.ObservedAt.Sub(observation.LastRecoveryAt) < policy.Cooldown {
 		return Decision{Reason: "recovery-cooldown", Stuck: stuck}
 	}
-	if staleAssigned && observation.CapacityBackpressure && !overdueRetry {
+	if staleAssigned && observation.CapacityBackpressure && !overdueRetry && !pendingStuck {
 		return Decision{Reason: "capacity-deferred-assigned", Stuck: stuck}
 	}
 	reason := "stale-pending-create-attempt-zero"

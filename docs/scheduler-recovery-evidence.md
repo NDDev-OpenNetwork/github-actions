@@ -4,6 +4,11 @@ Recovery eligibility and stalled-work observation are separate. Adapters may
 emit `restart_blockers` as an optional list of bounded reason codes. The evaluator
 retains exact stalled IDs while refusing a manager-wide restart. Reasons contain
 only lowercase ASCII letters, digits and hyphens; at most 16 codes of 96 bytes.
+`assigned-only-active-provider-work` blocks coarse assigned-only recovery while
+preserving the existing aged pending-create and non-capacity-retry paths. All
+other codes, including unknown codes, block every manager-wide restart. This
+preserves existing exact recovery; it is not a new guarantee that manager-wide
+restarts are safe during arbitrary provider activity.
 
 Progress must partition the original attempt exactly into `progressed` and
 `remaining`. Missing, duplicate, overlapping, foreign and empty receipts are
