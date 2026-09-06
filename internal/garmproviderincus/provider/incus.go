@@ -1574,6 +1574,72 @@ func (l *Incus) launchInstance(ctx context.Context, createArgs api.InstancesPost
 	return nil
 }
 
+func (l *Incus) deletePreemptedWarmWorkers(ctx context.Context, warmInstances []string) error {
+	for _, warmInstance := range warmInstances {
+		// The create context may already be near its deadline -- GARM's
+		// attempt lease is 45s and a contended delete wait is a minute.
+		// Using it here aborted the reclaim as "context deadline exceeded",
+		// which the retry journal then classed as timeout and paged.
+		// Diagnostics already detach the same way; the delete budget is the
+		// existing stop-plus-delete wait, not a new timeout.
+		preemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteOperationTimeout+stateOperationTimeout)
+		err := l.DeleteInstance(preemptCtx, warmInstance)
+		cancel()
+		if err != nil {
+			// Name the refusal the way admission already names a full
+			// fleet, so today's GARM retry classifier records capacity
+			// rather than matching "deadline" as timeout.
+			return errors.Wrapf(
+				err,
+				"preempting warm instance %q: insufficient-memory",
+				warmInstance,
+			)
+		}
+	}
+	return nil
+}
+
+func (l *Incus) launchColdInstance(ctx context.Context, args api.InstancesPost, bootstrap commonParams.BootstrapInstance) error {
+	if err := l.launchInstance(ctx, args); err == nil {
+		return nil
+	} else if !isPlacementRefusal(err) {
+		return errors.Wrap(err, "creating instance")
+	}
+	preemption, err := l.admission.PreemptForPlacement(ctx, l.cli, bootstrap)
+	if err != nil {
+		return errors.Wrap(err, "planning placement preemption")
+	}
+	if len(preemption.PreemptedWarmWorkers) == 0 {
+		if releaseErr := l.admission.Release(ctx, bootstrap.Name); releaseErr != nil {
+			return errors.Wrapf(releaseErr, "placement refused pool %q and reservation cleanup failed", bootstrap.Flavor)
+		}
+		return runnerErrors.NewNoPoolsAvailableError(
+			"provider admission rejected pool %q: insufficient-memory: no fleet member has room for this worker",
+			bootstrap.Flavor,
+		)
+	}
+	if err := l.deletePreemptedWarmWorkers(ctx, preemption.PreemptedWarmWorkers); err != nil {
+		return err
+	}
+	if err := l.launchInstance(ctx, args); err != nil {
+		if isPlacementRefusal(err) {
+			if releaseErr := l.admission.Release(ctx, bootstrap.Name); releaseErr != nil {
+				return errors.Wrapf(
+					releaseErr,
+					"placement still refused pool %q after warm preemption and reservation cleanup failed",
+					bootstrap.Flavor,
+				)
+			}
+			return runnerErrors.NewNoPoolsAvailableError(
+				"provider admission rejected pool %q: insufficient-memory: no fleet member has room for this worker",
+				bootstrap.Flavor,
+			)
+		}
+		return errors.Wrap(err, "creating instance")
+	}
+	return nil
+}
+
 // CreateInstance creates a new compute instance in the provider.
 func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams.BootstrapInstance) (result commonParams.ProviderInstance, err error) {
 	ctx, span := otel.Tracer("nddev.drakkars.provider").Start(ctx, "provider.create_instance", trace.WithAttributes(
@@ -1679,26 +1745,8 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 			admissionResult.Decision.Reason,
 		)
 	}
-	for _, warmInstance := range admissionResult.PreemptedWarmWorkers {
-		// The create context may already be near its deadline -- GARM's
-		// attempt lease is 45s and a contended delete wait is a minute.
-		// Using it here aborted the reclaim as "context deadline exceeded",
-		// which the retry journal then classed as timeout and paged.
-		// Diagnostics already detach the same way; the delete budget is the
-		// existing stop-plus-delete wait, not a new timeout.
-		preemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteOperationTimeout+stateOperationTimeout)
-		err := l.DeleteInstance(preemptCtx, warmInstance)
-		cancel()
-		if err != nil {
-			// Name the refusal the way admission already names a full
-			// fleet, so today's GARM retry classifier records capacity
-			// rather than matching "deadline" as timeout.
-			return commonParams.ProviderInstance{}, errors.Wrapf(
-				err,
-				"preempting warm instance %q: insufficient-memory",
-				warmInstance,
-			)
-		}
+	if err := l.deletePreemptedWarmWorkers(ctx, admissionResult.PreemptedWarmWorkers); err != nil {
+		return commonParams.ProviderInstance{}, err
 	}
 	if len(admissionResult.PreemptedWarmWorkers) > 0 {
 		confirmed, err := l.admission.Admit(ctx, l.cli, bootstrapParams)
@@ -1723,8 +1771,8 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 	}
 
 	span.AddEvent("incus.launch_started")
-	if err := l.launchInstance(ctx, args); err != nil {
-		return commonParams.ProviderInstance{}, errors.Wrap(err, "creating instance")
+	if err := l.launchColdInstance(ctx, args, bootstrapParams); err != nil {
+		return commonParams.ProviderInstance{}, err
 	}
 	span.AddEvent("incus.launch_completed")
 	if directJIT {

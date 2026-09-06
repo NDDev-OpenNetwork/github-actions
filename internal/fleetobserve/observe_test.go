@@ -1060,8 +1060,21 @@ func TestFailedWarmReconcilerMakesQueueHostUnhealthy(t *testing.T) {
 		}
 		return idle(ctx, name)
 	}
+	stopped := collector.Collect(context.Background())
+	if !stopped.Healthy {
+		t.Fatalf("stopped warm timer reported unhealthy: %#v", stopped.Services)
+	}
+	if stopped.WarmPoolTimersInactive != 1 {
+		t.Fatalf("stopped warm timer count=%d", stopped.WarmPoolTimersInactive)
+	}
+	collector.Service = func(ctx context.Context, name string) (string, error) {
+		if name == "gha-warm-pool@"+warmPool+".timer" {
+			return "failed", nil
+		}
+		return idle(ctx, name)
+	}
 	if snapshot := collector.Collect(context.Background()); snapshot.Healthy {
-		t.Fatalf("stopped warm timer reported healthy: %#v", snapshot.Services)
+		t.Fatalf("failed warm timer reported healthy: %#v", snapshot.Services)
 	}
 	for _, name := range serviceNamesForConfig(queueConfig) {
 		if strings.HasPrefix(name, "gha-warm-pool@") {

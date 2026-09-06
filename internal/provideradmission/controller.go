@@ -171,7 +171,7 @@ func (c Controller) admit(
 			return err
 		}
 		if !result.Decision.Admitted && allowWarmPreemption && preemptibleReason(result.Decision.Reason) {
-			result.Decision, result.PreemptedWarmWorkers, err = c.planWarmPreemption(host, journal, request)
+			result.Decision, result.PreemptedWarmWorkers, err = c.planWarmPreemption(host, journal, request, false)
 			if err != nil {
 				return err
 			}
@@ -217,6 +217,7 @@ func (c Controller) planWarmPreemption(
 	host admission.HostSnapshot,
 	journal *providerjournal.Journal,
 	request Request,
+	allowSamePool bool,
 ) (admission.Decision, []string, error) {
 	projected := withAllocatedLeases(host, journal.Leases, "")
 	decision, err := admission.Evaluate(projected, c.Policy, admission.Request{
@@ -237,7 +238,8 @@ func (c Controller) planWarmPreemption(
 		preemptibleState := lease.State == providerjournal.StateWarmReady ||
 			(request.QueueIntentAuthorized && lease.State == providerjournal.StateCreated)
 		if !preemptibleState || lease.PreemptedBy != "" ||
-			!strings.HasPrefix(lease.PoolID, "warm/") || lease.PoolName == request.PoolName {
+			!strings.HasPrefix(lease.PoolID, "warm/") ||
+			(!allowSamePool && lease.PoolName == request.PoolName) {
 			continue
 		}
 		candidates = append(candidates, lease)
@@ -275,6 +277,95 @@ func (c Controller) planWarmPreemption(
 
 func preemptibleReason(reason admission.Reason) bool {
 	return reason == admission.ReasonInsufficientCPU || reason == admission.ReasonInsufficientMemory
+}
+
+// PreemptForPlacement marks unclaimed warm-ready leases as victims of an
+// already-admitted job whose Incus placement then found no member with room.
+// Clustered fleet-sum Evaluate can admit while every member is packed with
+// warms; the scriptlet is the per-member truth. Same-pool warms are eligible
+// here because ClaimWarm already missed them. The caller must delete every
+// returned name before retrying launch.
+func (c Controller) PreemptForPlacement(
+	ctx context.Context,
+	host admission.HostSnapshot,
+	observed []Allocation,
+	request Request,
+) (AdmissionResult, error) {
+	if err := c.validate(); err != nil {
+		return AdmissionResult{}, err
+	}
+	if err := validateAllocation(request.Allocation); err != nil {
+		return AdmissionResult{}, fmt.Errorf("validate request: %w", err)
+	}
+	if request.ControllerID != c.ControllerID {
+		return AdmissionResult{}, fmt.Errorf("request controller ID does not match admission controller")
+	}
+	observedByName, err := c.validateObserved(observed)
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+
+	var result AdmissionResult
+	_, err = c.Store.Update(ctx, func(journal *providerjournal.Journal) error {
+		now := c.now()
+		if err := c.reconcile(journal, observedByName, now); err != nil {
+			return err
+		}
+		existing, exists := journal.Leases[request.InstanceName]
+		if !exists {
+			return fmt.Errorf("placement preemption requires an admitted lease for %q", request.InstanceName)
+		}
+		if err := leaseMatches(existing, request.Allocation); err != nil {
+			return err
+		}
+		already := preemptionsFor(journal.Leases, request.InstanceName)
+		if len(already) > 0 {
+			result.Decision = admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted, Pool: request.PoolName}
+			result.PreemptedWarmWorkers = already
+			existing.UpdatedAt = now
+			existing.ExpiresAt = now.Add(c.LeaseTTL)
+			journal.Leases[request.InstanceName] = existing
+			return nil
+		}
+		decision, selected, err := c.planWarmPreemption(host, journal, request, true)
+		if err != nil {
+			return err
+		}
+		if len(selected) == 0 {
+			result.Decision = admission.Decision{
+				Admitted: false,
+				Reason:   admission.ReasonPlacementRefused,
+				Pool:     request.PoolName,
+			}
+			return nil
+		}
+		result.Decision = decision
+		if !result.Decision.Admitted {
+			result.Decision.Admitted = true
+			result.Decision.Reason = admission.ReasonAdmitted
+		}
+		result.PreemptedWarmWorkers = selected
+		existing.UpdatedAt = now
+		existing.ExpiresAt = now.Add(c.LeaseTTL)
+		journal.Leases[request.InstanceName] = existing
+		for _, name := range selected {
+			victim := journal.Leases[name]
+			victim.PreemptedBy = request.InstanceName
+			victim.UpdatedAt = now
+			victim.ExpiresAt = now.Add(c.LeaseTTL)
+			journal.Leases[name] = victim
+		}
+		increment := uint64(len(selected))
+		if ^uint64(0)-journal.WarmPreemptionsTotal < increment {
+			return fmt.Errorf("warm preemption counter overflow")
+		}
+		journal.WarmPreemptionsTotal += increment
+		return nil
+	})
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+	return result, nil
 }
 
 // ClaimWarm atomically binds one GARM job identity to one already observed,

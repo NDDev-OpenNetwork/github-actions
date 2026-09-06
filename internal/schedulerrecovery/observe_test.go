@@ -21,6 +21,11 @@ func TestCommandObserverDecodesStrictSnapshot(t *testing.T) {
 	require.Equal(t, 2, observation.ActiveIntents)
 	require.Equal(t, 10*time.Minute, observation.ManagerUptime)
 	require.Equal(t, 2*time.Minute, observation.PendingCreates[0].Age)
+	require.False(t, observation.CapacityBackpressure)
+
+	capacity, err := (CommandObserver{Argv: []string{command, "-test.run=TestSchedulerRecoveryObserverHelper", "--", "capacity"}, Timeout: 10 * time.Second}).Observe(context.Background())
+	require.NoError(t, err)
+	require.True(t, capacity.CapacityBackpressure)
 }
 
 func TestCommandObserverFailsClosed(t *testing.T) {
@@ -47,6 +52,8 @@ func TestSchedulerRecoveryObserverHelper(t *testing.T) {
 	switch os.Args[separator+1] {
 	case "valid":
 		fmt.Print(`{"observed_at":"2026-08-24T10:00:00Z","active_intents":2,"pending_creates":[{"id":"instance-1","age_nanoseconds":120000000000,"create_attempt":0}],"overdue_provider_retries":[{"id":"retry-1","overdue_age_nanoseconds":120000000000}],"stale_assigned_intents":[{"id":"assigned-1","age_nanoseconds":120000000000}],"manager_uptime_seconds":600,"last_recovery_at":"0001-01-01T00:00:00Z","recovery_running":false}`)
+	case "capacity":
+		fmt.Print(`{"observed_at":"2026-09-06T13:33:00Z","active_intents":8,"pending_creates":[],"overdue_provider_retries":[],"stale_assigned_intents":[{"id":"assigned-1","age_nanoseconds":120000000000}],"capacity_backpressure":true,"manager_uptime_seconds":600,"last_recovery_at":"0001-01-01T00:00:00Z","recovery_running":false}`)
 	case "unknown":
 		fmt.Print(`{"observed_at":"2026-08-24T10:00:00Z","active_intents":1,"manager_uptime_seconds":1,"unexpected":true}`)
 	case "invalid":
