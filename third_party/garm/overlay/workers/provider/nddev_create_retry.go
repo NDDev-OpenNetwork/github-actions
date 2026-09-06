@@ -789,6 +789,16 @@ func nddevProviderErrorClass(err error) string {
 		return "capacity"
 	case strings.Contains(message, "incomplete instance metadata"):
 		return "capacity"
+	// Reclaiming a warm slot is capacity work. The delete wait uses
+	// "context deadline exceeded", and a start still in flight says
+	// "instance is busy running". Both used to match the timeout class
+	// below, which pages and can open a 24-hour circuit after three
+	// attempts, while insufficient-memory on the same create is a ticket.
+	case strings.Contains(message, "preempting warm"),
+		strings.Contains(message, "waiting for instance deletion"),
+		strings.Contains(message, "waiting to start instance deletion"),
+		strings.Contains(message, "instance is busy running"):
+		return "capacity"
 	case strings.Contains(message, "no active pre-acquirejobs"),
 		strings.Contains(message, "instance stopped during canceled create"),
 		strings.Contains(message, "instance is not running"):

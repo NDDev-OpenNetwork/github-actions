@@ -64,10 +64,30 @@ func TestNDDevCapacityClassificationCoversEveryAdmissionAndStorageReason(t *test
 		"io-pressure", "host-unhealthy", "incomplete instance metadata",
 		"project memory limit exceeded", "project disk limit exceeded",
 		"instance-count limit exceeded", "storage high-watermark", "no eligible member",
+		`preempting warm instance "warm-example-standard-aa": insufficient-memory: waiting for instance deletion: context deadline exceeded`,
+		"waiting to start instance deletion: context deadline exceeded",
+		`Failed to create instance delete operation: Instance is busy running a "start" operation`,
 	} {
 		if got := nddevProviderErrorClass(errors.New(message)); got != "capacity" {
 			t.Fatalf("nddevProviderErrorClass(%q) = %q, want capacity", message, got)
 		}
+	}
+}
+
+func TestNDDevTimeoutClassDoesNotCaptureWarmPreemptionDeadlines(t *testing.T) {
+	if got := nddevProviderErrorClass(errors.New("context deadline exceeded")); got != "timeout" {
+		t.Fatalf("bare deadline = %q, want timeout", got)
+	}
+	if got := nddevProviderErrorClass(errors.New("provider create timed out contacting Incus")); got != "timeout" {
+		t.Fatalf("provider timeout = %q, want timeout", got)
+	}
+	wrapped := fmt.Errorf(
+		`preempting warm instance %q: waiting for instance deletion: %w`,
+		"warm-example-standard-aa",
+		context.DeadlineExceeded,
+	)
+	if got := nddevProviderErrorClass(wrapped); got != "capacity" {
+		t.Fatalf("preemption deadline = %q, want capacity", got)
 	}
 }
 

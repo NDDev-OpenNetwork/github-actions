@@ -1680,8 +1680,24 @@ func (l *Incus) CreateInstance(ctx context.Context, bootstrapParams commonParams
 		)
 	}
 	for _, warmInstance := range admissionResult.PreemptedWarmWorkers {
-		if err := l.DeleteInstance(ctx, warmInstance); err != nil {
-			return commonParams.ProviderInstance{}, errors.Wrapf(err, "preempting warm instance %q", warmInstance)
+		// The create context may already be near its deadline -- GARM's
+		// attempt lease is 45s and a contended delete wait is a minute.
+		// Using it here aborted the reclaim as "context deadline exceeded",
+		// which the retry journal then classed as timeout and paged.
+		// Diagnostics already detach the same way; the delete budget is the
+		// existing stop-plus-delete wait, not a new timeout.
+		preemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteOperationTimeout+stateOperationTimeout)
+		err := l.DeleteInstance(preemptCtx, warmInstance)
+		cancel()
+		if err != nil {
+			// Name the refusal the way admission already names a full
+			// fleet, so today's GARM retry classifier records capacity
+			// rather than matching "deadline" as timeout.
+			return commonParams.ProviderInstance{}, errors.Wrapf(
+				err,
+				"preempting warm instance %q: insufficient-memory",
+				warmInstance,
+			)
 		}
 	}
 	if len(admissionResult.PreemptedWarmWorkers) > 0 {
