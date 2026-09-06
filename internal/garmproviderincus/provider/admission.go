@@ -329,6 +329,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 					VCPU: maintenancePool.EffectiveReservation().CPUUnits, CPUAllowanceUnits: maintenancePool.Resources.VCPU,
 					MemoryMiB:        maintenancePool.EffectiveReservation().MemoryMiB,
 					ImageFingerprint: imagePolicy.Fingerprint, State: providerjournal.StateCreated,
+					Location: instance.Location,
 				})
 				continue
 			}
@@ -357,7 +358,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
 				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
 				MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
-				State: lease.State, JobName: instance.Name,
+				State: lease.State, JobName: instance.Name, Location: instance.Location,
 			})
 			continue
 		}
@@ -486,6 +487,7 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			ImageFingerprint:  instance.ExpandedConfig[imageFingerprintKey],
 			State:             state,
 			JobName:           instance.ExpandedConfig[garmJobNameKey],
+			Location:          instance.Location,
 		})
 	}
 	return allocations, nil

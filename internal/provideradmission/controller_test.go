@@ -267,6 +267,151 @@ func TestPreemptForPlacementSelectsWarmsAfterFleetSumAdmit(t *testing.T) {
 	}
 }
 
+func TestPreemptForPlacementFreesRequestMemoryAcrossWarms(t *testing.T) {
+	now := time.Date(2026, time.September, 6, 14, 40, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	first := warmAllocation("warm-standard-a")
+	first.VCPU = 2
+	first.MemoryMiB = 4 * 1024
+	first.Location = "gha-runner-4"
+	second := warmAllocation("warm-standard-b")
+	second.VCPU = 2
+	second.MemoryMiB = 4 * 1024
+	second.Location = "gha-runner-4"
+	host := healthyHost()
+	host.TotalCPUUnits = 64
+	host.TotalMemoryMiB = 128 * 1024
+	host.AvailableMemoryMiB = 128 * 1024
+
+	job := integrationRequest("runner-integration")
+	job.VCPU = 2
+	job.MemoryMiB = 8 * 1024
+	job.QueueIntentAuthorized = true
+	admitted, err := controller.AdmitPreemptible(context.Background(), host, []Allocation{first, second}, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admitted.Decision.Admitted || len(admitted.PreemptedWarmWorkers) != 0 {
+		t.Fatalf("fleet-sum admit should not preempt: %#v", admitted)
+	}
+
+	result, err := controller.PreemptForPlacement(context.Background(), host, []Allocation{first, second}, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Decision.Admitted || len(result.PreemptedWarmWorkers) != 2 {
+		t.Fatalf("placement preemption should free the 8 GiB request, got %#v", result)
+	}
+}
+
+func TestPreemptForPlacementSelectsWarmsOnOneMember(t *testing.T) {
+	now := time.Date(2026, time.September, 6, 15, 10, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	localA := warmAllocation("warm-standard-a")
+	localA.VCPU = 2
+	localA.MemoryMiB = 4 * 1024
+	localA.Location = "gha-runner-4"
+	localB := warmAllocation("warm-standard-b")
+	localB.VCPU = 2
+	localB.MemoryMiB = 4 * 1024
+	localB.Location = "gha-runner-4"
+	other := warmAllocation("warm-standard-c")
+	other.VCPU = 2
+	other.MemoryMiB = 4 * 1024
+	other.Location = "gha-runner-1"
+	host := healthyHost()
+	host.TotalCPUUnits = 64
+	host.TotalMemoryMiB = 128 * 1024
+	host.AvailableMemoryMiB = 128 * 1024
+
+	job := integrationRequest("runner-integration")
+	job.VCPU = 2
+	job.MemoryMiB = 8 * 1024
+	job.QueueIntentAuthorized = true
+	observed := []Allocation{localA, localB, other}
+	admitted, err := controller.AdmitPreemptible(context.Background(), host, observed, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admitted.Decision.Admitted || len(admitted.PreemptedWarmWorkers) != 0 {
+		t.Fatalf("fleet-sum admit should not preempt: %#v", admitted)
+	}
+
+	result, err := controller.PreemptForPlacement(context.Background(), host, observed, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Decision.Admitted || len(result.PreemptedWarmWorkers) != 2 {
+		t.Fatalf("placement preemption=%#v", result)
+	}
+	selected := map[string]struct{}{}
+	for _, name := range result.PreemptedWarmWorkers {
+		selected[name] = struct{}{}
+	}
+	if _, ok := selected[other.InstanceName]; ok {
+		t.Fatalf("scattered preemption onto a packed member: %#v", result.PreemptedWarmWorkers)
+	}
+	if _, ok := selected[localA.InstanceName]; !ok {
+		t.Fatalf("missing same-member warm %q: %#v", localA.InstanceName, result.PreemptedWarmWorkers)
+	}
+	if _, ok := selected[localB.InstanceName]; !ok {
+		t.Fatalf("missing same-member warm %q: %#v", localB.InstanceName, result.PreemptedWarmWorkers)
+	}
+}
+
+func TestPreemptForPlacementAddsWarmsWhenPriorSelectionDoesNotCover(t *testing.T) {
+	now := time.Date(2026, time.September, 6, 15, 12, 0, 0, time.UTC)
+	controller := testController(t, &now)
+	first := warmAllocation("warm-standard-a")
+	first.VCPU = 2
+	first.MemoryMiB = 4 * 1024
+	first.Location = "gha-runner-4"
+	second := warmAllocation("warm-standard-b")
+	second.VCPU = 2
+	second.MemoryMiB = 4 * 1024
+	second.Location = "gha-runner-4"
+	host := healthyHost()
+	host.TotalCPUUnits = 64
+	host.TotalMemoryMiB = 128 * 1024
+	host.AvailableMemoryMiB = 128 * 1024
+
+	job := integrationRequest("runner-integration")
+	job.VCPU = 2
+	job.MemoryMiB = 8 * 1024
+	job.QueueIntentAuthorized = true
+	observed := []Allocation{first, second}
+	if _, err := controller.AdmitPreemptible(context.Background(), host, observed, job); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Store.Update(context.Background(), func(journal *providerjournal.Journal) error {
+		victim := journal.Leases[first.InstanceName]
+		victim.PreemptedBy = job.InstanceName
+		journal.Leases[first.InstanceName] = victim
+		journal.WarmPreemptionsTotal = 1
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := controller.PreemptForPlacement(context.Background(), host, observed, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Decision.Admitted || len(result.PreemptedWarmWorkers) != 2 {
+		t.Fatalf("retry should add the sibling warm, got %#v", result)
+	}
+	journal, err := controller.Store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.WarmPreemptionsTotal != 2 {
+		t.Fatalf("added preemption was not counted: %#v", journal)
+	}
+	if journal.Leases[second.InstanceName].PreemptedBy != job.InstanceName {
+		t.Fatalf("sibling was not marked: %#v", journal.Leases[second.InstanceName])
+	}
+}
+
 func TestPreemptForPlacementSelectsSamePoolWarmAfterClaimMiss(t *testing.T) {
 	now := time.Date(2026, time.September, 6, 13, 5, 0, 0, time.UTC)
 	controller := testController(t, &now)

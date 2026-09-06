@@ -136,11 +136,18 @@ func (r Reader) ReadActive(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	for _, intent := range journal.Intents {
-		if intent.ExpiresAt.After(now) {
-			active = append(active, intent)
-		} else {
+		if !intent.ExpiresAt.After(now) {
 			expired++
+			continue
 		}
+		// A completed or cancelled GitHub job is retained as a lineage marker
+		// so a replacement UUID can inherit FirstQueuedAt. It is not live wait:
+		// counting it as queued paged lifecycle_queued_delivery_stall for hours
+		// after the workflow run had already succeeded or been superseded.
+		if expiry, terminal := journal.TerminalJobs[intent.JobID]; terminal && expiry.After(now) && intent.State != StateRunning {
+			continue
+		}
+		active = append(active, intent)
 	}
 	sort.Slice(active, func(left, right int) bool {
 		if active[left].Priority != active[right].Priority {
