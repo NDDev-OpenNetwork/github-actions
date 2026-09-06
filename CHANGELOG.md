@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Do not count terminal queue lineage as live wait. A completed or cancelled
+  GitHub job is retained so a replacement UUID can inherit FirstQueuedAt, but
+  observer oldest-queued metrics treated those markers as GitHub-queued work.
+  On 2026-09-06 that paged `lifecycle_queued_delivery_stall` for a finished
+  `nddev-linux-fast` schedule and cancelled `linux-release` jobs.
+  `ReadActive` omits non-running terminal intents.
+
+- When Incus placement refuses a cold create, preempt unclaimed warms on one
+  Incus member until their reserved memory covers the request. Fleet-sum
+  Evaluate already admitted, so `.126` stopped after the first 4 GiB warm
+  even when two 4 GiB warms sat on the same 16 GiB member — the only shape
+  that can place an 8 GiB job. A prior selection that does not cover the
+  request adds siblings instead of returning the short list. This is
+  `v0.1.5-nddev.127`.
+
 - Preempt unclaimed warm workers when Incus placement refuses a cold create
   for `insufficient-memory`. Clustered fleet-sum admission can still admit
   while every member is packed with warm-ready reservations, so the create

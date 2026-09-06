@@ -95,6 +95,48 @@ func TestReaderReportsBoundedTerminalTombstones(t *testing.T) {
 	}
 }
 
+func TestReaderOmitsTerminalQueuedLineageFromActiveWait(t *testing.T) {
+	now := time.Date(2026, 9, 6, 14, 54, 0, 0, time.UTC)
+	path := writeFixture(t, `{
+  "schema_version": 6,
+  "generation": 12,
+  "updated_at": "2026-09-06T14:53:00Z",
+  "intents": {
+    "github-scale-set-job:v2:3:54cc2b45-9da5-5dc7-b654-0fa358873863": {
+      "key": "github-scale-set-job:v2:3:54cc2b45-9da5-5dc7-b654-0fa358873863", "scale_set_id": 3,
+      "job_id": "54cc2b45-9da5-5dc7-b654-0fa358873863", "runner_request_id": 0,
+      "scale_set_name": "nddev-linux-fast", "repository": "owner/completed",
+      "workflow_ref": "authoritative-rehydration", "event_name": "schedule",
+      "queue_time": "2026-09-06T10:52:44Z", "first_queued_at": "2026-09-06T10:57:46Z",
+      "state": "queued", "priority": 2, "state_entered_at": "2026-09-06T10:57:46Z",
+      "updated_at": "2026-09-06T14:48:12Z", "expires_at": "2026-09-06T14:58:12Z"
+    },
+    "github-scale-set-job:v2:5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+      "key": "github-scale-set-job:v2:5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "scale_set_id": 5,
+      "job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "runner_request_id": 0,
+      "scale_set_name": "nddev-priority-integration", "repository": "owner/live",
+      "workflow_ref": "owner/live/.github/workflows/ci.yml@refs/heads/main",
+      "event_name": "pull_request", "queue_time": "2026-09-06T14:50:00Z",
+      "first_queued_at": "2026-09-06T14:50:00Z", "state": "queued", "priority": 0,
+      "state_entered_at": "2026-09-06T14:50:00Z", "updated_at": "2026-09-06T14:50:00Z",
+      "expires_at": "2026-09-06T15:00:00Z"
+    }
+  },
+  "repositories": {},
+  "terminal_jobs": {
+    "54cc2b45-9da5-5dc7-b654-0fa358873863": "2026-09-07T10:57:44Z"
+  }
+}`)
+	snapshot, err := (Reader{Path: path, Now: func() time.Time { return now }}).ReadActive(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Stored != 2 || snapshot.TerminalJobs != 1 || len(snapshot.Active) != 1 ||
+		snapshot.Active[0].JobID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+		t.Fatalf("terminal queued lineage leaked into active wait: %#v", snapshot)
+	}
+}
+
 func TestReaderRejectsFinalComponentSymlink(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "real-journal.json")

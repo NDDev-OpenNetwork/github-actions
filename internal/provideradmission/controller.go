@@ -24,6 +24,12 @@ type Allocation struct {
 	// is treated as StateCreated for compatibility with cold workers.
 	State   providerjournal.LeaseState
 	JobName string
+	// Location is the Incus cluster member that currently holds this instance.
+	// It is observed inventory, not a journaled lease field. Placement
+	// preemption uses it to free a hole on one member rather than scattering
+	// 4 GiB warms across a fleet whose 16 GiB members cannot stack two 8 GiB
+	// jobs.
+	Location string
 }
 
 type Request struct {
@@ -171,7 +177,7 @@ func (c Controller) admit(
 			return err
 		}
 		if !result.Decision.Admitted && allowWarmPreemption && preemptibleReason(result.Decision.Reason) {
-			result.Decision, result.PreemptedWarmWorkers, err = c.planWarmPreemption(host, journal, request, false)
+			result.Decision, result.PreemptedWarmWorkers, err = c.planWarmPreemption(host, journal, request, false, 0, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -218,6 +224,9 @@ func (c Controller) planWarmPreemption(
 	journal *providerjournal.Journal,
 	request Request,
 	allowSamePool bool,
+	minFreedMemoryMiB int,
+	locationByInstance map[string]string,
+	preferLocations map[string]struct{},
 ) (admission.Decision, []string, error) {
 	projected := withAllocatedLeases(host, journal.Leases, "")
 	decision, err := admission.Evaluate(projected, c.Policy, admission.Request{
@@ -257,6 +266,26 @@ func (c Controller) planWarmPreemption(
 		return candidates[left].InstanceName < candidates[right].InstanceName
 	})
 
+	if minFreedMemoryMiB > 0 {
+		selected := selectPlacementWarmVictims(candidates, minFreedMemoryMiB, locationByInstance, preferLocations)
+		if len(selected) == 0 {
+			return decision, nil, nil
+		}
+		projected = withAllocatedLeasesExcluding(host, journal.Leases, exclusionSet(selected...))
+		projected.AvailableMemoryMiB = projectedAvailableMemory(host, journal.Leases, selected)
+		decision, err = admission.Evaluate(projected, c.Policy, admission.Request{
+			PoolName: request.PoolName, VCPU: request.VCPU, CPUAllowanceUnits: request.CPUAllowanceUnits, MemoryMiB: request.MemoryMiB,
+		})
+		if err != nil {
+			return admission.Decision{}, nil, err
+		}
+		if !decision.Admitted {
+			decision.Admitted = true
+			decision.Reason = admission.ReasonAdmitted
+		}
+		return decision, selected, nil
+	}
+
 	selected := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		selected = append(selected, candidate.InstanceName)
@@ -275,16 +304,137 @@ func (c Controller) planWarmPreemption(
 	return decision, nil, nil
 }
 
+func selectPlacementWarmVictims(
+	candidates []providerjournal.Lease,
+	minFreedMemoryMiB int,
+	locationByInstance map[string]string,
+	preferLocations map[string]struct{},
+) []string {
+	if minFreedMemoryMiB <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	groups := make(map[string][]providerjournal.Lease, len(candidates))
+	order := make([]string, 0)
+	for _, candidate := range candidates {
+		location := ""
+		if locationByInstance != nil {
+			location = locationByInstance[candidate.InstanceName]
+		}
+		if location == "" {
+			location = "\x00" + candidate.InstanceName
+		}
+		if _, exists := groups[location]; !exists {
+			order = append(order, location)
+		}
+		groups[location] = append(groups[location], candidate)
+	}
+	restricted := len(preferLocations) > 0
+	covering := make([][]string, 0)
+	bestPartial := []string(nil)
+	bestPartialMemory := -1
+	bestPartialLocation := ""
+	considered := 0
+	for _, location := range order {
+		if restricted {
+			if _, preferred := preferLocations[location]; !preferred {
+				continue
+			}
+		}
+		considered++
+		selected := make([]string, 0, len(groups[location]))
+		memory := 0
+		for _, warm := range groups[location] {
+			selected = append(selected, warm.InstanceName)
+			memory += warm.MemoryMiB
+			if memory >= minFreedMemoryMiB {
+				covering = append(covering, append([]string(nil), selected...))
+				break
+			}
+		}
+		if memory < minFreedMemoryMiB && (memory > bestPartialMemory || (memory == bestPartialMemory && location < bestPartialLocation)) {
+			bestPartial = selected
+			bestPartialMemory = memory
+			bestPartialLocation = location
+		}
+	}
+	if restricted && considered == 0 {
+		return selectPlacementWarmVictims(candidates, minFreedMemoryMiB, locationByInstance, nil)
+	}
+	if len(covering) > 0 {
+		sort.Slice(covering, func(left, right int) bool {
+			if len(covering[left]) != len(covering[right]) {
+				return len(covering[left]) < len(covering[right])
+			}
+			leftMemory, rightMemory := 0, 0
+			for _, name := range covering[left] {
+				leftMemory += leaseMemoryByName(candidates, name)
+			}
+			for _, name := range covering[right] {
+				rightMemory += leaseMemoryByName(candidates, name)
+			}
+			if leftMemory != rightMemory {
+				return leftMemory < rightMemory
+			}
+			return covering[left][0] < covering[right][0]
+		})
+		return covering[0]
+	}
+	if restricted {
+		return selectPlacementWarmVictims(candidates, minFreedMemoryMiB, locationByInstance, nil)
+	}
+	return bestPartial
+}
+
+func leaseMemoryByName(leases []providerjournal.Lease, name string) int {
+	for _, lease := range leases {
+		if lease.InstanceName == name {
+			return lease.MemoryMiB
+		}
+	}
+	return 0
+}
+
+func observedLocations(observed []Allocation) map[string]string {
+	locations := make(map[string]string, len(observed))
+	for _, allocation := range observed {
+		if allocation.InstanceName == "" || allocation.Location == "" {
+			continue
+		}
+		locations[allocation.InstanceName] = allocation.Location
+	}
+	return locations
+}
+
+func locationsOf(names []string, locationByInstance map[string]string) map[string]struct{} {
+	preferred := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if location := locationByInstance[name]; location != "" {
+			preferred[location] = struct{}{}
+		}
+	}
+	return preferred
+}
+
+func leasesMemoryMiB(leases map[string]providerjournal.Lease, names []string) int {
+	total := 0
+	for _, name := range names {
+		total += leases[name].MemoryMiB
+	}
+	return total
+}
+
 func preemptibleReason(reason admission.Reason) bool {
 	return reason == admission.ReasonInsufficientCPU || reason == admission.ReasonInsufficientMemory
 }
 
 // PreemptForPlacement marks unclaimed warm-ready leases as victims of an
 // already-admitted job whose Incus placement then found no member with room.
-// Clustered fleet-sum Evaluate can admit while every member is packed with
-// warms; the scriptlet is the per-member truth. Same-pool warms are eligible
-// here because ClaimWarm already missed them. The caller must delete every
-// returned name before retrying launch.
+// Clustered fleet-sum Evaluate can admit while every 16 GiB member is packed
+// with a mix of 8 GiB jobs and 4 GiB warms; the scriptlet is the per-member
+// truth, so victims are chosen on one member until their reserved memory
+// covers the request. Same-pool warms are eligible here because ClaimWarm
+// already missed them. The caller must delete every returned name before
+// retrying launch.
 func (c Controller) PreemptForPlacement(
 	ctx context.Context,
 	host admission.HostSnapshot,
@@ -319,7 +469,9 @@ func (c Controller) PreemptForPlacement(
 			return err
 		}
 		already := preemptionsFor(journal.Leases, request.InstanceName)
-		if len(already) > 0 {
+		locations := observedLocations(observed)
+		alreadyMemoryMiB := leasesMemoryMiB(journal.Leases, already)
+		if len(already) > 0 && alreadyMemoryMiB >= request.MemoryMiB {
 			result.Decision = admission.Decision{Admitted: true, Reason: admission.ReasonAdmitted, Pool: request.PoolName}
 			result.PreemptedWarmWorkers = already
 			existing.UpdatedAt = now
@@ -327,11 +479,17 @@ func (c Controller) PreemptForPlacement(
 			journal.Leases[request.InstanceName] = existing
 			return nil
 		}
-		decision, selected, err := c.planWarmPreemption(host, journal, request, true)
+		remainingMemoryMiB := request.MemoryMiB - alreadyMemoryMiB
+		if remainingMemoryMiB < 1 {
+			remainingMemoryMiB = request.MemoryMiB
+		}
+		decision, selected, err := c.planWarmPreemption(
+			host, journal, request, true, remainingMemoryMiB, locations, locationsOf(already, locations),
+		)
 		if err != nil {
 			return err
 		}
-		if len(selected) == 0 {
+		if len(already) == 0 && len(selected) == 0 {
 			result.Decision = admission.Decision{
 				Admitted: false,
 				Reason:   admission.ReasonPlacementRefused,
@@ -344,7 +502,8 @@ func (c Controller) PreemptForPlacement(
 			result.Decision.Admitted = true
 			result.Decision.Reason = admission.ReasonAdmitted
 		}
-		result.PreemptedWarmWorkers = selected
+		combined := append(append([]string(nil), already...), selected...)
+		result.PreemptedWarmWorkers = combined
 		existing.UpdatedAt = now
 		existing.ExpiresAt = now.Add(c.LeaseTTL)
 		journal.Leases[request.InstanceName] = existing
@@ -356,6 +515,9 @@ func (c Controller) PreemptForPlacement(
 			journal.Leases[name] = victim
 		}
 		increment := uint64(len(selected))
+		if increment == 0 {
+			return nil
+		}
 		if ^uint64(0)-journal.WarmPreemptionsTotal < increment {
 			return fmt.Errorf("warm preemption counter overflow")
 		}
