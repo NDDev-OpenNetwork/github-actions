@@ -59,6 +59,7 @@ type faultExecutor struct {
 	progressed  []string
 	remaining   []string
 	checkpoint  error
+	restart     error
 }
 
 func (executor *faultExecutor) Checkpoint(_ context.Context, _ Attempt) (string, error) {
@@ -72,7 +73,7 @@ func (executor *faultExecutor) RestartDispatcher(_ context.Context, _ Attempt) e
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
 	executor.restarts++
-	return nil
+	return executor.restart
 }
 
 func (executor *faultExecutor) AwaitProgress(_ context.Context, _ Attempt) ([]string, []string, error) {
@@ -116,5 +117,18 @@ func TestRecoverNeverRestartsWithoutCheckpoint(t *testing.T) {
 	require.Zero(t, executor.restarts)
 	require.Empty(t, result.Checkpoint)
 	require.Len(t, store.finished, 1)
+	require.False(t, result.Recovered)
+	require.Equal(t, []string{"instance-1"}, result.Remaining)
+}
+
+func TestRestartFailureRetainsOriginalSubjects(t *testing.T) {
+	store := &memoryAttempts{}
+	executor := &faultExecutor{restart: errors.New("restart timeout")}
+	at := time.Now().UTC()
+	result, err := Recover(context.Background(), at,
+		Decision{Recover: true, Stuck: []string{"instance-1", "instance-2"}}, store, executor, func() time.Time { return at })
+	require.ErrorContains(t, err, "restart dispatcher")
+	require.Equal(t, []string{"instance-1", "instance-2"}, result.Remaining)
+	require.Equal(t, result.Remaining, store.finished[0].Remaining)
 	require.False(t, result.Recovered)
 }

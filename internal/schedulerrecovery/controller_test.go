@@ -57,7 +57,7 @@ func TestControllerRecoversFaultInjectedStoppedDispatcher(t *testing.T) {
 	require.Equal(t, 1, executor.restarts)
 }
 
-func TestControllerReportsHealthyCurrentHeartbeat(t *testing.T) {
+func TestControllerKeepsStalledWorkUnhealthyDuringCurrentHeartbeat(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
 	events := &eventRecorder{}
@@ -71,7 +71,36 @@ func TestControllerReportsHealthyCurrentHeartbeat(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, decision.Recover)
 	require.Equal(t, "dispatcher-heartbeat-current", decision.Reason)
-	require.Equal(t, "healthy", events.events[0].State)
+	require.Equal(t, "unhealthy", events.events[0].State)
+	require.Equal(t, []string{"instance-1"}, events.events[0].Stuck)
+}
+
+func TestControllerSuppressionDoesNotClearIncident(t *testing.T) {
+	at := time.Now().UTC()
+	for _, reason := range []string{"manager-startup-grace", "recovery-cooldown"} {
+		t.Run(reason, func(t *testing.T) {
+			observation := Observation{ObservedAt: at, ActiveIntents: 1, ManagerUptime: time.Hour,
+				StaleAssigned: []AssignedIntent{{ID: "intent-a", Age: time.Hour}}}
+			if reason == "manager-startup-grace" {
+				observation.ManagerUptime = time.Second
+			} else {
+				observation.LastRecoveryAt = at.Add(-time.Second)
+			}
+			events, executor := &eventRecorder{}, &faultExecutor{}
+			controller := Controller{
+				Policy:   Policy{MinimumStuckAge: time.Minute, MinimumUptime: time.Minute, Cooldown: time.Minute, HeartbeatStale: time.Minute},
+				Observer: staticObserver{observation}, Heartbeat: staticHeartbeat{}, Attempts: &memoryAttempts{},
+				Executor: executor, Events: events, Now: func() time.Time { return at },
+			}
+			decision, _, err := controller.Tick(context.Background())
+			require.NoError(t, err)
+			require.False(t, decision.Recover)
+			require.Equal(t, reason, decision.Reason)
+			require.Zero(t, executor.restarts)
+			require.Equal(t, "unhealthy", events.events[0].State)
+			require.Equal(t, []string{"intent-a"}, events.events[0].Stuck)
+		})
+	}
 }
 
 func TestControllerFinishesInterruptedRecoveryAfterRestartProgressed(t *testing.T) {

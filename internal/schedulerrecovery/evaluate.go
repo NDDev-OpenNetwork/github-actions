@@ -1,6 +1,10 @@
 package schedulerrecovery
 
-import "time"
+import (
+	"slices"
+	"strings"
+	"time"
+)
 
 type Policy struct {
 	MinimumStuckAge time.Duration
@@ -40,10 +44,12 @@ type Observation struct {
 	OverdueRetries       []ProviderRetry
 	StaleAssigned        []AssignedIntent
 	CapacityBackpressure bool
-	ManagerUptime        time.Duration
-	LastRecoveryAt       time.Time
-	HeartbeatAt          time.Time
-	RecoveryRunning      bool
+	// RecoveryBlockers preserve stalled identities while a manager-wide restart is unsafe.
+	RecoveryBlockers []string
+	ManagerUptime    time.Duration
+	LastRecoveryAt   time.Time
+	HeartbeatAt      time.Time
+	RecoveryRunning  bool
 }
 
 type Decision struct {
@@ -81,6 +87,11 @@ func Evaluate(policy Policy, observation Observation) Decision {
 	}
 	if len(stuck) == 0 {
 		return Decision{Reason: "no-stale-undispatched-instance"}
+	}
+	if len(observation.RecoveryBlockers) != 0 {
+		blockers := slices.Clone(observation.RecoveryBlockers)
+		slices.Sort(blockers)
+		return Decision{Reason: "recovery-blocked:" + strings.Join(slices.Compact(blockers), ","), Stuck: stuck}
 	}
 	// A process-wide heartbeat proves only that some dispatcher work advanced.
 	// It cannot clear an exact retry that is already overdue: production has

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ type observationOutput struct {
 	ManagerUptimeSeconds int64            `json:"manager_uptime_seconds"`
 	LastRecoveryAt       time.Time        `json:"last_recovery_at"`
 	RecoveryRunning      bool             `json:"recovery_running"`
+	RecoveryBlockers     []string         `json:"recovery_blockers"`
 }
 
 func (observer CommandObserver) Validate() error {
@@ -63,6 +65,14 @@ func (observer CommandObserver) Observe(ctx context.Context) (Observation, error
 	if err := decoder.Decode(&decoded); err != nil {
 		return Observation{}, fmt.Errorf("decode scheduler observation: %w", err)
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return Observation{}, fmt.Errorf("scheduler observation must contain exactly one JSON value")
+	}
+	for _, blocker := range decoded.RecoveryBlockers {
+		if strings.TrimSpace(blocker) == "" || len(blocker) > 128 || strings.ContainsAny(blocker, "\r\n\x00,") {
+			return Observation{}, fmt.Errorf("scheduler observation contains an invalid recovery blocker")
+		}
+	}
 	if decoded.ObservedAt.IsZero() || decoded.ActiveIntents < 0 || decoded.ManagerUptimeSeconds < 0 {
 		return Observation{}, fmt.Errorf("scheduler observation contains invalid values")
 	}
@@ -85,6 +95,7 @@ func (observer CommandObserver) Observe(ctx context.Context) (Observation, error
 		ObservedAt: decoded.ObservedAt, ActiveIntents: decoded.ActiveIntents,
 		PendingCreates: decoded.PendingCreates, OverdueRetries: decoded.OverdueRetries, StaleAssigned: decoded.StaleAssigned,
 		CapacityBackpressure: decoded.CapacityBackpressure,
+		RecoveryBlockers:     decoded.RecoveryBlockers,
 		ManagerUptime:        time.Duration(decoded.ManagerUptimeSeconds) * time.Second,
 		LastRecoveryAt:       decoded.LastRecoveryAt, RecoveryRunning: decoded.RecoveryRunning,
 	}, nil
