@@ -48,6 +48,10 @@ class FeedbackTests(unittest.TestCase):
         evidence = json.loads(body.split("```json\n")[1].split("\n```")[0])
         self.assertEqual(evidence["source"]["run_attempt"], 2)
         self.assertEqual(evidence["source"]["head_sha"], "a" * 40)
+        observed = feedback.dt.datetime.fromisoformat(evidence["observed_at"])
+        self.assertEqual(observed.utcoffset(), feedback.dt.timedelta(0))
+        self.assertEqual(evidence["failure"]["classification"], "unknown")
+        self.assertEqual(evidence["failure"]["reason"], "1 job(s) failed on this exact attempt.")
         self.assertFalse(evidence["blocking"])
         self.assertEqual(evidence["delivery_state"], "unassigned")
         self.assertNotIn("repair_owner", evidence)
@@ -119,6 +123,43 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(feedback.publish(api, REPO, 10, 100, 2, publisher_id=700),
                          {"status": "already-published", "issue_number": 4})
         self.assertEqual(api.posts, [])
+
+    def test_explicit_user_publisher_requires_exact_id_and_type(self):
+        for user, expected in (({"id": 700, "type": "User"}, "already-published"),
+                               ({"id": 701, "type": "User"}, "published"),
+                               ({"id": 700, "type": "Bot"}, "published"),
+                               ({"id": True, "type": "User"}, "published")):
+            with self.subTest(user=user):
+                api = API()
+                api.issues = [{"number": 4, "user": user,
+                               "body": "<!-- ci-feedback:v1:10:100:2 -->\nprevious evidence"}]
+                result = feedback.publish(api, REPO, 10, 100, 2,
+                                          publisher_id=700, publisher_type="User")
+                self.assertEqual(result["status"], expected)
+
+    def test_unknown_publisher_type_fails_before_api_access(self):
+        for value in ("Organization", "user", "", None, []):
+            api = API()
+            with self.assertRaises(ValueError):
+                feedback.publish(api, REPO, 10, 100, 2, publisher_type=value)
+            self.assertEqual(api.calls, [])
+
+    def test_user_publisher_recovers_ambiguous_post_without_second_write(self):
+        api = API()
+        real = api.request
+        writes = []
+        def request(path, data=None):
+            if data is not None:
+                writes.append(data)
+                api.issues = [{"number": 12, "user": {"id": 700, "type": "User"},
+                               "body": "<!-- ci-feedback:v1:10:100:2 -->\npublished"}]
+                raise TimeoutError("POST reply lost")
+            return real(path, data)
+        api.request = request
+        result = feedback.publish(api, REPO, 10, 100, 2,
+                                  publisher_id=700, publisher_type="User")
+        self.assertEqual(result, {"status": "already-published", "issue_number": 12})
+        self.assertEqual(len(writes), 1)
 
     def test_user_authored_marker_cannot_suppress_feedback(self):
         api = API()

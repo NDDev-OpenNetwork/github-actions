@@ -18,7 +18,9 @@ For each failed completed attempt the action reads authoritative API metadata,
 checks repository ID, run ID, attempt and source SHA, then creates one unassigned
 repository-local issue. The body contains a `ci-feedback:v1` marker and JSON
 evidence: repository, workflow/run/attempt/commit, observed job count, failed job
-IDs/links, `blocking: false`, and `delivery_state: unassigned`. Names, arbitrary
+IDs/links, observation time, run creation time, a metadata-derived failure
+reason, `blocking: false`, and `delivery_state: unassigned`. Product versus
+infrastructure classification stays `unknown` until evidence establishes it. Names, arbitrary
 text and raw logs are omitted. Only the first 100 failed-job links are included;
 total and omitted counts are explicit. Remaining exact-attempt jobs are read from
 the API.
@@ -48,10 +50,14 @@ credentials, broad PAT or private runner is needed.
 An issue is durable evidence, not proof that an agent received or executed it.
 `delivery_state: unassigned` is intentional: this publisher does not invent a
 repair owner or start a model session. The repository owner assigns the agent.
-Deduplicate by repository/run/attempt and the configured bot account numeric ID.
+Deduplicate by repository/run/attempt and the configured account numeric ID and type.
 The composite action defaults `publisher-id` to GitHub Actions' bot ID. A custom
 App token must supply its own bot account ID from trusted configuration, never
-from the triggering event or issue body. Neither `type: Bot` nor a `[bot]` login
+from the triggering event or issue body. A trusted private executor may instead
+configure `publisher-type: User` with its exact authorized user ID; the default
+remains `Bot`. The executor must verify its authenticated identity before
+publishing, serialize delivery and keep durable pending events/receipts. This
+option does not grant permissions or broaden an inventory App's read authority. Neither `type: Bot` nor a `[bot]` login
 suffix alone establishes trust. After an ambiguous POST timeout the publisher re-reads
 the durable marker instead of creating a second issue. Commands and manifests
 come from trusted project configuration, never issue text or CI log instructions.
@@ -94,3 +100,7 @@ No live issue delivery or agent acknowledgment is implied by these tests.
 References: GitHub Actions workflow_run security, GITHUB_TOKEN event recursion,
 REST workflow-run attempts, and workflow concurrency documentation. Consult their
 current official docs when modifying event or permission behavior.
+
+The relevant primary API contracts are [issue creation](https://docs.github.com/en/rest/issues/issues#create-an-issue),
+[workflow run attempts](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt)
+and [attempt jobs](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt).
