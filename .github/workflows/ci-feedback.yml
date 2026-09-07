@@ -9,6 +9,11 @@ on:
       run-attempt:
         required: true
         type: string
+      allow-in-progress:
+        description: Report completed failed jobs on an unfinished exact attempt.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -25,8 +30,9 @@ jobs:
     timeout-minutes: 3
     steps:
       # Trusted immutable action code only. No checkout of the triggering PR.
-      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@9c81951b63cc76f19a2da3c2b8f742d8c4dd7081
+      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@5ddc179a5e2cc0cde7e1487a1268d858c2c6d9af # commit:5ddc179a5e2cc0cde7e1487a1268d858c2c6d9af
         with:
           run-id: ${{ inputs.run-id }}
           run-attempt: ${{ inputs.run-attempt }}
+          allow-in-progress: ${{ inputs.allow-in-progress }}
           token: ${{ github.token }}
