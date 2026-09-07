@@ -3,6 +3,28 @@
 Every fleet alert is symptom-oriented. Confirm the exact metric and correlated
 queue intent, GitHub job, provider lease and Incus instance before recovery.
 
+For queue and lifecycle age alerts, `observed` is seconds, not a job or runner
+count. The notification's `since` value is the alert observation timestamp;
+use the exact journal identity and its first-queued/state-entry timestamps to
+reconstruct the wait. A lower aggregate maximum can mean that one job advanced
+or was cancelled while other work remains stalled. Check its actual outcome.
+
+A REST workflow job can remain queued while the scale-set API reports no jobs
+assigned to that scale set. Preserve both observations. GARM confirms the
+scale-set API's current `statistics.TotalAssignedJobs` before creating a new
+JIT registration, bounded by local admission and the configured maximum. An
+old local `JobAssigned` record is a reason to reconcile; it is not independent
+proof of dispatchable demand. Conversely, an old persisted zero must not block
+an authoritative read that could show new demand. GitHub documents this
+distinction in the [scale-set client autoscaling contract](https://github.com/actions/scaleset#autoscaling).
+
+Compare a start with its completion in the same message batch when diagnosing
+fast jobs. Completion is terminal even if no intermediate running observation
+was captured. Never interpret a retained terminal record, a refreshed admission
+TTL, a normal process heartbeat or a quieter alert as proof that the exact job
+started. The confirmed-demand guard does not cancel or rerun those jobs, delete
+online runners, repair a lost upstream assignment, or prove runtime recovery.
+
 OpenTelemetry collects and transforms every fleet signal, OTLP/HTTP transports
 it, and OpenObserve stores, queries, dashboards and alerts it. PromQL in this
 contract is OpenObserve's query syntax; no Prometheus server, agent,

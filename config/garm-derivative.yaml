@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.91
+derivative_version: v0.2.1-nddev.92
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -93,20 +93,29 @@ patches:
     purpose: Treat a completed workflow run as authoritative over a queued child job so cancelled runs release their exact queue intent and cannot be resurrected during scale-set reconciliation.
   - path: third_party/garm/patches/0029-scale-up-from-admitted-intent.patch
     sha256: e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d
-    purpose: Scale up from durable admitted queue ownership capped by MaxRunners, not GitHub DesiredRunnerCount. Desired drops to zero after a sibling runner is deleted while JobAssigned waiters still need a runner, which is the assigned-without-instance stall.
+    purpose: Enter demand reconciliation from durable admitted ownership even when the persisted GitHub count is zero; the later confirmed-demand patch gates actual JIT registration.
+  - path: third_party/garm/patches/0030-confirm-live-scale-set-demand.patch
+    sha256: 102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497
+    purpose: Confirm current GitHub scale-set demand with a bounded read before JIT registration, preserving admission limits and queued identities while rejecting stale local-only demand.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: b20c6261ad7896ae3ca56befb64fefb5cd565322d77976af2135ca9e386643f1
-    purpose: Fsync-backed central queue admission that scales up from admitted ownership when GitHub desired is zero, demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, and FIFO-orders by FirstQueuedAt so a rewritten QueueTime cannot starve a GitHub-queued job behind a later UUID on the same label.
+    sha256: be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7
+    purpose: Fsync-backed central queue admission that excludes terminal capacity, gives completion precedence in fast start/complete batches, requests fresh demand when persisted desired is zero, demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, and FIFO-orders by FirstQueuedAt so a rewritten QueueTime cannot starve a GitHub-queued job behind a later UUID on the same label.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: a060182f2105307c265e6d8c8064bb4850f21af465bcbeaae3502f2a1360795b
-    purpose: Prove scale-up from an admitted waiter when GitHub desired is zero, expired never-started assigned waiters keep FIFO over later JobAssigned tokens, queued waiters refresh until the execution horizon then drop, FirstQueuedAt wins when QueueTime moves, plus lineage transfer, bootstrap, fairness, width and acknowledgement coverage.
+    sha256: e4680119fd004f56db9801583de3781e70597b1a0f7c79eee9edd7cb95d80cdf
+    purpose: Prove completed batched execution cannot retain running capacity, an admitted waiter requests reconciliation when persisted desired is zero, expired never-started assigned waiters keep FIFO over later JobAssigned tokens, queued waiters refresh until the execution horizon then drop, FirstQueuedAt wins when QueueTime moves, plus lineage transfer, bootstrap, fairness, width and acknowledgement coverage.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219
     purpose: Fsync-backed schema-v2 instance-to-intent reservations that bind a pre-job create to a queued non-terminal waiter when no assigned intent exists yet, skip terminal lineage from active inventory, and treat job-keyed capacity refusals as cluster backpressure that never opens a 24-hour circuit.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry_test.go
     sha256: c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff
     purpose: Prove a pre-job create binds the live queued waiter rather than terminal lineage, unique-owner reconstruction, tenant-qualified shared-capacity ownership, selective terminal pruning, blocked-intent preservation, and fail-closed behavior when every exact intent is blocked.
+  - path: third_party/garm/overlay/workers/scaleset/confirmed_demand.go
+    sha256: 5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458
+    purpose: Bound each new JIT registration by current GitHub demand with a five-second request deadline and thirty-second negative/error backoff; preserve existing jobs and workers.
+  - path: third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go
+    sha256: 32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8
+    purpose: Prove fresh zero demand prevents allocation, stale persisted zero can recover against fresh positive demand, positive observations are not reused, and missing, mismatched or unavailable evidence fails closed.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -121,7 +130,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: f57cf8d0860745106d21b38cfa097f284b710906ea6d8303b3be4fd913b99d97
+  binary_sha256: c112777344debf7e9c0b82524b6de381872ff6576e700cc4c4469b136770b560
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true
