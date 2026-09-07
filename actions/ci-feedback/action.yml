@@ -2,11 +2,14 @@ name: CI feedback
 description: Publish exact-attempt background CI evidence to a repository-local repair issue.
 inputs:
   run-id:
-    description: Completed GitHub Actions run ID in the caller repository.
+    description: GitHub Actions run ID in the caller repository; unfinished runs require allow-in-progress.
     required: true
   run-attempt:
-    description: Exact completed run attempt, never implicitly the latest attempt.
+    description: Exact run attempt, never implicitly the latest attempt.
     required: true
+  allow-in-progress:
+    description: Explicitly report completed failed jobs on an unfinished exact attempt; never treats pending as success.
+    default: 'false'
   token:
     description: Repository token with actions read and issues write permissions.
     required: true
@@ -25,6 +28,7 @@ runs:
         FEEDBACK_ACTION_PATH: ${{ github.action_path }}
         FEEDBACK_RUN_ID: ${{ inputs.run-id }}
         FEEDBACK_RUN_ATTEMPT: ${{ inputs.run-attempt }}
+        FEEDBACK_ALLOW_IN_PROGRESS: ${{ inputs.allow-in-progress }}
         FEEDBACK_PUBLISHER_ID: ${{ inputs.publisher-id }}
         FEEDBACK_PUBLISHER_TYPE: ${{ inputs.publisher-type }}
         GH_TOKEN: ${{ inputs.token }}

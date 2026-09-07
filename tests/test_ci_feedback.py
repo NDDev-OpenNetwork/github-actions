@@ -4,6 +4,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import urllib.parse
 import unittest
 from unittest import mock
 
@@ -33,13 +34,111 @@ class API:
         if "/issues?" in path:
             return self.issues
         if "/jobs?" in path:
-            return {"jobs": self.jobs, "total_count": len(self.jobs)}
+            page = int(urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)["page"][0])
+            return {"jobs": self.jobs[(page - 1) * 100:page * 100], "total_count": len(self.jobs)}
         return self.run
 
 
 class FeedbackTests(unittest.TestCase):
     def publish(self, api):
         return feedback.publish(api, REPO, 10, 100, 2)
+
+    def early(self, api):
+        return feedback.publish(api, REPO, 10, 100, 2, allow_in_progress=True)
+
+    def active_api(self):
+        api = API()
+        api.run.update(status="in_progress", conclusion=None)
+        api.jobs[0].update(status="completed", run_attempt=2, head_sha="a" * 40)
+        api.jobs.append({"id": 102, "run_id": 100, "status": "queued", "conclusion": None})
+        return api
+
+    def test_early_failure_is_a_dated_unfinished_attempt_observation(self):
+        api = self.active_api()
+        result = self.early(api)
+        self.assertEqual(result, {"status": "published", "issue_number": 1,
+                                 "attempt_complete": False, "run_status": "in_progress",
+                                 "run_conclusion": None})
+        body = api.posts[0]["body"]
+        evidence = json.loads(body.split("```json\n")[1].split("\n```")[0])
+        self.assertFalse(evidence["attempt_complete"])
+        self.assertEqual(evidence["run_status"], "in_progress")
+        self.assertIsNone(evidence["conclusion"])
+        self.assertEqual(evidence["failed_jobs_total"], 1)
+        self.assertEqual(evidence["jobs_observed"], 2)
+        self.assertIn("workflow is unfinished", body)
+        self.assertNotIn("untrusted $(payload)", body)
+        self.assertEqual(evidence["source"]["run_attempt"], 2)
+
+    def test_active_failure_requires_explicit_opt_in(self):
+        api = self.active_api()
+        with self.assertRaises(RuntimeError):
+            self.publish(api)
+        self.assertEqual(api.posts, [])
+        for flag in ("true", 1, None, []):
+            with self.assertRaises(ValueError):
+                feedback.publish(api, REPO, 10, 100, 2, allow_in_progress=flag)
+
+    def test_active_without_failed_jobs_stays_pending_not_success(self):
+        for status in feedback.ACTIVE_STATUSES:
+            api = self.active_api()
+            api.run["status"] = status
+            api.jobs = api.jobs[1:]
+            result = self.early(api)
+            self.assertEqual(result["status"], "pending")
+            self.assertFalse(result["attempt_complete"])
+            self.assertIsNone(result["run_conclusion"])
+            self.assertEqual(api.posts, [])
+
+    def test_early_refuses_uncompleted_failed_job_and_conflicting_identity(self):
+        for updates in ({"status": "in_progress"}, {"status": None},
+                        {"run_attempt": 1}, {"head_sha": "b" * 40}):
+            api = self.active_api()
+            api.jobs[0].update(updates)
+            with self.assertRaises((ValueError, RuntimeError)):
+                self.early(api)
+            self.assertEqual(api.posts, [])
+
+    def test_early_refuses_unknown_run_state_or_nonterminal_final_conclusion(self):
+        for updates in ({"status": "unknown"}, {"status": None}, {"status": []},
+                        {"conclusion": "failure"}, {"conclusion": {}}):
+            api = self.active_api()
+            api.run.update(updates)
+            with self.assertRaises(RuntimeError):
+                self.early(api)
+            self.assertEqual(api.posts, [])
+
+    def test_early_then_completed_reuses_one_issue_and_reports_terminal_observation(self):
+        api = self.active_api()
+        first = self.early(api)
+        self.assertFalse(first["attempt_complete"])
+        original_body = api.posts[0]["body"]
+        api.issues = [{"number": 1, "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"},
+                       "body": original_body}]
+        api.run.update(status="completed", conclusion="cancelled")
+        api.jobs[1].update(status="completed", conclusion="cancelled")
+        final = self.early(api)
+        self.assertEqual(final["status"], "already-published")
+        self.assertTrue(final["attempt_complete"])
+        self.assertEqual(final["run_conclusion"], "cancelled")
+        self.assertEqual(len(api.posts), 1)
+        self.assertEqual(api.issues[0]["body"], original_body)
+
+    def test_terminal_observation_metadata_is_explicit_in_early_mode(self):
+        api = API()
+        api.run["conclusion"] = "success"
+        result = self.early(api)
+        self.assertEqual(result["status"], "not-a-failure")
+        self.assertTrue(result["attempt_complete"])
+        self.assertEqual(result["run_conclusion"], "success")
+        self.assertEqual(api.posts, [])
+
+    def test_early_input_boolean_parser_is_exact(self):
+        self.assertTrue(feedback.early_mode("true"))
+        self.assertFalse(feedback.early_mode("false"))
+        for value in ("True", "1", "", " false "):
+            with self.assertRaises(ValueError):
+                feedback.early_mode(value)
 
     def test_failure_is_exact_and_has_no_project_text(self):
         api = API()

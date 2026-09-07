@@ -7,8 +7,9 @@ merge/deploy requirements without changing their outcome to success.
 
 ## Interface
 
-The reusable workflow `ci-feedback.yml` accepts the completed run ID and exact
-attempt. It executes an immutable public composite action on a standard hosted
+The reusable workflow `ci-feedback.yml` accepts a run ID and exact attempt.
+Completed attempts are the default; unfinished observation is an explicit option.
+It executes an immutable public composite action on a standard hosted
 runner. No project checkout, PR script, artifact, cache, log or title is executed.
 The token only needs repository Actions read and Issues write. Private callers
 publish their evidence in their own repository, never in this public module.
@@ -31,6 +32,36 @@ does not. A missing or unknown result is not converted to success. A run-level
 failure with zero jobs is still reported. Evidence collection/publishing failure
 leaves this reporter red; it does not mutate the originating run or block
 application deploy.
+
+## Early job failure observation
+
+Set the composite action's `allow-in-progress: 'true'`, the reusable workflow's
+boolean `allow-in-progress: true`, or the Python publisher's
+`allow_in_progress=True` only in a trusted reporter. This enables observation
+of an exact unfinished attempt through GitHub's attempt-specific jobs endpoint.
+It creates an issue only when a job is explicitly `completed` with a failing
+conclusion. A queued job, an unfinished job, or a missing final run conclusion
+is never treated as a failure or success by itself.
+
+Early evidence records `run_status`, `attempt_complete: false` and a null run
+conclusion. It is a dated failure snapshot; its observed job count and failure
+list do not claim to include jobs that finish later. The attempt marker is the
+same as for terminal delivery, so completion or cancellation cannot create a
+second issue for that attempt. The publisher preserves the original issue and
+any human edits; it does not rewrite that snapshot to claim a final outcome.
+
+In early mode every Python return includes `attempt_complete`, `run_status`
+and `run_conclusion`. An unfinished attempt with no failed jobs returns
+`status: pending`, never `not-a-failure`. Polling executors must keep every
+unfinished attempt pending even after `published` or `already-published`, and
+record terminal receipts only after an explicit `attempt_complete: true`.
+The final observed status belongs in that receipt. The exact-attempt link in
+the issue provides subsequent authoritative job outcomes. A fresh rerun has
+its own attempt key and is never substituted for the original.
+
+This option does not itself schedule polling or add an event subscription.
+Completed `workflow_run` delivery stays supported; an independently configured
+reconciler is responsible for observing early failures and missed events.
 
 ## Deduplication and bounded work
 
@@ -95,6 +126,9 @@ Tests execute the production publisher with API fixtures. They cover exact-attem
 binding, unassigned delivery, cancelled runs that already failed, duplicate
 delivery including App bots, lost POST replies, spoofed markers, incorrect
 identities, partial pagination, bounded large failure evidence and token routing.
+Early-mode cases cover completed failed jobs beside unfinished work, explicit
+opt-in, no-failure pending observations, invalid run/job states, foreign attempts
+and source commits, and one durable issue across completion or cancellation.
 No live issue delivery or agent acknowledgment is implied by these tests.
 
 References: GitHub Actions workflow_run security, GITHUB_TOKEN event recursion,
