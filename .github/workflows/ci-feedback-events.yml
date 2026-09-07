@@ -1,0 +1,18 @@
+name: CI feedback
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  feedback:
+    if: ${{ contains(fromJSON('["failure","timed_out","action_required","stale","startup_failure","cancelled"]'), github.event.workflow_run.conclusion) }}
+    uses: ./.github/workflows/ci-feedback.yml
+    with:
+      run-id: ${{ format('{0}', github.event.workflow_run.id) }}
+      run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}

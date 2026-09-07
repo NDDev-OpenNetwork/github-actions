@@ -1,0 +1,32 @@
+name: Reusable CI feedback
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        required: true
+        type: string
+      run-attempt:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: ci-feedback-${{ github.repository_id }}-${{ inputs.run-id }}-${{ inputs.run-attempt }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Publish unassigned CI evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # Trusted immutable action code only. No checkout of the triggering PR.
+      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@5e10c678cda0d0510517ee0e443882ec54e56998
+        with:
+          run-id: ${{ inputs.run-id }}
+          run-attempt: ${{ inputs.run-attempt }}
+          token: ${{ github.token }}
