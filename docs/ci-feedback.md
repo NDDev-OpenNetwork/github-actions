@@ -66,9 +66,13 @@ agent scheduler.
 ## Adoption
 
 Add a workflow_run caller on the default branch, scoped to actual verification
-workflow names; do not subscribe to the feedback workflow itself. Pin the reusable
-workflow to the reviewed immutable commit. Grant actions: read and issues: write
-in the caller. Its own check is advisory and must not become a deploy prerequisite.
+workflow names; do not subscribe to the feedback workflow itself. Include
+`cancelled` in the conclusion filter so already-failed jobs on a cancelled or
+superseded run still reach the publisher; `publish()` creates no issue for a
+clean cancel. The in-repo example is `.github/workflows/ci-feedback-events.yml`.
+Pin the reusable workflow to the reviewed immutable commit. Grant actions: read
+and issues: write in the caller. Its own check is advisory and must not become a
+deploy prerequisite.
 
 Latest-only cancellation applies to stateless PR verification. In-flight deploy,
 migration and other stateful apply runs retain their own serialization policy.

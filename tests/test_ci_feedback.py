@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 import pathlib
+import re
 import unittest
 from unittest import mock
 
@@ -192,6 +193,19 @@ class FeedbackTests(unittest.TestCase):
         for value in ("../repo", "org/..", "org/repo/extra", "org/repo?token=x"):
             with self.assertRaises(ValueError):
                 feedback.repository_name(value)
+
+    def test_workflow_run_caller_invokes_publisher_on_cancelled(self):
+        text = pathlib.Path(__file__).resolve().parents[1].joinpath(
+            ".github/workflows/ci-feedback-events.yml").read_text()
+        match = re.search(r"fromJSON\('(\[[^\]]+\])'\)", text)
+        self.assertIsNotNone(match, "shipped workflow_run caller lost its conclusion filter")
+        conclusions = json.loads(match.group(1))
+        for value in ("failure", "timed_out", "action_required", "stale",
+                      "startup_failure", "cancelled"):
+            self.assertIn(value, conclusions)
+        for value in ("success", "neutral", "skipped"):
+            self.assertNotIn(value, conclusions)
+        self.assertIn("uses: ./.github/workflows/ci-feedback.yml", text)
 
 
 if __name__ == "__main__":
