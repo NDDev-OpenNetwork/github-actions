@@ -100,6 +100,7 @@ type RuntimeContract struct {
 	AuthoritativeRepositoryBinding           bool   `json:"authoritative_repository_binding" yaml:"authoritative_repository_binding"`
 	AuthoritativeRunningRepositoryBinding    bool   `json:"authoritative_running_repository_binding" yaml:"authoritative_running_repository_binding"`
 	AuthoritativeIdleOfflineRunnerReaping    bool   `json:"authoritative_idle_offline_runner_reaping" yaml:"authoritative_idle_offline_runner_reaping"`
+	AuthoritativeIdleOnlineRunnerRetirement  bool   `json:"authoritative_idle_online_runner_retirement" yaml:"authoritative_idle_online_runner_retirement"`
 	AuthoritativeAccessRefusalBackoffSeconds int    `json:"authoritative_access_refusal_backoff_seconds" yaml:"authoritative_access_refusal_backoff_seconds"`
 	JobStartedRunnerIdentity                 bool   `json:"job_started_runner_identity" yaml:"job_started_runner_identity"`
 	JobAvailableCorrelationBinding           bool   `json:"job_available_correlation_binding" yaml:"job_available_correlation_binding"`
