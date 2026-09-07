@@ -419,6 +419,9 @@ Versioning.
 
 ## [Unreleased]
 
+- Include CodeQL in background CI feedback and limit issue-write permission
+  to the publisher job.
+
 ### Added
 
 - Added autonomous vanished-runner recovery with exact GitHub run
