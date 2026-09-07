@@ -1,17 +1,24 @@
 name: CI feedback
 
 on:
-  workflow_run:
-    workflows: [CI]
+  # Trusted publisher reads completed-run metadata only; source-run code and
+  # artifacts are never executed. Its code is fixed by the reviewed caller/ref.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["CI", "codeql"]
     types: [completed]
 
-permissions:
-  actions: read
-  issues: write
+permissions: {}
+
+concurrency:
+  group: ci-feedback-events-${{ github.repository_id }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   feedback:
     if: ${{ contains(fromJSON('["failure","timed_out","action_required","stale","startup_failure","cancelled"]'), github.event.workflow_run.conclusion) }}
+    permissions:
+      actions: read # Read exact completed run and job metadata.
+      issues: write # Publish bounded failure evidence in this repository.
     uses: ./.github/workflows/ci-feedback.yml
     with:
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
