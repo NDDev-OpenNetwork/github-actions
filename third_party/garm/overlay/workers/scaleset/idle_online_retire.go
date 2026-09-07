@@ -409,15 +409,25 @@ func (w *Worker) retireExcessIdleCapacity() error {
 		if ok := locking.TryLock(runner.Name, w.consumerID); !ok {
 			continue
 		}
-		defer locking.Unlock(runner.Name, false)
+		lockedName := runner.Name
+		unlockRunner := func() {
+			if lockedName == "" {
+				return
+			}
+			locking.Unlock(lockedName, false)
+			lockedName = ""
+		}
 		latest := w.liveMessageDemand()
 		if !latest.unchangedIdleZero(demand, time.Now().UTC()) {
+			unlockRunner()
 			w.idleRetire.forget(runner.AgentID)
 			slog.InfoContext(w.ctx, "idle retirement skipped; live message demand changed before removal",
 				"runner_name", runner.Name, "agent_id", runner.AgentID)
 			continue
 		}
-		if err := w.removeIdleRunnerAfterConfirmation(cli, runner); err != nil {
+		err = w.removeIdleRunnerAfterConfirmation(cli, runner)
+		unlockRunner()
+		if err != nil {
 			w.idleRetire.forget(runner.AgentID)
 			return err
 		}

@@ -311,10 +311,10 @@ index 0cc6526..e287e3e 100644
  	HandleJobsStarted(jobs []params.ScaleSetJobMessage) error
 diff --git a/workers/scaleset/listener_session_test.go b/workers/scaleset/listener_session_test.go
 new file mode 100644
-index 0000000..35e4763
+index 0000000..d4ae347
 --- /dev/null
 +++ b/workers/scaleset/listener_session_test.go
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,136 @@
 +//go:build testing
 +
 +package scaleset
@@ -410,6 +410,11 @@ index 0000000..35e4763
 +	}
 +	if listener.IsRunning() || listener.messageSession != nil {
 +		t.Fatal("failed Start left a live listener session")
++	}
++	select {
++	case <-listener.listenerCtx.Done():
++	default:
++		t.Fatal("failed Start leaked the listener context")
 +	}
 +}
 +
@@ -933,7 +938,7 @@ index 449180e..ffe6a46 100644
 +	return w.liveDemand
 +}
 diff --git a/workers/scaleset/scaleset_listener.go b/workers/scaleset/scaleset_listener.go
-index a689316..2c348e6 100644
+index a689316..be8910d 100644
 --- a/workers/scaleset/scaleset_listener.go
 +++ b/workers/scaleset/scaleset_listener.go
 @@ -59,6 +59,7 @@ type scaleSetListener struct {
@@ -944,32 +949,56 @@ index a689316..2c348e6 100644
  	// intentCoordinator is the single durable admission point before
  	// AcquireJobs. Every scale-set listener shares its fsync journal and lock.
  	intentCoordinator *queueIntentCoordinator
-@@ -83,6 +84,8 @@ func (l *scaleSetListener) Start() error {
+@@ -83,7 +84,10 @@ func (l *scaleSetListener) Start() error {
  	if err := l.intentCoordinator.Validate(); err != nil {
  		return fmt.Errorf("validating queue-intent coordinator: %w", err)
  	}
 +	l.scaleSetHelper.InvalidateLiveMessageDemand()
 +	l.sessionID = ""
  
++	adopted := false
  	listenCtx, listenCancelFunc := context.WithCancel(context.Background())
  	listenCtx = garmUtil.CopySlogValuesToNewCtx(l.ctx, listenCtx)
-@@ -106,12 +109,37 @@ func (l *scaleSetListener) Start() error {
- 	if err != nil {
- 		return fmt.Errorf("creating message session: %w", err)
- 	}
-+	adopted := false
+ 	listenCtx = garmUtil.WithSlogContext(
+@@ -92,6 +96,26 @@ func (l *scaleSetListener) Start() error {
+ 	)
+ 	l.listenerCtx = listenCtx
+ 	l.cancelFunc = listenCancelFunc
++	var session *scalesets.MessageSession
 +	defer func() {
 +		if adopted {
 +			return
 +		}
++		listenCancelFunc()
++		if session == nil {
++			return
++		}
 +		_ = session.Close()
-+		if err := scaleSetClient.DeleteMessageSession(context.Background(), session); err != nil {
++		scaleSetClient, clientErr := l.scaleSetHelper.GetScaleSetClient()
++		if clientErr != nil {
++			slog.ErrorContext(l.ctx, "getting scale set client to delete unstarted session", "error", clientErr)
++		} else if err := scaleSetClient.DeleteMessageSession(context.Background(), session); err != nil {
 +			slog.ErrorContext(l.ctx, "deleting unstarted message session", "error", err)
 +		}
 +		l.messageSession = nil
 +		l.sessionID = ""
 +		l.scaleSetHelper.InvalidateLiveMessageDemand()
 +	}()
+ 
+ 	scaleSet := l.scaleSetHelper.GetScaleSet()
+ 	scaleSetClient, err := l.scaleSetHelper.GetScaleSetClient()
+@@ -99,7 +123,7 @@ func (l *scaleSetListener) Start() error {
+ 		return fmt.Errorf("getting scale set client: %w", err)
+ 	}
+ 	slog.DebugContext(l.ctx, "creating new message session", "scale_set", scaleSet.ScaleSetID)
+-	session, err := scaleSetClient.CreateMessageSession(
++	session, err = scaleSetClient.CreateMessageSession(
+ 		l.listenerCtx, scaleSet.ScaleSetID,
+ 		l.scaleSetHelper.Owner(),
+ 	)
+@@ -107,11 +131,23 @@ func (l *scaleSetListener) Start() error {
+ 		return fmt.Errorf("creating message session: %w", err)
+ 	}
  	l.messageSession = session
 +	l.sessionID = session.SessionID()
 +	if l.sessionID == "" {
@@ -992,7 +1021,7 @@ index a689316..2c348e6 100644
  	return nil
  }
  
-@@ -122,6 +150,8 @@ func (l *scaleSetListener) Stop() error {
+@@ -122,6 +158,8 @@ func (l *scaleSetListener) Stop() error {
  	if !l.running.Load() {
  		return nil
  	}
@@ -1001,7 +1030,7 @@ index a689316..2c348e6 100644
  	if l.messageSession != nil {
  		slog.DebugContext(l.ctx, "closing message session", "scale_set", l.scaleSetHelper.GetScaleSet().ScaleSetID)
  		if err := l.messageSession.Close(); err != nil {
-@@ -187,6 +217,15 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+@@ -187,6 +225,15 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
  		}
  	}
  
@@ -1017,7 +1046,7 @@ index a689316..2c348e6 100644
  	scaleSetClient, err := l.scaleSetHelper.GetScaleSetClient()
  	if err != nil {
  		slog.ErrorContext(l.ctx, "getting scale set client", "error", err)
-@@ -282,9 +321,6 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+@@ -282,9 +329,6 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
  		}
  	}
  
@@ -1027,7 +1056,7 @@ index a689316..2c348e6 100644
  	if retainAvailableMessage {
  		slog.DebugContext(l.ctx, "retaining unacquired available-job message", "message_id", msg.MessageID)
  		timer := time.NewTimer(time.Second)
-@@ -352,7 +388,8 @@ func (l *scaleSetListener) loop() {
+@@ -352,7 +396,8 @@ func (l *scaleSetListener) loop() {
  			retryAfterUnauthorized = false
  			if !msg.IsNil() {
  				// Longpoll returns after 50 seconds. If no message arrives during that interval

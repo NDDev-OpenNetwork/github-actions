@@ -452,10 +452,10 @@ index 7d8a5ce..7f2635a 100644
  
  func (r *basePoolManager) ensureAuthoritativeQueueIntent(job params.Job) error {
 diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
-index 53ee134..b3692c0 100644
+index 53ee134..362c65c 100644
 --- a/runner/pool/pool_test.go
 +++ b/runner/pool/pool_test.go
-@@ -18,7 +18,9 @@ package pool
+@@ -18,8 +18,11 @@ package pool
  
  import (
  	"context"
@@ -463,9 +463,11 @@ index 53ee134..b3692c0 100644
  	"fmt"
 +	"net/http"
  	"sync"
++	"sync/atomic"
  	"testing"
  	"time"
-@@ -833,77 +835,215 @@ func (s *PoolStressTestSuite) TestExactScaleSetForJobFailsClosedOnMissingOrAmbig
+ 
+@@ -833,77 +836,215 @@ func (s *PoolStressTestSuite) TestExactScaleSetForJobFailsClosedOnMissingOrAmbig
  	job.Labels = []string{"nddev-linux-standard", "nddev-linux-integration"}
  	_, err = exactScaleSetForJob(sets, job)
  	s.Error(err)
@@ -490,7 +492,7 @@ index 53ee134..b3692c0 100644
 +			Name:  github.Ptr("test-repo"),
 +			Owner: &github.User{Login: github.Ptr("test-owner")},
 +		},
- 	}
++	}
 +}
 +
 +func scaleSetIdentityCheckRun(id int64, externalID, status, sha string, suiteID int64) *github.CheckRun {
@@ -517,7 +519,7 @@ index 53ee134..b3692c0 100644
 +		Name:        github.Ptr("wanted"),
 +		Labels:      labels,
 +		CheckRunURL: github.Ptr(fmt.Sprintf("https://api.github.com/repos/test-owner/test-repo/check-runs/%d", checkID)),
-+	}
+ 	}
 +}
 +
 +func completeCheckPage(runs []*github.CheckRun, total, next int) (*github.ListCheckRunsResults, *github.Response) {
@@ -720,7 +722,7 @@ index 53ee134..b3692c0 100644
  		released = true
  		return true, nil
  	}
-@@ -911,19 +1051,9 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
+@@ -911,19 +1052,9 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
  		reconciled = got.ScaleSetJobID == "scale-job-started" && got.RepositoryOwner == "test-owner" && got.RepositoryName == "test-repo"
  		return true, nil
  	}
@@ -743,7 +745,7 @@ index 53ee134..b3692c0 100644
  
  	s.True(s.mgr.reconcileStaleScaleSetJob(job))
  	s.False(released, "a stale queued DB duplicate released the running capacity intent")
-@@ -933,6 +1063,215 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
+@@ -933,6 +1064,314 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
  	s.Empty(jobs)
  }
  
@@ -904,6 +906,78 @@ index 53ee134..b3692c0 100644
 +	s.False(s.mgr.reconcileStaleScaleSetJob(job))
 +}
 +
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsOmittedCheckTotal() {
++	job := s.storeQueuedScaleSetJob("scale-job-omit-total", 4809, "wanted")
++	sha := "abababababababababababababababababababab"
++	page := &github.ListCheckRunsResults{CheckRuns: []*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "scale-job-omit-total", "queued", sha, 9049),
++	}}
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4809)).
++		Return(scaleSetIdentityRun(4809, 9049, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9049), mock.MatchedBy(allCheckRuns)).
++		Return(page, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsChangingCheckTotal() {
++	job := s.storeQueuedScaleSetJob("scale-job-changing-total", 4810, "wanted")
++	sha := "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
++	page1, resp1 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "scale-job-changing-total", "queued", sha, 9050),
++	}, 2, 2)
++	page2, resp2 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(102, "unrelated", "queued", sha, 9050),
++	}, 3, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4810)).
++		Return(scaleSetIdentityRun(4810, 9050, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9050), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 0
++	})).Return(page1, resp1, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9050), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 2
++	})).Return(page2, resp2, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobConcurrentCompletedAndUnknown() {
++	s.requireScaleSet()
++	var released atomic.Value
++	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
++		released.Store(jobID)
++		return true, nil
++	}
++	unknown := s.storeQueuedScaleSetJob("scale-job-concurrent-unknown", 4811, "wanted")
++	terminal := s.storeQueuedScaleSetJob("scale-job-concurrent-terminal", 4812, "wanted")
++	unknownSHA := "1111111111111111111111111111111111111111"
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4811)).
++		Return(scaleSetIdentityRun(4811, 9051, unknownSHA, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9051), mock.MatchedBy(allCheckRuns)).
++		Return(&github.ListCheckRunsResults{CheckRuns: []*github.CheckRun{
++			scaleSetIdentityCheckRun(111, "other-guid", "queued", unknownSHA, 9051),
++		}, Total: github.Ptr(1)}, &github.Response{}, nil).Once()
++	s.expectBoundScaleSetIdentity(4812, 9052, 930, 830, 1, "2222222222222222222222222222222222222222", "scale-job-concurrent-terminal", "completed", "success")
++
++	var wg sync.WaitGroup
++	var unknownRetained, terminalDeleted bool
++	wg.Add(2)
++	go func() {
++		defer wg.Done()
++		unknownRetained = !s.mgr.reconcileStaleScaleSetJob(unknown)
++	}()
++	go func() {
++		defer wg.Done()
++		terminalDeleted = s.mgr.reconcileStaleScaleSetJob(terminal)
++	}()
++	wg.Wait()
++	s.True(unknownRetained)
++	s.True(terminalDeleted)
++	s.Equal("scale-job-concurrent-terminal", released.Load())
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Require().Len(jobs, 1)
++	s.Equal("scale-job-concurrent-unknown", jobs[0].ScaleSetJobID)
++}
++
 +func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsIncompleteJobTotal() {
 +	s.requireScaleSet()
 +	job := s.storeQueuedScaleSetJob("scale-job-jobs", 4808, "wanted")
@@ -926,6 +1000,10 @@ index 53ee134..b3692c0 100644
 +	cursor := newGitHubListCursor()
 +	if _, ok := cursor.accept(0, nil, []int64{1}, github.Ptr(1)); ok {
 +		t.Fatal("missing response must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{}, []int64{1}, nil); ok {
++		t.Fatal("missing total must be incomplete")
 +	}
 +	cursor = newGitHubListCursor()
 +	done, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2))
@@ -954,6 +1032,29 @@ index 53ee134..b3692c0 100644
 +	if _, ok := cursor.accept(0, &github.Response{}, []int64{1}, github.Ptr(2)); ok {
 +		t.Fatal("incomplete total must be incomplete")
 +	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2)); !ok {
++		t.Fatal("first page")
++	}
++	if _, ok := cursor.accept(2, &github.Response{}, []int64{2}, github.Ptr(3)); ok {
++		t.Fatal("changing total must be incomplete")
++	}
++}
++
++func TestWorkflowJobBindsCheckRunByURLPathID(t *testing.T) {
++	check := scaleSetIdentityCheckRun(12, "guid", "queued", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1)
++	job := scaleSetIdentityJob(800, 12, 1, 1, "queued", "", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
++	if !workflowJobBindsCheckRun(job, check) {
++		t.Fatal("matching check-run path ID must bind")
++	}
++	job.CheckRunURL = github.Ptr("https://api.github.com/repos/test-owner/test-repo/check-runs/2")
++	if workflowJobBindsCheckRun(job, check) {
++		t.Fatal("a shorter numeric suffix must not bind a different check ID")
++	}
++	job.CheckRunURL = github.Ptr("https://api.github.com/repos/test-owner/test-repo/check-runs/12?per_page=100")
++	if !workflowJobBindsCheckRun(job, check) {
++		t.Fatal("query string on check_run_url must still bind by path ID")
++	}
 +}
 +
  func mustParseUUID(s string) uuid.UUID {
@@ -961,10 +1062,10 @@ index 53ee134..b3692c0 100644
  	if err != nil {
 diff --git a/runner/pool/scale_set_identity.go b/runner/pool/scale_set_identity.go
 new file mode 100644
-index 0000000..7186e0c
+index 0000000..204bc71
 --- /dev/null
 +++ b/runner/pool/scale_set_identity.go
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,175 @@
 +// Copyright 2026 Cloudbase Solutions SRL
 +//
 +//    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -983,6 +1084,8 @@ index 0000000..7186e0c
 +
 +import (
 +	"fmt"
++	"net/url"
++	"strconv"
 +	"strings"
 +
 +	"github.com/google/go-github/v84/github"
@@ -996,19 +1099,35 @@ index 0000000..7186e0c
 +	githubActionsAppSlug = "github-actions"
 +)
 +
++func checkRunIDFromURL(raw string) (int64, bool) {
++	parsed, err := url.Parse(raw)
++	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" {
++		return 0, false
++	}
++	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
++	if len(parts) < 2 || parts[len(parts)-2] != "check-runs" {
++		return 0, false
++	}
++	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
++	if err != nil || id <= 0 {
++		return 0, false
++	}
++	return id, true
++}
++
 +func workflowJobBindsCheckRun(job *github.WorkflowJob, check *github.CheckRun) bool {
-+	if job == nil || check == nil || job.GetCheckRunURL() == "" || check.GetID() == 0 {
++	if job == nil || check == nil || check.GetID() == 0 {
 +		return false
 +	}
-+	jobURL := strings.TrimRight(job.GetCheckRunURL(), "/")
-+	suffix := fmt.Sprintf("/check-runs/%d", check.GetID())
-+	if strings.HasSuffix(jobURL, suffix) {
++	jobCheckID, ok := checkRunIDFromURL(job.GetCheckRunURL())
++	if !ok || jobCheckID != check.GetID() {
++		return false
++	}
++	if check.GetURL() == "" {
 +		return true
 +	}
-+	if check.GetURL() != "" && strings.TrimRight(check.GetURL(), "/") == jobURL {
-+		return true
-+	}
-+	return false
++	listedID, ok := checkRunIDFromURL(check.GetURL())
++	return ok && listedID == check.GetID()
 +}
 +
 +func isGitHubActionsCheckRun(check *github.CheckRun) bool {
@@ -1045,9 +1164,11 @@ index 0000000..7186e0c
 +}
 +
 +type githubListCursor struct {
-+	seenPages map[int]struct{}
-+	seenIDs   map[int64]struct{}
-+	collected int
++	seenPages     map[int]struct{}
++	seenIDs       map[int64]struct{}
++	collected     int
++	expectedTotal int
++	hasTotal      bool
 +}
 +
 +func newGitHubListCursor() githubListCursor {
@@ -1058,7 +1179,13 @@ index 0000000..7186e0c
 +}
 +
 +func (c *githubListCursor) accept(requestedPage int, resp *github.Response, ids []int64, total *int) (done bool, ok bool) {
-+	if c == nil || resp == nil {
++	if c == nil || resp == nil || total == nil || *total < 0 {
++		return false, false
++	}
++	if !c.hasTotal {
++		c.expectedTotal = *total
++		c.hasTotal = true
++	} else if *total != c.expectedTotal {
 +		return false, false
 +	}
 +	if _, exists := c.seenPages[requestedPage]; exists {
@@ -1075,6 +1202,9 @@ index 0000000..7186e0c
 +		c.seenIDs[id] = struct{}{}
 +	}
 +	c.collected += len(ids)
++	if c.collected > c.expectedTotal {
++		return false, false
++	}
 +	if resp.NextPage != 0 {
 +		if resp.NextPage == requestedPage || resp.NextPage < 0 {
 +			return false, false
@@ -1084,7 +1214,7 @@ index 0000000..7186e0c
 +		}
 +		return false, true
 +	}
-+	if total != nil && c.collected != *total {
++	if c.collected != c.expectedTotal {
 +		return false, false
 +	}
 +	return true, true

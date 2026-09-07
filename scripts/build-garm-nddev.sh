@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="c6e811a52ddb1b9a4f57d54b8f4d6fd14f650b9c0226e9b0d5350d03fc87fdc0"
+readonly expected_binary_sha256="44721568b2f8839e643a1976414de56a41e453854b5f41467a2cf2775b99bdad"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -101,8 +101,8 @@ readonly patch_sha256s=(
   "e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d"
   "102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497"
   "62f8a273e86ed19fe80905ad7205fbf5d6fdefdf1847cc085303c613db3f1345"
-  "06a9aa4ec2ea5a6c75c54a52ac3f05688d62cfa58b3a6a6c5a57f801008f8089"
-  "8e11eb58f35720ee4650c9f7a420d4df6e23451bc1cbf741a1e40a97b6e195e8"
+  "396eea6c1ee9250843ed8002e57658c8a1a6d853423ecba7ed5f85442ec59d9c"
+  "e2a9bb7cc787a3c1dc7bfe4c8e1af458cff8ed77ddd8d5b135c0402bef4a5dbb"
   "2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2"
 )
 readonly overlay_paths=(
@@ -117,12 +117,12 @@ readonly overlay_paths=(
 )
 readonly overlay_sha256s=(
   "44197acff7b8643827ab02637d60d2bbb06470313665a94e27c419291b2428ac"
-  "3f035401d8137c353ab8a32926a14358965aa7b87865d66446c4f8327e553f6b"
+  "5678a469b4fac0270fce611b1e3d2f7b0a1bc4785d7a358c0a232f688d6b4fc7"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
   "8a99d172b4aaf7f113081c776bbde471db6f85420bf5eca5a856a40c4e59606b"
   "453e6252ab13f29feff0b1fbae6c418e081bb89222accf1551c90bf7eac12a3f"
-  "f635e3c3b1396452b02d6274f653785e58f0df8bd58afde87f9e8befc9340eb6"
+  "c77cc8fff92b5b23eb4691d24acdd58548f21cce065f9837ad6f2f70fd207eb4"
   "d8dbd3b5d3ca0c89cc8f869e27e1a074166be705a1b65e76b70e2f6cdf92d7dc"
 )
 readonly overlay_targets=(
@@ -183,12 +183,35 @@ for index in "${!overlay_paths[@]}"; do
 done
 
 work_dir=$(mktemp -d)
+cidfile=""
+container_pid=""
 cleanup() {
+  if [[ -n "${container_pid}" ]]; then
+    if [[ -n "${cidfile}" && -f "${cidfile}" ]]; then
+      cid=$(cat "${cidfile}" 2>/dev/null || true)
+      if [[ -n "${cid}" ]]; then
+        "${container_engine}" stop --time 20 "${cid}" >/dev/null 2>&1 || true
+      fi
+    fi
+    wait "${container_pid}" 2>/dev/null || true
+    container_pid=""
+  fi
+  if [[ -n "${cidfile}" && -f "${cidfile}" ]]; then
+    cid=$(cat "${cidfile}" 2>/dev/null || true)
+    if [[ -n "${cid}" ]]; then
+      "${container_engine}" wait "${cid}" >/dev/null 2>&1 || true
+      "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
+    fi
+    rm -f -- "${cidfile}"
+    cidfile=""
+  fi
   if [[ -n "${work_dir:-}" && "${work_dir}" == /tmp/* && -d "${work_dir}" ]]; then
     rm -rf -- "${work_dir}"
   fi
 }
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 source_dir="${work_dir}/source"
 artifact_dir="${work_dir}/artifacts"
@@ -222,8 +245,13 @@ git -C "${source_dir}" diff --check
 # region could not reach and the contract test could not see. The derivative
 # version was exactly that -- compiled into the binary from a literal that
 # nothing compared against the manifest.
+# Do not use --rm: EXIT must stop and wait for this container before deleting
+# the bind-mounted source. Killing the launcher otherwise unmounts /src under
+# a still-running compile. --cidfile requires a path that does not already exist.
 # shellcheck disable=SC2016
-"${container_engine}" run --rm \
+cidfile="${work_dir}/container.id"
+"${container_engine}" run \
+  --cidfile="${cidfile}" \
   --network "${build_network}" \
   --mount "type=bind,src=${source_dir},dst=/src,readonly" \
   --mount "type=bind,src=${artifact_dir},dst=/out" \
@@ -266,7 +294,33 @@ git -C "${source_dir}" diff --check
       build "/out/garm.${attempt}"
       cmp /out/garm.1 "/out/garm.${attempt}"
     done
-  '
+  ' &
+container_pid=$!
+container_status=0
+wait "${container_pid}" || container_status=$?
+container_pid=""
+if [[ ! -f "${cidfile}" ]]; then
+  echo "GARM build container identity is missing" >&2
+  if [[ "${container_status}" -ne 0 ]]; then
+    exit "${container_status}"
+  fi
+  exit 1
+fi
+container_id=$(cat "${cidfile}")
+if [[ -z "${container_id}" ]]; then
+  echo "GARM build container identity is empty" >&2
+  exit 1
+fi
+container_exit=$("${container_engine}" inspect -f '{{.State.ExitCode}}' "${container_id}")
+"${container_engine}" rm -f "${container_id}" >/dev/null
+rm -f -- "${cidfile}"
+cidfile=""
+if [[ "${container_status}" -ne 0 ]]; then
+  exit "${container_status}"
+fi
+if [[ "${container_exit}" != "0" ]]; then
+  exit "${container_exit}"
+fi
 
 first_sha256=$(sha256sum "${artifact_dir}/garm.1" | awk '{print $1}')
 for attempt in $(seq 2 "${build_reproducible_rebuilds}"); do
