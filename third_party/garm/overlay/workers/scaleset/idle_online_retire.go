@@ -184,6 +184,136 @@ func (g *idleRetirementGate) forget(agentID int64) {
 	}
 }
 
+func (g *idleRetirementGate) prune(live map[int64]struct{}) {
+	if g.seen == nil {
+		return
+	}
+	for agentID := range g.seen {
+		if _, ok := live[agentID]; !ok {
+			delete(g.seen, agentID)
+		}
+	}
+}
+
+func idleRetirementLocalPlan(runners map[string]params.Instance, minIdle uint, now time.Time) (idleCount int, aged []params.Instance) {
+	for _, runner := range runners {
+		if providerRemovalProtected(runner.Status) || runner.AgentID <= 0 {
+			continue
+		}
+		switch runner.RunnerStatus {
+		case params.RunnerPending, params.RunnerIdle:
+			idleCount++
+			if now.Sub(runner.CreatedAt) >= idleRetirementMinAge {
+				aged = append(aged, runner)
+			}
+		}
+	}
+	if idleCount <= int(minIdle) {
+		return idleCount, nil
+	}
+	return idleCount, aged
+}
+
+func warnIdleRetirement(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	slog.WarnContext(ctx, "idle retirement failed; continuing runner consolidation", "error", err, "error_class", "idle-retirement")
+}
+
+func continueAfterIdleRetirement(ctx context.Context, retireErr error, cleanupAbsent func() error) error {
+	warnIdleRetirement(ctx, retireErr)
+	if cleanupAbsent == nil {
+		return nil
+	}
+	return cleanupAbsent()
+}
+
+func markDBRunnersMissingFromGitHub(
+	dbRunners map[string]params.Instance,
+	ghRunners map[string]params.RunnerReference,
+	markAbsent func(params.Instance) error,
+) error {
+	if markAbsent == nil {
+		return fmt.Errorf("absent-runner cleanup is required")
+	}
+	for _, runner := range dbRunners {
+		if providerRemovalProtected(runner.Status) {
+			continue
+		}
+		if _, ok := ghRunners[runner.Name]; ok {
+			continue
+		}
+		if err := markAbsent(runner); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *Worker) markDBRunnersMissingFromGitHub(ghRunners map[string]params.RunnerReference) error {
+	return markDBRunnersMissingFromGitHub(w.runnerByName(), ghRunners, func(runner params.Instance) error {
+		if ok := locking.TryLock(runner.Name, w.consumerID); !ok {
+			slog.DebugContext(w.ctx, "runner is locked; skipping", "runner_name", runner.Name)
+			return nil
+		}
+		defer locking.Unlock(runner.Name, false)
+		slog.InfoContext(w.ctx, "runner does not exist in github; removing from provider", "runner_name", runner.Name)
+		instance, err := w.setRunnerDBStatus(runner.Name, commonParams.InstancePendingDelete)
+		if err != nil {
+			if !errors.Is(err, runnerErrors.ErrNotFound) {
+				return fmt.Errorf("updating runner %s: %w", instance.Name, err)
+			}
+		}
+		w.runners[runner.ID] = instance
+		return nil
+	})
+}
+
+type idleActionsClient interface {
+	RemoveRunner(context.Context, int64) error
+	GetRunner(context.Context, int64) (params.RunnerReference, error)
+}
+
+type idleRemoveOutcome string
+
+const (
+	idleRemoveMarkAbsent idleRemoveOutcome = "mark-absent"
+	idleRemoveConflict   idleRemoveOutcome = "conflict"
+	idleRemoveNone       idleRemoveOutcome = "none"
+)
+
+func decideIdleRemoveRunner(removeErr error, getErr error, getFound bool) (idleRemoveOutcome, error) {
+	if removeErr != nil {
+		if errors.Is(removeErr, runnerErrors.ErrNotFound) {
+			return idleRemoveMarkAbsent, nil
+		}
+		var conflict interface{ Conflict() bool }
+		if errors.As(removeErr, &conflict) || isConflictError(removeErr) {
+			return idleRemoveConflict, nil
+		}
+		return idleRemoveNone, fmt.Errorf("Actions RemoveRunner: %w", removeErr)
+	}
+	if getFound {
+		return idleRemoveNone, fmt.Errorf("Actions runner still present after RemoveRunner")
+	}
+	if getErr != nil && !errors.Is(getErr, runnerErrors.ErrNotFound) {
+		return idleRemoveNone, fmt.Errorf("read back Actions runner: %w", getErr)
+	}
+	return idleRemoveMarkAbsent, nil
+}
+
+func applyIdleRemoveRunner(ctx context.Context, cli idleActionsClient, runnerID int64) (idleRemoveOutcome, error) {
+	removeErr := cli.RemoveRunner(ctx, runnerID)
+	getFound := false
+	var getErr error
+	if removeErr == nil {
+		_, getErr = cli.GetRunner(ctx, runnerID)
+		getFound = getErr == nil
+	}
+	return decideIdleRemoveRunner(removeErr, getErr, getFound)
+}
+
 func (w *Worker) restRunner(ctx context.Context, runnerID int64) (*github.Runner, error) {
 	cli, err := w.GetScaleSetClient()
 	if err != nil {
@@ -221,56 +351,56 @@ func (w *Worker) restRunner(ctx context.Context, runnerID int64) (*github.Runner
 }
 
 func (w *Worker) retireExcessIdleCapacity() error {
+	now := time.Now().UTC()
+	live := make(map[int64]struct{}, len(w.runners))
+	for _, runner := range w.runners {
+		if runner.AgentID > 0 {
+			live[runner.AgentID] = struct{}{}
+		}
+	}
+	w.idleRetire.prune(live)
+	idleCount, aged := idleRetirementLocalPlan(w.runners, w.scaleSet.MinIdleRunners, now)
+	if len(aged) == 0 {
+		return nil
+	}
 	cli, err := w.GetScaleSetClient()
 	if err != nil {
+		w.resetIdleObservations(aged)
 		return fmt.Errorf("getting scale set client: %w", err)
 	}
 	readCtx, cancel := context.WithTimeout(w.ctx, idleRetirementReadTimeout)
 	defer cancel()
 	remote, err := cli.GetRunnerScaleSetByID(readCtx, w.scaleSet.ScaleSetID)
 	if err != nil {
+		w.resetIdleObservations(aged)
 		return fmt.Errorf("read scale set for idle retirement: %w", err)
 	}
 	if remote.ID != w.scaleSet.ScaleSetID || remote.Name != w.scaleSet.Name ||
 		remote.Enabled == nil || !*remote.Enabled || remote.Statistics == nil {
+		w.resetIdleObservations(aged)
 		return fmt.Errorf("idle retirement scale-set identity, enabled state or statistics missing")
 	}
 
-	idleCount := 0
-	var candidates []params.Instance
-	for _, runner := range w.runners {
-		if providerRemovalProtected(runner.Status) || runner.AgentID <= 0 {
-			continue
-		}
-		switch runner.RunnerStatus {
-		case params.RunnerPending, params.RunnerIdle:
-			idleCount++
-			candidates = append(candidates, runner)
-		}
-	}
-	if idleCount <= int(w.scaleSet.MinIdleRunners) {
-		return nil
-	}
-
-	now := time.Now().UTC()
-	for _, runner := range candidates {
-		if time.Since(runner.CreatedAt) < idleRetirementMinAge {
-			continue
-		}
+	for _, runner := range aged {
 		actionsRunner, err := cli.GetRunner(readCtx, runner.AgentID)
 		if err != nil {
+			w.idleRetire.forget(runner.AgentID)
 			if errors.Is(err, runnerErrors.ErrNotFound) {
-				w.idleRetire.forget(runner.AgentID)
 				continue
 			}
-			return fmt.Errorf("get Actions runner %d: %w", runner.AgentID, err)
+			slog.WarnContext(w.ctx, "idle retirement skipped candidate after Actions read failure", "runner_name", runner.Name, "agent_id", runner.AgentID, "error", err, "error_class", "idle-retirement")
+			continue
 		}
 		restRunner, err := w.restRunner(readCtx, runner.AgentID)
 		if err != nil {
-			return fmt.Errorf("get REST runner %d: %w", runner.AgentID, err)
+			w.idleRetire.forget(runner.AgentID)
+			slog.WarnContext(w.ctx, "idle retirement skipped candidate after REST read failure", "runner_name", runner.Name, "agent_id", runner.AgentID, "error", err, "error_class", "idle-retirement")
+			continue
 		}
 		if restRunner == nil {
-			return fmt.Errorf("get REST runner %d: empty payload", runner.AgentID)
+			w.idleRetire.forget(runner.AgentID)
+			slog.WarnContext(w.ctx, "idle retirement skipped candidate after empty REST payload", "runner_name", runner.Name, "agent_id", runner.AgentID, "error_class", "idle-retirement")
+			continue
 		}
 		actionsListBusyUntrusted(actionsRunner.Busy)
 		evidence := idleRetirementEvidence{
@@ -313,7 +443,8 @@ func (w *Worker) retireExcessIdleCapacity() error {
 			continue
 		}
 		defer locking.Unlock(runner.Name, false)
-		if err := w.removeIdleRunnerAfterConfirmation(runner); err != nil {
+		if err := w.removeIdleRunnerAfterConfirmation(cli, runner); err != nil {
+			w.idleRetire.forget(runner.AgentID)
 			return err
 		}
 		w.idleRetire.forget(runner.AgentID)
@@ -322,32 +453,46 @@ func (w *Worker) retireExcessIdleCapacity() error {
 	return nil
 }
 
-func (w *Worker) removeIdleRunnerAfterConfirmation(runner params.Instance) error {
-	cli, err := w.GetScaleSetClient()
+func (w *Worker) resetIdleObservations(runners []params.Instance) {
+	for _, runner := range runners {
+		w.idleRetire.forget(runner.AgentID)
+	}
+}
+
+func applyConfirmedIdleRemoval(
+	ctx context.Context,
+	cli idleActionsClient,
+	runner params.Instance,
+	markAbsent func(params.Instance) error,
+) (idleRemoveOutcome, error) {
+	if markAbsent == nil {
+		return idleRemoveNone, fmt.Errorf("idle pending-delete writer is required")
+	}
+	outcome, err := applyIdleRemoveRunner(ctx, cli, runner.AgentID)
+	if err != nil {
+		return outcome, err
+	}
+	if outcome == idleRemoveMarkAbsent {
+		return outcome, markAbsent(runner)
+	}
+	return outcome, nil
+}
+
+func (w *Worker) removeIdleRunnerAfterConfirmation(cli idleActionsClient, runner params.Instance) error {
+	readCtx, cancel := context.WithTimeout(w.ctx, idleRetirementReadTimeout)
+	defer cancel()
+	outcome, err := applyConfirmedIdleRemoval(readCtx, cli, runner, w.markIdleRunnerAbsent)
 	if err != nil {
 		return err
 	}
-	readCtx, cancel := context.WithTimeout(w.ctx, idleRetirementReadTimeout)
-	defer cancel()
-	if err := cli.RemoveRunner(readCtx, runner.AgentID); err != nil {
-		if errors.Is(err, runnerErrors.ErrNotFound) {
-			return w.markIdleRunnerAbsent(runner)
-		}
-		var conflict interface{ Conflict() bool }
-		if errors.As(err, &conflict) || isConflictError(err) {
-			slog.InfoContext(w.ctx, "idle retirement refused; Actions service reported conflict", "runner_name", runner.Name, "agent_id", runner.AgentID)
-			w.idleRetire.forget(runner.AgentID)
-			return nil
-		}
-		return fmt.Errorf("Actions RemoveRunner %d: %w", runner.AgentID, err)
+	switch outcome {
+	case idleRemoveConflict:
+		slog.InfoContext(w.ctx, "idle retirement refused; Actions service reported conflict", "runner_name", runner.Name, "agent_id", runner.AgentID)
+		w.idleRetire.forget(runner.AgentID)
+	case idleRemoveMarkAbsent:
+		slog.InfoContext(w.ctx, "retired excess idle runner from Actions service", "runner_name", runner.Name, "agent_id", runner.AgentID)
 	}
-	if _, err := cli.GetRunner(readCtx, runner.AgentID); err == nil {
-		return fmt.Errorf("Actions runner %d still present after RemoveRunner", runner.AgentID)
-	} else if !errors.Is(err, runnerErrors.ErrNotFound) {
-		return fmt.Errorf("read back Actions runner %d: %w", runner.AgentID, err)
-	}
-	slog.InfoContext(w.ctx, "retired excess idle runner from Actions service", "runner_name", runner.Name, "agent_id", runner.AgentID)
-	return w.markIdleRunnerAbsent(runner)
+	return nil
 }
 
 func (w *Worker) markIdleRunnerAbsent(runner params.Instance) error {

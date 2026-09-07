@@ -98,8 +98,8 @@ patches:
     sha256: 102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497
     purpose: Confirm current GitHub scale-set demand with a bounded read before JIT registration, preserving admission limits and queued identities while rejecting stale local-only demand.
   - path: third_party/garm/patches/0031-retire-excess-idle-online-runners.patch
-    sha256: 4b6c7ac3366fc1e6668e830546ba1428f7fb6f709e46c4e09bb6d8753929ca14
-    purpose: Require Actions RemoveRunner to return 204 and call excess idle-online retirement before provider delete so MinIdle-zero undemanded JIT registrations cannot occupy members forever.
+    sha256: e042e6d006ffcafdd7c01a2123e6b116c3d26d8aa95b47875f7c079c96a46f94
+    purpose: Require Actions RemoveRunner to return 204 and continue ordinary runner consolidation through continueAfterIdleRetirement after a classified idle-retirement warning so MinIdle-zero undemanded JIT registrations cannot occupy members forever.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7
@@ -120,11 +120,11 @@ overlays:
     sha256: 32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8
     purpose: Prove fresh zero demand prevents allocation, stale persisted zero can recover against fresh positive demand, positive observations are not reused, and missing, mismatched or unavailable evidence fails closed.
   - path: third_party/garm/overlay/workers/scaleset/idle_online_retire.go
-    sha256: 9fbc42a6222ca40317bf083af0eb6e62f7a27db0d7ad9ba9cc3152d1e5eb694c
-    purpose: Retire excess undemanded idle ephemeral JIT registrations through Actions RemoveRunner after two matching observations, requiring REST busy to be explicit false and refusing omitted busy, identity change, demand, or JobStillRunningException.
+    sha256: 8a17eb940839b31670e0236efc2828e8d33793b946fdbe30d95a1e9f9bf60cfa
+    purpose: Retire excess undemanded idle ephemeral JIT registrations through Actions RemoveRunner after two matching observations, requiring REST busy to be explicit false and refusing omitted busy, identity change, demand, or JobStillRunningException. Local age and min-idle decide whether any API call happens; continueAfterIdleRetirement keeps absent-runner consolidation running after a classified warning; unseen observation IDs are pruned.
   - path: third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go
-    sha256: 520fc7a713f812018c190b8e221a6b816fd11af5f3e1f5c61038e5d0c05aaa86
-    purpose: Prove omitted REST busy is unknown, Actions list Busy defaults are untrusted, all-zero scale-set statistics do not prove idle, mixed identity restarts observation, and two matching observations are required before RemoveRunner.
+    sha256: 76175b8fa313d9e72cff8e0fa2e2889041e390f399cd8154a50240772025ef0f
+    purpose: Prove omitted REST busy is unknown, Actions list Busy defaults are untrusted, all-zero scale-set statistics do not prove idle, mixed identity restarts observation, two matching observations are required before RemoveRunner, continueAfterIdleRetirement plus markDBRunnersMissingFromGitHub still pending-deletes an unrelated absent runner after a retirement API failure, empty aged-candidate plans make no API call, and RemoveRunner 204+404, 409, unexpected 2xx and non-404 read-back are wired to pending-delete through an injected writer.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -139,7 +139,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: e4da5f7ba06ee8f6cb1356adfcd2a76224596ce673e6198fe88e179e719a09e8
+  binary_sha256: d254fc511d7a9ee74ff05cfe64645a2390975dcb20ee254103416f84d6ef8427
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true

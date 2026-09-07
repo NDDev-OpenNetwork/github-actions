@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="e4da5f7ba06ee8f6cb1356adfcd2a76224596ce673e6198fe88e179e719a09e8"
+readonly expected_binary_sha256="d254fc511d7a9ee74ff05cfe64645a2390975dcb20ee254103416f84d6ef8427"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -97,7 +97,7 @@ readonly patch_sha256s=(
   "3bc2722e87f1721c6094130d0f07310a796bf8074504ef121acac8ca7402887c"
   "e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d"
   "102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497"
-  "4b6c7ac3366fc1e6668e830546ba1428f7fb6f709e46c4e09bb6d8753929ca14"
+  "e042e6d006ffcafdd7c01a2123e6b116c3d26d8aa95b47875f7c079c96a46f94"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -116,8 +116,8 @@ readonly overlay_sha256s=(
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
   "5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458"
   "32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8"
-  "9fbc42a6222ca40317bf083af0eb6e62f7a27db0d7ad9ba9cc3152d1e5eb694c"
-  "520fc7a713f812018c190b8e221a6b816fd11af5f3e1f5c61038e5d0c05aaa86"
+  "8a17eb940839b31670e0236efc2828e8d33793b946fdbe30d95a1e9f9bf60cfa"
+  "76175b8fa313d9e72cff8e0fa2e2889041e390f399cd8154a50240772025ef0f"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"

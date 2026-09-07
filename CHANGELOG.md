@@ -8,8 +8,12 @@
   omitted field is unknown, not idle. Scale-set statistics of all zeros are
   not proof that nothing is running. Identity changes, demand, min-idle,
   bootstrap/active states and JobStillRunningException refuse the delete.
-  Provider delete remains GARM's ordinary absent-runner reconcile. The
-  `.92` patches are unchanged.
+  Provider delete remains GARM's ordinary absent-runner reconcile. Idle
+  retirement is best-effort: a remote read or delete failure is a classified
+  warning and cannot block absent-runner consolidation. Candidate age and
+  min-idle are decided locally before any new API call. The `.92` patches are
+  unchanged. REST overlay fallback for acknowledged never-started jobs is not
+  in this derivative: JobAssigned does not bind GitHub job ID or run attempt.
 - Ordinary merge in this repository does not require a general CI status
   check. `Gate` remains truthful advisory evidence.
 

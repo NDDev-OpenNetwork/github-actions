@@ -33,6 +33,8 @@ old local `JobAssigned` record is a reason to reconcile; it is not independent
 proof of dispatchable demand. Conversely, an old persisted zero must not block
 an authoritative read that could show new demand. GitHub documents this
 distinction in the [scale-set client autoscaling contract](https://github.com/actions/scaleset#autoscaling).
+Idle-online retirement is best-effort and cannot block absent-runner
+consolidation. It does not repair a lost upstream assignment.
 
 Compare a start with its completion in the same message batch when diagnosing
 fast jobs. Completion is terminal even if no intermediate running observation
