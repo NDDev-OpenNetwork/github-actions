@@ -107,16 +107,17 @@ class FeedbackTests(unittest.TestCase):
 
     def test_duplicate_including_closed_issue_is_not_republished(self):
         api = API()
-        api.issues = [{"number": 9, "state": "closed", "user": {"login": "github-actions[bot]"},
+        api.issues = [{"number": 9, "state": "closed", "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"},
                        "body": "<!-- ci-feedback:v1:10:100:2 -->\nprevious evidence"}]
         self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 9})
         self.assertEqual(api.posts, [])
 
     def test_app_bot_publisher_is_trusted_for_dedup(self):
         api = API()
-        api.issues = [{"number": 4, "user": {"login": "nddev-gds[bot]", "type": "Bot"},
+        api.issues = [{"number": 4, "user": {"id": 700, "login": "example-reporter[bot]", "type": "Bot"},
                        "body": "<!-- ci-feedback:v1:10:100:2 -->\nprevious evidence"}]
-        self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 4})
+        self.assertEqual(feedback.publish(api, REPO, 10, 100, 2, publisher_id=700),
+                         {"status": "already-published", "issue_number": 4})
         self.assertEqual(api.posts, [])
 
     def test_user_authored_marker_cannot_suppress_feedback(self):
@@ -131,7 +132,7 @@ class FeedbackTests(unittest.TestCase):
 
         def request(path, data=None):
             if data is not None:
-                api.issues = [{"number": 12, "user": {"login": "github-actions[bot]", "type": "Bot"},
+                api.issues = [{"number": 12, "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"},
                                "body": "<!-- ci-feedback:v1:10:100:2 -->\npublished"}]
                 raise TimeoutError("POST reply lost")
             return real(path, data)
@@ -139,6 +140,41 @@ class FeedbackTests(unittest.TestCase):
         api.request = request
         self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 12})
         self.assertEqual(api.posts, [])
+
+    def test_unrelated_bot_or_forged_login_does_not_suppress_failure(self):
+        for user in ({"id": 701, "type": "Bot", "login": "other[bot]"},
+                     {"id": 701, "type": "Bot", "login": "github-actions[bot]"},
+                     {"login": "github-actions[bot]"},
+                     {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "User"},
+                     {"id": True, "type": "Bot"}):
+            with self.subTest(user=user):
+                api = API()
+                api.issues = [{"number": 9, "user": user,
+                               "body": "<!-- ci-feedback:v1:10:100:2 -->\nspoofed"}]
+                self.assertEqual(self.publish(api)["status"], "published")
+
+    def test_invalid_publisher_identity_fails_before_api_access(self):
+        api = API()
+        with self.assertRaises(ValueError):
+            feedback.publish(api, REPO, 10, 100, 2, publisher_id=True)
+        self.assertEqual(api.calls, [])
+
+    def test_unknown_post_result_does_not_retry_write(self):
+        api = API()
+        real = api.request
+        writes = []
+
+        def request(path, data=None):
+            if data is not None:
+                writes.append(data)
+                raise TimeoutError("unknown write outcome")
+            return real(path, data)
+
+        api.request = request
+        with self.assertRaises(TimeoutError):
+            self.publish(api)
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(sum("/issues?" in call for call in api.calls), 2)
 
     def test_foreign_and_duplicate_jobs_rejected(self):
         for jobs in ([{"id": 101, "run_id": 999}], [{"id": 101, "run_id": 100}] * 2):

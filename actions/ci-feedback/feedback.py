@@ -15,6 +15,7 @@ CLEAN_CONCLUSIONS = {"success", "neutral", "skipped"}
 NON_FAILURES = CLEAN_CONCLUSIONS | {"cancelled"}
 MAX_PAGES = 10
 MAX_RESPONSE = 4 * 1024 * 1024
+GITHUB_ACTIONS_BOT_ID = 41898282
 
 
 def positive_id(value: object) -> int:
@@ -70,16 +71,13 @@ class GitHubAPI:
         return json.loads(raw)
 
 
-def trusted_publisher(issue: dict) -> bool:
-    """GITHUB_TOKEN and GitHub Apps both create issues as Bot accounts."""
+def trusted_publisher(issue: dict, publisher_id: int) -> bool:
+    """Only the configured immutable publisher identity may suppress delivery."""
     user = issue.get("user")
     if not isinstance(user, dict):
         return False
-    login = user.get("login")
-    account_type = user.get("type")
-    if account_type == "Bot":
-        return True
-    return isinstance(login, str) and login.endswith("[bot]")
+    return (type(user.get("id")) is int and user["id"] == publisher_id
+            and user.get("type") == "Bot")
 
 
 def failed_jobs(repository: str, run_id: int, jobs: list[dict]) -> list[dict]:
@@ -95,7 +93,7 @@ def failed_jobs(repository: str, run_id: int, jobs: list[dict]) -> list[dict]:
     return failed
 
 
-def find_published(api, prefix: str, marker: str, created: dt.datetime):
+def find_published(api, prefix: str, marker: str, created: dt.datetime, publisher_id: int):
     """Direct listing avoids search-index lag. A full bound raises rather than
     claiming an absent duplicate. Caller serializes this key."""
     for page in range(1, MAX_PAGES + 1):
@@ -107,8 +105,10 @@ def find_published(api, prefix: str, marker: str, created: dt.datetime):
         if not isinstance(issues, list):
             raise RuntimeError("invalid issue inventory")
         for issue in issues:
+            if not isinstance(issue, dict):
+                raise RuntimeError("invalid issue row")
             body = issue.get("body")
-            if ("pull_request" not in issue and trusted_publisher(issue)
+            if ("pull_request" not in issue and trusted_publisher(issue, publisher_id)
                     and isinstance(body, str) and body.startswith(marker + "\n")):
                 return {"status": "already-published", "issue_number": positive_id(issue["number"])}
         if len(issues) < 100:
@@ -142,8 +142,10 @@ def read_jobs(api, prefix: str, run_id: int, attempt: int) -> list[dict]:
     raise RuntimeError("jobs exceed the bounded pagination window")
 
 
-def publish(api, repository: str, repository_id: int, run_id: int, attempt: int) -> dict:
+def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
+            publisher_id: int = GITHUB_ACTIONS_BOT_ID) -> dict:
     repository = repository_name(repository)
+    publisher_id = positive_id(publisher_id)
     repository_id, run_id, attempt = map(positive_id, (repository_id, run_id, attempt))
     prefix = "/repos/" + repository
     run = api.request(f"{prefix}/actions/runs/{run_id}/attempts/{attempt}")
@@ -173,7 +175,7 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int)
     # already failed; a clean cancel creates no repair issue.
     if conclusion == "cancelled" and not failed:
         return {"status": "not-a-failure", "conclusion": conclusion}
-    existing = find_published(api, prefix, marker, created)
+    existing = find_published(api, prefix, marker, created, publisher_id)
     if existing is not None:
         return existing
     # Names, titles, branch text, logs and artifacts are deliberately omitted:
@@ -196,8 +198,8 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int)
     payload = {"title": f"[CI feedback] workflow {workflow_id}: run {run_id}/{attempt}", "body": body}
     try:
         issue = api.request(prefix + "/issues", payload)
-    except (RuntimeError, OSError, urllib.error.URLError):
-        recovered = find_published(api, prefix, marker, created)
+    except (RuntimeError, ValueError, OSError, urllib.error.URLError):
+        recovered = find_published(api, prefix, marker, created, publisher_id)
         if recovered is not None:
             return recovered
         raise
@@ -210,7 +212,8 @@ def main() -> int:
     repository = repository_name(os.environ["GITHUB_REPOSITORY"])
     api = GitHubAPI(repository, os.environ["GH_TOKEN"])
     result = publish(api, repository, positive_id(os.environ["GITHUB_REPOSITORY_ID"]),
-                     positive_id(os.environ["FEEDBACK_RUN_ID"]), positive_id(os.environ["FEEDBACK_RUN_ATTEMPT"]))
+                     positive_id(os.environ["FEEDBACK_RUN_ID"]), positive_id(os.environ["FEEDBACK_RUN_ATTEMPT"]),
+                     positive_id(os.environ.get("FEEDBACK_PUBLISHER_ID", str(GITHUB_ACTIONS_BOT_ID))))
     print(json.dumps(result, sort_keys=True))
     return 0
 

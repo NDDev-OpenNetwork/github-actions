@@ -33,7 +33,7 @@ application deploy.
 ## Deduplication and bounded work
 
 Serialize reporters for the same repository/run/attempt with cancellation off.
-Direct issue listing avoids search-index lag; bot-authored markers deduplicate
+Direct issue listing avoids search-index lag; exact-publisher markers deduplicate
 re-delivery, including an already closed issue. Collection is bounded to 10 pages
 of 100 jobs/issues and 4 MiB per response. Exceeding the inventory bound fails
 explicitly instead of assuming no prior issue. Mutation is a single issue POST;
@@ -48,8 +48,11 @@ credentials, broad PAT or private runner is needed.
 An issue is durable evidence, not proof that an agent received or executed it.
 `delivery_state: unassigned` is intentional: this publisher does not invent a
 repair owner or start a model session. The repository owner assigns the agent.
-Deduplicate by repository/run/attempt, including GitHub App bots, not only
-`github-actions[bot]`. After an ambiguous POST timeout the publisher re-reads
+Deduplicate by repository/run/attempt and the configured bot account numeric ID.
+The composite action defaults `publisher-id` to GitHub Actions' bot ID. A custom
+App token must supply its own bot account ID from trusted configuration, never
+from the triggering event or issue body. Neither `type: Bot` nor a `[bot]` login
+suffix alone establishes trust. After an ambiguous POST timeout the publisher re-reads
 the durable marker instead of creating a second issue. Commands and manifests
 come from trusted project configuration, never issue text or CI log instructions.
 
