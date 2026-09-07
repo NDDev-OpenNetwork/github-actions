@@ -71,13 +71,19 @@ class GitHubAPI:
         return json.loads(raw)
 
 
-def trusted_publisher(issue: dict, publisher_id: int) -> bool:
+def publisher_account_type(value: str) -> str:
+    if not isinstance(value, str) or value not in {"Bot", "User"}:
+        raise ValueError("publisher account type must be Bot or User")
+    return value
+
+
+def trusted_publisher(issue: dict, publisher_id: int, publisher_type: str = "Bot") -> bool:
     """Only the configured immutable publisher identity may suppress delivery."""
     user = issue.get("user")
     if not isinstance(user, dict):
         return False
     return (type(user.get("id")) is int and user["id"] == publisher_id
-            and user.get("type") == "Bot")
+            and user.get("type") == publisher_type)
 
 
 def failed_jobs(repository: str, run_id: int, jobs: list[dict]) -> list[dict]:
@@ -93,7 +99,8 @@ def failed_jobs(repository: str, run_id: int, jobs: list[dict]) -> list[dict]:
     return failed
 
 
-def find_published(api, prefix: str, marker: str, created: dt.datetime, publisher_id: int):
+def find_published(api, prefix: str, marker: str, created: dt.datetime, publisher_id: int,
+                   publisher_type: str = "Bot"):
     """Direct listing avoids search-index lag. A full bound raises rather than
     claiming an absent duplicate. Caller serializes this key."""
     for page in range(1, MAX_PAGES + 1):
@@ -108,7 +115,7 @@ def find_published(api, prefix: str, marker: str, created: dt.datetime, publishe
             if not isinstance(issue, dict):
                 raise RuntimeError("invalid issue row")
             body = issue.get("body")
-            if ("pull_request" not in issue and trusted_publisher(issue, publisher_id)
+            if ("pull_request" not in issue and trusted_publisher(issue, publisher_id, publisher_type)
                     and isinstance(body, str) and body.startswith(marker + "\n")):
                 return {"status": "already-published", "issue_number": positive_id(issue["number"])}
         if len(issues) < 100:
@@ -143,9 +150,10 @@ def read_jobs(api, prefix: str, run_id: int, attempt: int) -> list[dict]:
 
 
 def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
-            publisher_id: int = GITHUB_ACTIONS_BOT_ID) -> dict:
+            publisher_id: int = GITHUB_ACTIONS_BOT_ID, publisher_type: str = "Bot") -> dict:
     repository = repository_name(repository)
     publisher_id = positive_id(publisher_id)
+    publisher_type = publisher_account_type(publisher_type)
     repository_id, run_id, attempt = map(positive_id, (repository_id, run_id, attempt))
     prefix = "/repos/" + repository
     run = api.request(f"{prefix}/actions/runs/{run_id}/attempts/{attempt}")
@@ -175,12 +183,17 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
     # already failed; a clean cancel creates no repair issue.
     if conclusion == "cancelled" and not failed:
         return {"status": "not-a-failure", "conclusion": conclusion}
-    existing = find_published(api, prefix, marker, created, publisher_id)
+    existing = find_published(api, prefix, marker, created, publisher_id, publisher_type)
     if existing is not None:
         return existing
     # Names, titles, branch text, logs and artifacts are deliberately omitted:
     # they can contain secrets or adversarial instructions from project input.
     evidence = {"schema_version": 1, "kind": "ci.failure", "blocking": False,
+        "observed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "run_created_at": created.isoformat(),
+        "failure": {"classification": "unknown", "basis": "run-and-job-conclusions",
+                    "reason": (f"{len(failed)} job(s) failed on this exact attempt."
+                               if failed else "The run failed without a failed job record.")},
         "repository": {"id": repository_id, "full_name": repository},
         "source": {"workflow_id": workflow_id, "run_id": run_id, "run_attempt": attempt, "head_sha": sha},
         "conclusion": conclusion, "jobs_observed": len(jobs), "failed_jobs": failed[:100],
@@ -199,7 +212,7 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
     try:
         issue = api.request(prefix + "/issues", payload)
     except (RuntimeError, ValueError, OSError, urllib.error.URLError):
-        recovered = find_published(api, prefix, marker, created, publisher_id)
+        recovered = find_published(api, prefix, marker, created, publisher_id, publisher_type)
         if recovered is not None:
             return recovered
         raise
@@ -213,7 +226,8 @@ def main() -> int:
     api = GitHubAPI(repository, os.environ["GH_TOKEN"])
     result = publish(api, repository, positive_id(os.environ["GITHUB_REPOSITORY_ID"]),
                      positive_id(os.environ["FEEDBACK_RUN_ID"]), positive_id(os.environ["FEEDBACK_RUN_ATTEMPT"]),
-                     positive_id(os.environ.get("FEEDBACK_PUBLISHER_ID", str(GITHUB_ACTIONS_BOT_ID))))
+                     positive_id(os.environ.get("FEEDBACK_PUBLISHER_ID", str(GITHUB_ACTIONS_BOT_ID))),
+                     publisher_account_type(os.environ.get("FEEDBACK_PUBLISHER_TYPE", "Bot")))
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -11,8 +11,11 @@ inputs:
     description: Repository token with actions read and issues write permissions.
     required: true
   publisher-id:
-    description: Trusted bot account numeric ID. Set from trusted configuration for a custom App token.
+    description: Trusted publisher numeric ID. Set from trusted configuration for a custom token.
     default: '41898282'
+  publisher-type:
+    description: Trusted account type (Bot or explicitly configured User), never event or issue input.
+    default: Bot
 runs:
   using: composite
   steps:
@@ -23,5 +26,6 @@ runs:
         FEEDBACK_RUN_ID: ${{ inputs.run-id }}
         FEEDBACK_RUN_ATTEMPT: ${{ inputs.run-attempt }}
         FEEDBACK_PUBLISHER_ID: ${{ inputs.publisher-id }}
+        FEEDBACK_PUBLISHER_TYPE: ${{ inputs.publisher-type }}
         GH_TOKEN: ${{ inputs.token }}
       run: python3 "${FEEDBACK_ACTION_PATH}/feedback.py"

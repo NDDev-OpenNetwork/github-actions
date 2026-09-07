@@ -419,6 +419,9 @@ Versioning.
 
 ## [Unreleased]
 
+- Permit an explicitly trusted User publisher while retaining exact ID/type
+  deduplication and the Bot default; include bounded failure reason and timestamps.
+
 - Include CodeQL in background CI feedback and limit issue-write permission
   to the publisher job.
 
