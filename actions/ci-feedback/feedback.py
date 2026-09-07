@@ -194,8 +194,6 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
                     "run_conclusion": conclusion}
         return result
 
-    if not active and conclusion in CLEAN_CONCLUSIONS:
-        return outcome({"status": "not-a-failure", "conclusion": conclusion})
     sha = run.get("head_sha", "")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise RuntimeError("invalid source commit")
@@ -204,6 +202,8 @@ def publish(api, repository: str, repository_id: int, run_id: int, attempt: int,
         raise RuntimeError("run creation time lacks timezone")
     workflow_id = positive_id(run["workflow_id"])
     marker = f"<!-- ci-feedback:v1:{repository_id}:{run_id}:{attempt} -->"
+    if not active and conclusion in CLEAN_CONCLUSIONS:
+        return outcome({"status": "not-a-failure", "conclusion": conclusion})
     jobs = read_jobs(api, prefix, run_id, attempt, head_sha=sha)
     failed = failed_jobs(repository, run_id, jobs, active=active)
     if active and not failed:
