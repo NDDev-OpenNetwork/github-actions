@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 concurrency:
-  # A shared group discards older pending runs even when cancellation is false.
-  group: ${{ github.workflow }}-${{ github.run_id }}
-  cancel-in-progress: false
+  # Only stateless PR verification is superseded; main/manual runs keep unique groups.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -107,6 +107,8 @@ jobs:
       - run: go mod download
       - run: go mod verify
       - run: go test ./...
+      - name: Test background CI feedback
+        run: python3 -m unittest discover -s tests -p test_ci_feedback.py -v
 
   race:
     name: Race

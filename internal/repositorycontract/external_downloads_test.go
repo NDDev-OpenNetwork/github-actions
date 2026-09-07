@@ -13,6 +13,7 @@ func TestEveryNetworkBootstrapSurfaceIsClassified(t *testing.T) {
 	t.Parallel()
 	root := toolCacheRepositoryRoot(t)
 	want := []string{
+		"actions/ci-feedback/feedback.py",
 		"actions/package-cache/package-cache.sh",
 		"actions/tool-cache/tool-cache.sh",
 		"internal/garmproviderincus/provider/admission.go",
@@ -34,7 +35,13 @@ func TestEveryNetworkBootstrapSurfaceIsClassified(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if entry.IsDir() || strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, ".md") {
+			if entry.IsDir() {
+				if entry.Name() == "__pycache__" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".pyc") {
 				return nil
 			}
 			raw, err := os.ReadFile(path)
