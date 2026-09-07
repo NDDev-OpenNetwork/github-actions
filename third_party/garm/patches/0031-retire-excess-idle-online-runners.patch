@@ -15,7 +15,7 @@ index e467049..423eee2 100644
  	return nil
  }
 diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
-index dd6a316..e943468 100644
+index dd6a316..9883ec9 100644
 --- a/workers/scaleset/scaleset.go
 +++ b/workers/scaleset/scaleset.go
 @@ -90,6 +90,7 @@ type Worker struct {
@@ -26,68 +26,11 @@ index dd6a316..e943468 100644
  }
  
  func (w *Worker) ensureScaleSetInGitHub() error {
-@@ -489,6 +490,16 @@ func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error
+@@ -489,6 +490,7 @@ func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error
  		return fmt.Errorf("getting scale set client: %w", err)
  	}
  	dbRunnersByName := w.runnerByName()
-+	return continueAfterIdleRetirement(w.ctx, w.retireExcessIdleCapacity(), func() error {
-+		return w.consolidateRunnersAfterIdleRetirement(scaleSetCli, ghRunnersByName, dbRunnersByName)
-+	})
-+}
-+
-+func (w *Worker) consolidateRunnersAfterIdleRetirement(
-+	scaleSetCli idleActionsClient,
-+	ghRunnersByName map[string]params.RunnerReference,
-+	dbRunnersByName map[string]params.Instance,
-+) error {
++	warnIdleRetirement(w.ctx, w.retireExcessIdleCapacity())
  	// Cross check what exists in github with what we have in the database.
  	for name, runner := range ghRunnersByName {
  		status := runner.GetStatus()
-@@ -513,45 +524,8 @@ func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error
- 	}
- 	defer unlockFn()
- 
--	// refresh the map. It may have been mutated above.
--	dbRunnersByName = w.runnerByName()
--	// Cross check what exists in the database with what we have in github.
--	for name, runner := range dbRunnersByName {
--		// in the case of scale sets, JIT configs are used. There is no situation
--		// in which we create a runner in the DB and one does not exist in github.
--		// We can safely assume that if the runner is not in github anymore, it can
--		// be removed from the provider and the DB.
--		if providerRemovalProtected(runner.Status) {
--			continue
--		}
--
--		if _, ok := ghRunnersByName[name]; !ok {
--			if ok := locking.TryLock(name, w.consumerID); !ok {
--				slog.DebugContext(w.ctx, "runner is locked; skipping", "runner_name", name)
--				continue
--			}
--			// unlock the runner only after this function returns. This function also cross
--			// checks between the provider and the database, and removes left over runners.
--			// If we unlock early, the provider worker will attempt to remove runners that
--			// we set in pending_delete. This function holds the mutex, so we won't see those
--			// changes until we return. So we hold the instance lock here until we are done.
--			// That way, even if the provider sees the pending_delete status, it won't act on
--			// it until it manages to lock the instance.
--			defer locking.Unlock(name, false)
--
--			slog.InfoContext(w.ctx, "runner does not exist in github; removing from provider", "runner_name", name)
--			instance, err := w.setRunnerDBStatus(runner.Name, commonParams.InstancePendingDelete)
--			if err != nil {
--				if !errors.Is(err, runnerErrors.ErrNotFound) {
--					return fmt.Errorf("updating runner %s: %w", instance.Name, err)
--				}
--			}
--			// We will get an update event anyway from the watcher, but updating the runner
--			// here, will prevent race conditions if some other event is already in the queue
--			// which involves this runner. For the duration of the lifetime of this function, we
--			// hold the lock, so no race condition can occur.
--			w.runners[runner.ID] = instance
--		}
-+	if err := w.markDBRunnersMissingFromGitHub(ghRunnersByName); err != nil {
-+		return err
- 	}
- 
- 	// Cross check what exists in the provider with the DB.

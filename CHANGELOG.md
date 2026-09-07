@@ -10,7 +10,9 @@
   bootstrap/active states and JobStillRunningException refuse the delete.
   Provider delete remains GARM's ordinary absent-runner reconcile. Idle
   retirement is best-effort: a remote read or delete failure is a classified
-  warning and cannot block absent-runner consolidation. Candidate age and
+  warning and cannot block absent-runner consolidation. The original
+  consolidation lock lifetime is unchanged: runner Unlock stays deferred until
+  consolidateRunnerState returns. Candidate age and
   min-idle are decided locally before any new API call. The `.92` patches are
   unchanged. REST overlay fallback for acknowledged never-started jobs is not
   in this derivative: JobAssigned does not bind GitHub job ID or run attempt.

@@ -221,55 +221,6 @@ func warnIdleRetirement(ctx context.Context, err error) {
 	slog.WarnContext(ctx, "idle retirement failed; continuing runner consolidation", "error", err, "error_class", "idle-retirement")
 }
 
-func continueAfterIdleRetirement(ctx context.Context, retireErr error, cleanupAbsent func() error) error {
-	warnIdleRetirement(ctx, retireErr)
-	if cleanupAbsent == nil {
-		return nil
-	}
-	return cleanupAbsent()
-}
-
-func markDBRunnersMissingFromGitHub(
-	dbRunners map[string]params.Instance,
-	ghRunners map[string]params.RunnerReference,
-	markAbsent func(params.Instance) error,
-) error {
-	if markAbsent == nil {
-		return fmt.Errorf("absent-runner cleanup is required")
-	}
-	for _, runner := range dbRunners {
-		if providerRemovalProtected(runner.Status) {
-			continue
-		}
-		if _, ok := ghRunners[runner.Name]; ok {
-			continue
-		}
-		if err := markAbsent(runner); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (w *Worker) markDBRunnersMissingFromGitHub(ghRunners map[string]params.RunnerReference) error {
-	return markDBRunnersMissingFromGitHub(w.runnerByName(), ghRunners, func(runner params.Instance) error {
-		if ok := locking.TryLock(runner.Name, w.consumerID); !ok {
-			slog.DebugContext(w.ctx, "runner is locked; skipping", "runner_name", runner.Name)
-			return nil
-		}
-		defer locking.Unlock(runner.Name, false)
-		slog.InfoContext(w.ctx, "runner does not exist in github; removing from provider", "runner_name", runner.Name)
-		instance, err := w.setRunnerDBStatus(runner.Name, commonParams.InstancePendingDelete)
-		if err != nil {
-			if !errors.Is(err, runnerErrors.ErrNotFound) {
-				return fmt.Errorf("updating runner %s: %w", instance.Name, err)
-			}
-		}
-		w.runners[runner.ID] = instance
-		return nil
-	})
-}
-
 type idleActionsClient interface {
 	RemoveRunner(context.Context, int64) error
 	GetRunner(context.Context, int64) (params.RunnerReference, error)

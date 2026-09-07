@@ -231,45 +231,13 @@ func TestIdleRetirementReadErrorResetsConfirmation(t *testing.T) {
 	}
 }
 
-func TestContinueAfterIdleRetirementStillCleansAbsentRunner(t *testing.T) {
+func TestWarnIdleRetirementDoesNotReturn(t *testing.T) {
 	t.Parallel()
-	cleaned := false
-	err := continueAfterIdleRetirement(context.Background(), errors.New("Actions GetRunner 500"), func() error {
-		cleaned = true
-		return nil
-	})
-	if err != nil || !cleaned {
-		t.Fatalf("idle-retirement API failure blocked absent cleanup: cleaned=%t err=%v", cleaned, err)
-	}
-}
-
-func TestWorkerConsolidationIdleRetirementFailureStillMarksAbsentRunner(t *testing.T) {
-	t.Parallel()
-	absent := params.Instance{
-		ID: "example-absent", Name: "example-absent",
-		Status: commonParams.InstanceRunning, RunnerStatus: params.RunnerIdle,
-	}
-	present := params.Instance{
-		ID: "example-present", Name: "example-present",
-		Status: commonParams.InstanceRunning, RunnerStatus: params.RunnerActive,
-	}
-	var marked []string
-	err := continueAfterIdleRetirement(context.Background(), errors.New("Actions GetRunner 500"), func() error {
-		return markDBRunnersMissingFromGitHub(
-			map[string]params.Instance{absent.Name: absent, present.Name: present},
-			map[string]params.RunnerReference{present.Name: {Name: present.Name, ID: 9}},
-			func(runner params.Instance) error {
-				marked = append(marked, runner.Name)
-				return nil
-			},
-		)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(marked) != 1 || marked[0] != "example-absent" {
-		t.Fatalf("marked=%v", marked)
-	}
+	// Helper evidence only: production consolidateRunnerState calls
+	// warnIdleRetirement then keeps the original body. This does not construct
+	// a Worker or exercise DB/provider consolidation.
+	warnIdleRetirement(context.Background(), errors.New("Actions GetRunner 500"))
+	warnIdleRetirement(context.Background(), nil)
 }
 
 func TestRetireExcessIdleCapacityNoAgedCandidatesMakesNoClientCall(t *testing.T) {
@@ -365,7 +333,9 @@ func TestApplyIdleRemoveRunnerConflictDoesNotReadBack(t *testing.T) {
 	}
 }
 
-func TestRemoveIdleRunnerAfterConfirmationPendingDeleteOnce(t *testing.T) {
+func TestApplyConfirmedIdleRemovalPendingDeleteOnce(t *testing.T) {
+	// Helper evidence only: fake Actions client plus injected writer, not a
+	// Worker, database, or live HTTP transport.
 	var marked []string
 	runner := params.Instance{Name: "example-runner", AgentID: 42}
 	cli := &fakeIdleActions{getErr: runnerErrors.ErrNotFound}
@@ -378,7 +348,7 @@ func TestRemoveIdleRunnerAfterConfirmationPendingDeleteOnce(t *testing.T) {
 	}
 }
 
-func TestRemoveIdleRunnerAfterConfirmationConflictDoesNotPendingDelete(t *testing.T) {
+func TestApplyConfirmedIdleRemovalConflictDoesNotPendingDelete(t *testing.T) {
 	var marked []string
 	cli := &fakeIdleActions{removeErr: errString("conflict: JobStillRunningException")}
 	outcome, err := applyConfirmedIdleRemoval(context.Background(), cli, params.Instance{Name: "example-runner", AgentID: 42}, func(got params.Instance) error {
@@ -390,7 +360,7 @@ func TestRemoveIdleRunnerAfterConfirmationConflictDoesNotPendingDelete(t *testin
 	}
 }
 
-func TestRemoveIdleRunnerAfterConfirmationRefusesUnexpectedStatus(t *testing.T) {
+func TestApplyConfirmedIdleRemovalRefusesUnexpectedStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		removeErr error
