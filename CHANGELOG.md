@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Confirm current GitHub scale-set demand before each new JIT registration.
+  A retained local assignment requests reconciliation but cannot allocate a
+  runner against a fresh zero-demand snapshot. Reads have a five-second
+  deadline and a thirty-second backoff after zero, invalid or failed evidence;
+  a stale local zero can still recover against fresh positive demand. Existing
+  jobs, queue timestamps and runners are preserved. Fast jobs whose start and
+  completion share one message batch no longer retain running capacity, and
+  terminal records from earlier writers cannot request more runners. This is
+  GARM `v0.2.1-nddev.92`; runtime adoption is a separate deployment operation.
+
 - Recovery requires exact complete progress evidence, preserves unresolved
   identities on checkpoint/restart failures, and never replays interrupted
   restart authorization. Blocked/suppressed stalled work remains unhealthy;
@@ -17,14 +27,12 @@
   lost POST reply. This publisher does not invent an agent consumer or execute
   log text.
 
-- Scale up from durable admitted queue ownership, not GitHub
-  `DesiredRunnerCount`. After a sibling runner is deleted, GitHub reports
-  zero assigned jobs while `JobAssigned` waiters still need a runner, so
-  autoscale never called create and Almaty `Candidate certified` cycled a
-  new UUID every five minutes with the scale set at 0. Pre-job creates
+- GARM `v0.2.1-nddev.91` introduced demand reconciliation from durable admitted
+  queue ownership when the persisted `DesiredRunnerCount` was zero. The later
+  `.92` change above requires current GitHub evidence before actual creation.
+  Pre-job creates
   also bind a queued non-terminal waiter when the journal is not yet
-  assigned, and terminal lineage is omitted from retry inventory. This is
-  GARM `v0.2.1-nddev.91`.
+  assigned, and terminal lineage is omitted from retry inventory.
 
 - Pack 4 GiB workers onto the member with the least remaining memory that
   still fits, instead of spreading onto empty 16 GiB hosts. The emptiest-

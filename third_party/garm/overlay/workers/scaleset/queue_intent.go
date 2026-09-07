@@ -403,21 +403,22 @@ func (c *queueIntentCoordinator) HasQueuedAvailable(scaleSet params.ScaleSet, jo
 	return pending, err
 }
 
-// AdmittedCapacityTarget is the exact current runner target from durable queue
-// ownership. GitHub DesiredRunnerCount is not an upper bound: it drops to zero
-// while JobAssigned waiters still need a runner, which is the
-// assigned-without-instance stall. Cancellations leave the journal, so this
-// count already clips stale-high desired. Cap it with MaxRunners at the
-// scale-up call site via admittedScaleUpTarget.
+// AdmittedCapacityTarget counts non-terminal local resource ownership. It is
+// an admission ceiling, not proof that GitHub can dispatch the retained jobs.
+// The scale-up path confirms current GitHub demand before creating a runner;
+// a stale-low persisted message count alone must not prevent that read.
 func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet, entity params.ForgeEntity) (int, error) {
 	config, err := c.loadConfig()
 	if err != nil {
 		return 0, err
 	}
 	target := 0
-	err = c.update(config, func(journal *queueIntentJournal, _ time.Time) error {
+	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		for _, intent := range journal.Intents {
 			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name || intent.Owner != entity.Owner {
+				continue
+			}
+			if expiry, terminal := journal.TerminalJobs[intent.JobID]; terminal && expiry.After(now) {
 				continue
 			}
 			switch intent.State {
@@ -442,9 +443,9 @@ func admittedScaleUpTarget(intentTarget, maxRunners int) int {
 	return intentTarget
 }
 
-// shouldScaleUp is true when GitHub desired or durable admitted ownership
-// still needs a runner. Admitted is the floor that GitHub TotalAssignedJobs
-// does not provide after the runner for a sibling job is deleted.
+// shouldScaleUp requests reconciliation when either local observation suggests
+// missing capacity. The create path still requires both local admission and a
+// fresh GitHub demand snapshot; neither stale counter authorizes a new runner.
 func shouldScaleUp(current, githubDesired, admitted int) bool {
 	return current < admitted || current < githubDesired
 }
@@ -619,18 +620,25 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		suppressedTerminalAssignments = suppressedTerminalAssignments[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
+		for _, job := range started {
+			startedKeys[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)] = struct{}{}
+		}
 		for _, job := range completed {
 			if !validQueueText(job.JobID) {
 				return fmt.Errorf("completed job has invalid job ID")
 			}
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
 			intent, exists := journal.Intents[key]
+			_, startedInBatch := startedKeys[key]
 			// GitHub may retire a capacity waiter before it ever emits
 			// JobAvailable, then immediately assign the same workflow job under a
 			// new UUID. Retain that unstarted intent as a terminal lineage marker;
 			// it is excluded from admission below and lets the replacement inherit
 			// the original queue time instead of starving at the tail forever.
-			if exists && intent.RunnerRequestID == 0 && intent.RunnerName == "" && intent.State != queueStateRunning {
+			// A fast job may start and finish in this one batch. Completion
+			// must win; keeping its pre-start lineage would let the started
+			// loop resurrect a terminal running intent and request spare VMs.
+			if exists && !startedInBatch && intent.RunnerRequestID == 0 && intent.RunnerName == "" && intent.State != queueStateRunning {
 				intent.State = queueStateQueued
 				intent.StateEnteredAt = now
 				intent.UpdatedAt = now

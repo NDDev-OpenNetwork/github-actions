@@ -14,6 +14,68 @@ import (
 	"github.com/cloudbase/garm/params"
 )
 
+func TestFastStartedCompletedBatchDoesNotRetainRunningCapacity(t *testing.T) {
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "example-integration")
+	job := testQueueJob(101, "example-owner", "example-repository", now)
+	job.RunnerRequestID = 0
+	job.RunnerName = ""
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	started := job
+	started.RunnerName = "example-runner"
+	started.RunnerID = 202
+	now = now.Add(time.Minute)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, []params.ScaleSetJobMessage{started}, []params.ScaleSetJobMessage{started}); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)]; exists {
+		t.Fatal("completed execution was retained as running capacity")
+	}
+	if !journal.TerminalJobs[job.JobID].After(now) {
+		t.Fatal("completed execution lost its terminal receipt")
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("completed execution still requests a runner: target=%d err=%v", target, err)
+	}
+}
+
+func TestTerminalRunningRecordFromOlderWriterDoesNotRequestCapacity(t *testing.T) {
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "example-integration")
+	job := testQueueJob(101, "example-owner", "example-repository", now)
+	job.RunnerRequestID = 0
+	job.RunnerName = "example-runner"
+	job.RunnerID = 202
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, []params.ScaleSetJobMessage{job}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Older writers could leave a running record alongside its terminal
+	// receipt after a batched start/complete. Read it without erasing evidence.
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markTerminalJob(&journal, job.JobID, now.Add(time.Hour))
+	if err := writeQueueIntentJournal(coordinator.journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("legacy terminal execution requested capacity: target=%d err=%v", target, err)
+	}
+}
+
 func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
 	now := time.Date(2026, 8, 19, 7, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
@@ -66,14 +128,12 @@ func TestAdmittedScaleUpTargetCapsAtMaxRunners(t *testing.T) {
 	}
 }
 
-func TestScaleUpUsesAdmittedWhenGitHubDesiredIsZero(t *testing.T) {
+func TestAdmittedWaiterRequestsDemandReconciliationWhenPersistedDesiredIsZero(t *testing.T) {
 	t.Parallel()
-	// Live 2026-09-06: Candidate certified sat assigned-without-instance for
-	// 17 minutes because handleAutoScale compared runnerCount to GitHub
-	// DesiredRunnerCount (0 after the sibling runner was deleted) and never
-	// called handleScaleUp.
+	// A persisted zero must not prevent the authoritative demand read. The
+	// confirmed-demand tests separately prove that a fresh zero forbids create.
 	if !shouldScaleUp(0, 0, 1) {
-		t.Fatal("assigned-without-instance must scale up when GitHub desired is 0")
+		t.Fatal("an admitted waiter must request current demand when persisted desired is 0")
 	}
 	if shouldScaleDown(0, 0, 1) {
 		t.Fatal("empty pool with an admitted waiter must not scale down")

@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.91"
+readonly derivative_version="v0.2.1-nddev.92"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="f57cf8d0860745106d21b38cfa097f284b710906ea6d8303b3be4fd913b99d97"
+readonly expected_binary_sha256="c112777344debf7e9c0b82524b6de381872ff6576e700cc4c4469b136770b560"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -63,6 +63,7 @@ readonly patch_paths=(
   "third_party/garm/patches/0027-bound-upstream-download-attempts.patch"
   "third_party/garm/patches/0028-terminal-workflow-run-reconciliation.patch"
   "third_party/garm/patches/0029-scale-up-from-admitted-intent.patch"
+  "third_party/garm/patches/0030-confirm-live-scale-set-demand.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -94,24 +95,31 @@ readonly patch_sha256s=(
   "35f257c8016c7999c8780970f673c5b35e04b3b3301565cffea0bd242e168456"
   "3bc2722e87f1721c6094130d0f07310a796bf8074504ef121acac8ca7402887c"
   "e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d"
+  "102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
   "third_party/garm/overlay/workers/scaleset/queue_intent_test.go"
   "third_party/garm/overlay/workers/provider/nddev_create_retry.go"
   "third_party/garm/overlay/workers/provider/nddev_create_retry_test.go"
+  "third_party/garm/overlay/workers/scaleset/confirmed_demand.go"
+  "third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go"
 )
 readonly overlay_sha256s=(
-  "b20c6261ad7896ae3ca56befb64fefb5cd565322d77976af2135ca9e386643f1"
-  "a060182f2105307c265e6d8c8064bb4850f21af465bcbeaae3502f2a1360795b"
+  "be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7"
+  "e4680119fd004f56db9801583de3781e70597b1a0f7c79eee9edd7cb95d80cdf"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
+  "5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458"
+  "32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
   "workers/scaleset/queue_intent_test.go"
   "workers/provider/nddev_create_retry.go"
   "workers/provider/nddev_create_retry_test.go"
+  "workers/scaleset/confirmed_demand.go"
+  "workers/scaleset/confirmed_demand_test.go"
 )
 # END GENERATED REGION
 
