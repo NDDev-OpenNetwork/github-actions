@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 3
     steps:
       # Trusted immutable action code only. No checkout of the triggering PR.
-      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@5ee031753c583e090c82f41347f6377f214dfa21
+      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@c9f86b984823765a889690f4fff1a605343f31be
         with:
           run-id: ${{ inputs.run-id }}
           run-attempt: ${{ inputs.run-attempt }}
