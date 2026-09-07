@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.93
+derivative_version: v0.2.1-nddev.94
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -100,13 +100,22 @@ patches:
   - path: third_party/garm/patches/0031-retire-excess-idle-online-runners.patch
     sha256: 62f8a273e86ed19fe80905ad7205fbf5d6fdefdf1847cc085303c613db3f1345
     purpose: Require Actions RemoveRunner to return 204 and call warnIdleRetirement before the original consolidateRunnerState body so idle-retirement failures cannot block absent-runner consolidation while runner locks stay held until that function returns.
+  - path: third_party/garm/patches/0032-exact-scale-set-job-identity.patch
+    sha256: 06a9aa4ec2ea5a6c75c54a52ac3f05688d62cfa58b3a6a6c5a57f801008f8089
+    purpose: Bind scale-set stale-job mutation to check-run external_id, workflow_job.check_run_url, repository, exact attempt, numeric job ID and source SHA. A name is a search hint only. Missing fields, incomplete pagination, wrong URL, wrong scale-set, non-Actions producer, access refusal and no exact match retain the intent.
+  - path: third_party/garm/patches/0033-live-message-demand-authority.patch
+    sha256: 8e11eb58f35720ee4650c9f7a420d4df6e23451bc1cbf741a1e40a97b6e195e8
+    purpose: Treat statistics.TotalAssignedJobs from the current MESSAGE session as scaling authority. Idle retirement requires a recent MESSAGE with messageID>0. A replayed MESSAGE with the same session and messageID does not refresh observedAt. A late message from a replaced session does not replace current demand. Session-create zeros and 202/nil long-polls are not idle evidence. Start failure deletes the new session. Accessors are mux-protected.
+  - path: third_party/garm/patches/0034-bump-golang-x-text-v0.39.0.patch
+    sha256: 2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2
+    purpose: Upgrade the one source-reachable advisory, golang.org/x/text, to v0.39.0. x/mod v0.37.0 and x/sync v0.21.0 are required transitives of that release. OpenPGP is not imported.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7
-    purpose: Fsync-backed central queue admission that excludes terminal capacity, gives completion precedence in fast start/complete batches, requests fresh demand when persisted desired is zero, demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, and FIFO-orders by FirstQueuedAt so a rewritten QueueTime cannot starve a GitHub-queued job behind a later UUID on the same label.
+    sha256: 44197acff7b8643827ab02637d60d2bbb06470313665a94e27c419291b2428ac
+    purpose: Fsync-backed central queue admission that excludes terminal capacity, gives completion precedence in fast start/complete batches, requests fresh demand when persisted desired is zero, demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, FIFO-orders by FirstQueuedAt, treats listener JobCompleted as a delivery-reservation end rather than a REST workflow-job terminal, does not alias a later same-run/name GUID onto that waiter, does not delete or rename an assigned waiter because an unrelated JobStarted arrived, and yields request-less occupancy when a dispatchable JobAvailable for another GUID is recorded.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
-    sha256: e4680119fd004f56db9801583de3781e70597b1a0f7c79eee9edd7cb95d80cdf
-    purpose: Prove completed batched execution cannot retain running capacity, an admitted waiter requests reconciliation when persisted desired is zero, expired never-started assigned waiters keep FIFO over later JobAssigned tokens, queued waiters refresh until the execution horizon then drop, FirstQueuedAt wins when QueueTime moves, plus lineage transfer, bootstrap, fairness, width and acknowledgement coverage.
+    sha256: 3f035401d8137c353ab8a32926a14358965aa7b87865d66446c4f8327e553f6b
+    purpose: Prove completed batched execution cannot retain running capacity, an admitted waiter requests reconciliation when persisted desired is zero, expired never-started assigned waiters keep FIFO over later JobAssigned tokens, queued waiters refresh until the execution horizon then drop, FirstQueuedAt wins when QueueTime moves, a replacement GUID does not inherit a completed waiter's queue clock, REST still-queued identity clears a listener delivery tombstone, unrelated JobStarted does not consume another GUID's assigned waiter or FIFO clock, a dispatchable JobAvailable takes occupancy from a request-less reservation without deleting it, plus bootstrap, fairness, width and acknowledgement coverage.
   - path: third_party/garm/overlay/workers/provider/nddev_create_retry.go
     sha256: 2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219
     purpose: Fsync-backed schema-v2 instance-to-intent reservations that bind a pre-job create to a queued non-terminal waiter when no assigned intent exists yet, skip terminal lineage from active inventory, and treat job-keyed capacity refusals as cluster backpressure that never opens a 24-hour circuit.
@@ -114,17 +123,17 @@ overlays:
     sha256: c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff
     purpose: Prove a pre-job create binds the live queued waiter rather than terminal lineage, unique-owner reconstruction, tenant-qualified shared-capacity ownership, selective terminal pruning, blocked-intent preservation, and fail-closed behavior when every exact intent is blocked.
   - path: third_party/garm/overlay/workers/scaleset/confirmed_demand.go
-    sha256: 5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458
-    purpose: Bound each new JIT registration by current GitHub demand with a five-second request deadline and thirty-second negative/error backoff; preserve existing jobs and workers.
+    sha256: 8a99d172b4aaf7f113081c776bbde471db6f85420bf5eca5a856a40c4e59606b
+    purpose: Bound each new JIT registration by the latest live MESSAGE assigned counter from the current listener session. Idle retirement additionally requires a recent MESSAGE with messageID>0. Unknown, invalid or unobserved demand fails closed. A 202/nil long-poll is not a heartbeat and does not expire legitimate scaling.
   - path: third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go
-    sha256: 32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8
-    purpose: Prove fresh zero demand prevents allocation, stale persisted zero can recover against fresh positive demand, positive observations are not reused, and missing, mismatched or unavailable evidence fails closed.
+    sha256: 453e6252ab13f29feff0b1fbae6c418e081bb89222accf1551c90bf7eac12a3f
+    purpose: Prove unknown or unobserved demand cannot allocate, a live session zero does not create, a live positive count can, admission and max runners still cap the target, an invalid count fails closed, session-create zeros are not idle-fresh, a changed generation cannot confirm idle removal, and JobStarted demand cannot confirm idle removal. Gate unit tests, not Worker/DB/HTTP integration.
   - path: third_party/garm/overlay/workers/scaleset/idle_online_retire.go
-    sha256: a7eb84571633d76ce6f3134b362e90b695beb7f4f36c882363bef087ad2d3d69
-    purpose: Retire excess undemanded idle ephemeral JIT registrations through Actions RemoveRunner after two matching observations, requiring REST busy to be explicit false and refusing omitted busy, identity change, demand, or JobStillRunningException. Local age and min-idle decide whether any API call happens; unseen observation IDs are pruned.
+    sha256: f635e3c3b1396452b02d6274f653785e58f0df8bd58afde87f9e8befc9340eb6
+    purpose: Retire excess undemanded idle ephemeral JIT registrations through Actions RemoveRunner after two matching observations, requiring REST busy to be explicit false, a recent MESSAGE assigned-zero, and the same observation immediately before removal. Refuses omitted busy, identity change, unknown live message demand, live assigned demand, or JobStillRunningException.
   - path: third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go
-    sha256: 94c4d4ba7368adba4e9620c89b116acccba6c09771413896150c4b0c5379dbc4
-    purpose: Prove omitted REST busy is unknown, Actions list Busy defaults are untrusted, all-zero scale-set statistics do not prove idle, mixed identity restarts observation, two matching observations are required before RemoveRunner, empty aged-candidate plans make no API call, and helper RemoveRunner 204+404, 409, unexpected 2xx and non-404 read-back outcomes. These are predicate and fake-client helpers, not Worker/DB/HTTP integration.
+    sha256: d8dbd3b5d3ca0c89cc8f869e27e1a074166be705a1b65e76b70e2f6cdf92d7dc
+    purpose: Prove omitted REST busy is unknown, Actions list Busy defaults are untrusted, unknown message demand cannot retire idle runners, all-zero live statistics do not prove demand by themselves, mixed identity restarts observation, two matching observations are required before RemoveRunner, empty aged-candidate plans make no API call, and helper RemoveRunner 204+404, 409, unexpected 2xx and non-404 read-back outcomes. These are predicate and fake-client helpers, not Worker/DB/HTTP integration.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -139,7 +148,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 8f6519500e90ad028c62b7fc3f5c8f2c7784fd82ef653c37c8db9e45afcfa841
+  binary_sha256: c6e811a52ddb1b9a4f57d54b8f4d6fd14f650b9c0226e9b0d5350d03fc87fdc0
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true

@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.93"
+readonly derivative_version="v0.2.1-nddev.94"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="8f6519500e90ad028c62b7fc3f5c8f2c7784fd82ef653c37c8db9e45afcfa841"
+readonly expected_binary_sha256="c6e811a52ddb1b9a4f57d54b8f4d6fd14f650b9c0226e9b0d5350d03fc87fdc0"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -65,6 +65,9 @@ readonly patch_paths=(
   "third_party/garm/patches/0029-scale-up-from-admitted-intent.patch"
   "third_party/garm/patches/0030-confirm-live-scale-set-demand.patch"
   "third_party/garm/patches/0031-retire-excess-idle-online-runners.patch"
+  "third_party/garm/patches/0032-exact-scale-set-job-identity.patch"
+  "third_party/garm/patches/0033-live-message-demand-authority.patch"
+  "third_party/garm/patches/0034-bump-golang-x-text-v0.39.0.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -98,6 +101,9 @@ readonly patch_sha256s=(
   "e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d"
   "102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497"
   "62f8a273e86ed19fe80905ad7205fbf5d6fdefdf1847cc085303c613db3f1345"
+  "06a9aa4ec2ea5a6c75c54a52ac3f05688d62cfa58b3a6a6c5a57f801008f8089"
+  "8e11eb58f35720ee4650c9f7a420d4df6e23451bc1cbf741a1e40a97b6e195e8"
+  "2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -110,14 +116,14 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go"
 )
 readonly overlay_sha256s=(
-  "be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7"
-  "e4680119fd004f56db9801583de3781e70597b1a0f7c79eee9edd7cb95d80cdf"
+  "44197acff7b8643827ab02637d60d2bbb06470313665a94e27c419291b2428ac"
+  "3f035401d8137c353ab8a32926a14358965aa7b87865d66446c4f8327e553f6b"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
-  "5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458"
-  "32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8"
-  "a7eb84571633d76ce6f3134b362e90b695beb7f4f36c882363bef087ad2d3d69"
-  "94c4d4ba7368adba4e9620c89b116acccba6c09771413896150c4b0c5379dbc4"
+  "8a99d172b4aaf7f113081c776bbde471db6f85420bf5eca5a856a40c4e59606b"
+  "453e6252ab13f29feff0b1fbae6c418e081bb89222accf1551c90bf7eac12a3f"
+  "f635e3c3b1396452b02d6274f653785e58f0df8bd58afde87f9e8befc9340eb6"
+  "d8dbd3b5d3ca0c89cc8f869e27e1a074166be705a1b65e76b70e2f6cdf92d7dc"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"

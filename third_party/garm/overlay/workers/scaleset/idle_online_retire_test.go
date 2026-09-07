@@ -38,26 +38,27 @@ func TestRestBusyOmittedIsUnknown(t *testing.T) {
 func baseEvidence(now time.Time) idleRetirementEvidence {
 	busy := false
 	return idleRetirementEvidence{
-		AgentID:           42,
-		Name:              "example-runner",
-		ScaleSetID:        7,
-		LocalStatus:       params.RunnerPending,
-		CreatedAt:         now.Add(-45 * time.Minute),
-		MinIdle:           0,
-		IdleCount:         4,
-		Now:               now,
-		RESTID:            42,
-		RESTName:          "example-runner",
-		RESTStatus:        "online",
-		RESTBusy:          &busy,
-		ActionsID:         42,
-		ActionsName:       "example-runner",
-		ActionsScaleSetID: 7,
-		ActionsEphemeral:  true,
-		ActionsEnabled:    true,
-		ActionsState:      "Provisioned",
-		ActionsStatus:     "online",
-		StatisticsPresent: true,
+		AgentID:            42,
+		Name:               "example-runner",
+		ScaleSetID:         7,
+		LocalStatus:        params.RunnerPending,
+		CreatedAt:          now.Add(-45 * time.Minute),
+		MinIdle:            0,
+		IdleCount:          4,
+		Now:                now,
+		RESTID:             42,
+		RESTName:           "example-runner",
+		RESTStatus:         "online",
+		RESTBusy:           &busy,
+		ActionsID:          42,
+		ActionsName:        "example-runner",
+		ActionsScaleSetID:  7,
+		ActionsEphemeral:   true,
+		ActionsEnabled:     true,
+		ActionsState:       "Provisioned",
+		ActionsStatus:      "online",
+		StatisticsPresent:  true,
+		MessageDemandKnown: true,
 	}
 }
 
@@ -101,6 +102,18 @@ func TestEvaluateIdleRetirementStatsZeroIsNotABlocker(t *testing.T) {
 	got := evaluateIdleRetirement(ev)
 	if !got.Eligible {
 		t.Fatalf("all-zero statistics must not prove demand and must not block REST-idle retirement: %#v", got)
+	}
+}
+
+func TestEvaluateIdleRetirementUnknownMessageDemandRefuses(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	ev := baseEvidence(now)
+	ev.MessageDemandKnown = false
+	ev.AssignedJobs = 0
+	got := evaluateIdleRetirement(ev)
+	if got.Eligible || got.Reason != "message-demand-unknown" {
+		t.Fatalf("stale or disconnected zero must not retire idle runners: %#v", got)
 	}
 }
 

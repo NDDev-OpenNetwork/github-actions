@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- GARM `v0.2.1-nddev.94` binds stale scale-set job mutation to exact identity:
+  check-run `external_id`, `workflow_job.check_run_url`, repository, exact
+  attempt, numeric job ID and source SHA. A job name is never terminal proof.
+  Missing fields, incomplete pagination, another attempt, a non-Actions
+  producer and no exact match retain the intent. Scaling uses the latest
+  MESSAGE `statistics.TotalAssignedJobs`; idle retirement requires a recent
+  MESSAGE with `messageID > 0` and re-checks that observation before
+  RemoveRunner. Session-create zeros and 202/nil long-polls are not idle
+  evidence. Start failure deletes the new message session. Listener
+  JobCompleted with an empty runner name ends a delivery reservation and is
+  not a REST workflow-job terminal; REST still-queued exact identity can clear
+  that tombstone. A later same-run/name GUID is not aliased onto it. JobStarted
+  of another GUID does not delete or rename an assigned waiter or copy its
+  FIFO clock. A request-less JobAssigned yields occupancy when a different
+  GUID becomes JobAvailable; the original waiter and FIFO stay in the journal.
+  A replayed MESSAGE with the same session and messageID does not
+  refresh idle-retirement freshness. A late message from a replaced session
+  does not overwrite current demand.
+  `golang.org/x/text` is v0.39.0. The `.92` and `.93`
+  patches are unchanged. This is a source/artifact candidate, not a fleet
+  rollout.
+
 - GARM `v0.2.1-nddev.93` retires excess undemanded idle ephemeral JIT
   registrations through the Actions service RemoveRunner path (204 then 404)
   after two matching observations. REST `busy` must be explicit false; an

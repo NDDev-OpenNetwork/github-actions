@@ -243,12 +243,22 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 		if queueTime.IsZero() || queueTime.After(now) {
 			queueTime = now
 		}
+		clearedDeliveryTombstone := false
+		if _, terminal := journal.TerminalJobs[job.ScaleSetJobID]; terminal {
+			// REST still-queued identity outranks a listener delivery tombstone.
+			delete(journal.TerminalJobs, job.ScaleSetJobID)
+			clearedDeliveryTombstone = true
+			changed = true
+		}
 		if existing, exists := journal.Intents[key]; exists {
 			if existing.ScaleSetName != scaleSet.Name || existing.Owner != entity.Owner ||
 				!queueIntentRepositoryCompatible(existing, queueIntent{Owner: entity.Owner, Repository: repository}) {
 				return fmt.Errorf("authoritative queued job changed immutable queue identity")
 			}
 			if queueIntentRepositoryBound(existing) {
+				if clearedDeliveryTombstone {
+					admitQueuedToBudget(journal, config, now)
+				}
 				return nil
 			}
 			// Direct JIT normally goes from JobAssigned straight to JobStarted,
@@ -271,6 +281,9 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			existing.UpdatedAt = now
 			journal.Intents[key] = existing
 			ensureRepositoryState(journal, config, repository)
+			if clearedDeliveryTombstone {
+				admitQueuedToBudget(journal, config, now)
+			}
 			changed = true
 			return nil
 		}
@@ -630,11 +643,13 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
 			intent, exists := journal.Intents[key]
 			_, startedInBatch := startedKeys[key]
-			// GitHub may retire a capacity waiter before it ever emits
-			// JobAvailable, then immediately assign the same workflow job under a
-			// new UUID. Retain that unstarted intent as a terminal lineage marker;
-			// it is excluded from admission below and lets the replacement inherit
-			// the original queue time instead of starving at the tail forever.
+			// Listener JobCompleted with no runner ends this GUID's scale-set
+			// delivery reservation. It is not a REST workflow-job outcome: the
+			// GitHub job may remain queued under the same external_id. Keep the
+			// GUID, release the assigned slot, and tombstone only listener
+			// redelivery of this GUID. REST EnsureAuthoritative of a still-queued
+			// exact identity clears that tombstone. A later different GUID with
+			// the same run/name is not this job and must not inherit its clock.
 			// A fast job may start and finish in this one batch. Completion
 			// must win; keeping its pre-start lineage would let the started
 			// loop resurrect a terminal running intent and request spare VMs.
@@ -849,88 +864,30 @@ func bindStartedIdentity(journal *queueIntentJournal, config queueAdmissionConfi
 }
 
 func transferTerminalWaiterLineage(
-	journal *queueIntentJournal,
-	scaleSet params.ScaleSet,
-	entity params.ForgeEntity,
-	replacement *queueIntent,
-	now time.Time,
+	_ *queueIntentJournal,
+	_ params.ScaleSet,
+	_ params.ForgeEntity,
+	_ *queueIntent,
+	_ time.Time,
 ) (string, bool, error) {
-	if replacement == nil || replacement.WorkflowRunID <= 0 || !validQueueText(replacement.JobDisplayName) {
-		return "", false, nil
-	}
-	candidates := make([]queueIntent, 0, 1)
-	for _, candidate := range journal.Intents {
-		terminalExpiry, terminal := journal.TerminalJobs[candidate.JobID]
-		if !terminal || !terminalExpiry.After(now) || candidate.JobID == replacement.JobID ||
-			candidate.State != queueStateQueued || candidate.RunnerRequestID != 0 || candidate.RunnerName != "" ||
-			candidate.ScaleSetID != int64(scaleSet.ScaleSetID) || candidate.ScaleSetName != scaleSet.Name ||
-			candidate.Owner != entity.Owner || candidate.WorkflowRunID != replacement.WorkflowRunID ||
-			candidate.JobDisplayName != replacement.JobDisplayName {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) > 1 {
-		return "", false, fmt.Errorf("redelivered waiter identity is ambiguous for workflow run %d job %q", replacement.WorkflowRunID, replacement.JobDisplayName)
-	}
-	if len(candidates) == 0 {
-		return "", false, nil
-	}
-	lineage := candidates[0]
-	delete(journal.Intents, lineage.Key)
-	replacement.QueueTime = lineage.QueueTime
-	replacement.FirstQueuedAt = lineage.FirstQueuedAt
-	replacement.Priority = lineage.Priority
-	replacement.Repository = lineage.Repository
-	replacement.State = queueStateQueued
-	replacement.StateEnteredAt = now
-	replacement.UpdatedAt = now
-	return lineage.JobID, true, nil
+	// Listener JobCompleted ends a delivery reservation. It does not prove a
+	// REST workflow-job terminal outcome, and a later JobAssigned with the
+	// same run/name is a different GUID. Do not migrate identity or queue age.
+	return "", false, nil
 }
 
 func transferAssignedReservation(
-	journal *queueIntentJournal,
-	config queueAdmissionConfig,
-	scaleSet params.ScaleSet,
-	entity params.ForgeEntity,
-	started params.ScaleSetJobMessage,
-	now time.Time,
+	_ *queueIntentJournal,
+	_ queueAdmissionConfig,
+	_ params.ScaleSet,
+	_ params.ForgeEntity,
+	_ params.ScaleSetJobMessage,
+	_ time.Time,
 ) (string, bool, error) {
-	candidates := make([]queueIntent, 0)
-	for _, candidate := range journal.Intents {
-		if candidate.State != queueStateAssigned || candidate.ScaleSetID != int64(scaleSet.ScaleSetID) ||
-			candidate.ScaleSetName != scaleSet.Name || candidate.Owner != entity.Owner || candidate.JobID == started.JobID {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) == 0 {
-		return "", false, nil
-	}
-	sort.Slice(candidates, func(left, right int) bool {
-		if !candidates[left].UpdatedAt.Equal(candidates[right].UpdatedAt) {
-			return candidates[left].UpdatedAt.Before(candidates[right].UpdatedAt)
-		}
-		return candidates[left].Key < candidates[right].Key
-	})
-	replacement, err := queueIntentFromLifecycle(
-		config, scaleSet, entity, started, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
-	)
-	if err != nil {
-		return "", false, err
-	}
-	reservation := candidates[0]
-	delete(journal.Intents, reservation.Key)
-	replacement.QueueTime = reservation.QueueTime
-	replacement.FirstQueuedAt = reservation.FirstQueuedAt
-	replacement.Priority = reservation.Priority
-	replacement.State = queueStateRunning
-	replacement.StateEnteredAt = now
-	replacement.UpdatedAt = now
-	replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
-	journal.Intents[replacement.Key] = replacement
-	ensureRepositoryState(journal, config, replacement.Repository)
-	return reservation.JobID, true, nil
+	// JobStarted of GUID B is not proof that assigned waiter A was a
+	// mis-keyed reservation for B. Deleting or renaming A drops its FIFO
+	// clock and hides a still-waiting job. Rehydrate B on its own key.
+	return "", false, nil
 }
 
 func admitQueuedToBudget(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
@@ -1060,6 +1017,13 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	if err := mutate(&journal, now); err != nil {
 		return err
 	}
+	// JobAvailable is the dispatch token. A request-less JobAssigned may occupy
+	// the slot to bootstrap an empty scale set, but admit above can re-grant that
+	// occupancy after TTL before this transaction records a newer available job.
+	// Yield that occupancy here so SelectForAcquire can take the dispatchable GUID
+	// without deleting the original waiter or its FIFO clock.
+	yieldRequestlessOccupancy(&journal, config, now)
+	admitQueuedToBudget(&journal, config, now)
 	if err := journal.Validate(); err != nil {
 		return err
 	}
@@ -1305,9 +1269,46 @@ func baseQueuePriority(config queueAdmissionConfig, scaleSetName string, job par
 	return 1
 }
 
+func hasDispatchableQueued(journal *queueIntentJournal) bool {
+	for _, intent := range journal.Intents {
+		if intent.State == queueStateQueued && intent.RunnerRequestID != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func yieldRequestlessOccupancy(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
+	if !hasDispatchableQueued(journal) {
+		return
+	}
+	for key, intent := range journal.Intents {
+		if intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
+			continue
+		}
+		intent.State = queueStateQueued
+		intent.StateEnteredAt = now
+		intent.UpdatedAt = now
+		if intent.FirstQueuedAt.IsZero() {
+			intent.FirstQueuedAt = intent.QueueTime
+			if intent.FirstQueuedAt.IsZero() {
+				intent.FirstQueuedAt = now
+			}
+		}
+		next := expiryForState(config, queueStateQueued, now)
+		horizon := intent.FirstQueuedAt.Add(time.Duration(config.ExecutionTTLSeconds) * time.Second)
+		if next.After(horizon) {
+			next = horizon
+		}
+		intent.ExpiresAt = next
+		journal.Intents[key] = intent
+	}
+}
+
 func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	candidates := make([]queueIntent, 0)
 	backgroundInFlight := queueBackgroundInFlight(journal)
+	dispatchableQueued := hasDispatchableQueued(journal)
 	for _, intent := range journal.Intents {
 		limit := repositoryPolicy(config, intent.Repository).MaxInFlight
 		if queueHasCompetingRepository(journal, intent.Repository) {
@@ -1316,7 +1317,8 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
 		if intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
 			inFlight[intent.Repository] >= limit ||
-			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) {
+			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) ||
+			(dispatchableQueued && intent.RunnerRequestID == 0) {
 			continue
 		}
 		candidates = append(candidates, intent)
