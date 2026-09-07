@@ -9,6 +9,22 @@ use the exact journal identity and its first-queued/state-entry timestamps to
 reconstruct the wait. A lower aggregate maximum can mean that one job advanced
 or was cancelled while other work remains stalled. Check its actual outcome.
 
+Idle online JIT registrations with local pending/idle status are not reaped
+by the `.92` offline-only timeout path. Excess undemanded idle capacity is
+retired only after two matching observations, an exact identity match, age
+of at least thirty minutes, REST `busy` explicitly false, and Actions
+RemoveRunner returning 204 with a 404 read-back. An omitted REST `busy`
+field is unknown, not idle. Scale-set statistics of all zeros are not
+proof that nothing is running; a later REST `busy=true` must refuse the
+delete. GARM then deletes the provider instance only after the
+registration is absent. Never use the public GitHub REST force-delete.
+
+`lifecycle_assigned_stall` is the assigned *state clock*, not
+`FirstQueuedAt`. Assigned TTL is 600 seconds; a lower aggregate maximum
+can mean the oldest assigned job started, cancelled, or demoted while a
+queued waiter with an hours-old `FirstQueuedAt` remains. Do not shorten
+that alert to hide age.
+
 A REST workflow job can remain queued while the scale-set API reports no jobs
 assigned to that scale set. Preserve both observations. GARM confirms the
 scale-set API's current `statistics.TotalAssignedJobs` before creating a new
@@ -17,6 +33,8 @@ old local `JobAssigned` record is a reason to reconcile; it is not independent
 proof of dispatchable demand. Conversely, an old persisted zero must not block
 an authoritative read that could show new demand. GitHub documents this
 distinction in the [scale-set client autoscaling contract](https://github.com/actions/scaleset#autoscaling).
+Idle-online retirement is best-effort and cannot block absent-runner
+consolidation. It does not repair a lost upstream assignment.
 
 Compare a start with its completion in the same message batch when diagnosing
 fast jobs. Completion is terminal even if no intermediate running observation
