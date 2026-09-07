@@ -92,7 +92,19 @@ type AttemptStore interface {
 
 func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
 	progressed, remaining, progressErr := executor.AwaitProgress(ctx, attempt)
-	if progressErr == nil && len(remaining) == 0 {
+	if progressErr == nil {
+		progressErr = validateProgress(attempt.Stuck, progressed, remaining)
+	}
+	if progressErr != nil {
+		// Unknown or malformed progress never authorizes another manager restart.
+		result := Result{AttemptID: attempt.ID, Remaining: slices.Clone(attempt.Stuck),
+			FinishedAt: now().UTC(), Error: "verify resumed recovery progress: " + progressErr.Error()}
+		if err := store.Finish(ctx, result); err != nil {
+			return result, fmt.Errorf("finish resumed recovery attempt: %w", err)
+		}
+		return result, fmt.Errorf("verify resumed recovery progress: %w", progressErr)
+	}
+	if len(remaining) == 0 {
 		result := Result{
 			AttemptID: attempt.ID, Progressed: slices.Clone(progressed), Recovered: true,
 			FinishedAt: now().UTC(),
@@ -102,13 +114,16 @@ func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, ex
 		}
 		return result, nil
 	}
-	// The previous process may have died before or during the manager restart.
-	// Re-running the checkpoint-first sequence is idempotent; restricting it to
-	// the still-stuck identities avoids replaying work already proven progressed.
-	if len(remaining) > 0 {
-		attempt.Stuck = slices.Clone(remaining)
+	// A stored attempt is not fresh authorization to restart the dispatcher.
+	// Finish it as incomplete and let the next observation re-evaluate current
+	// work, blockers, startup grace and cooldown instead of replaying a restart.
+	result := Result{AttemptID: attempt.ID, Progressed: slices.Clone(progressed),
+		Remaining: slices.Clone(remaining), FinishedAt: now().UTC(),
+		Error: "resumed recovery incomplete: fresh evaluation required"}
+	if err := store.Finish(ctx, result); err != nil {
+		return result, fmt.Errorf("finish resumed recovery attempt: %w", err)
 	}
-	return recoverAcquired(ctx, attempt, store, executor, now)
+	return result, fmt.Errorf("resumed recovery incomplete: %d identities remain", len(remaining))
 }
 
 type Executor interface {
@@ -129,6 +144,9 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 	if !decision.Recover {
 		return Result{}, fmt.Errorf("recovery refused: %s", decision.Reason)
 	}
+	if err := validateProgress(decision.Stuck, nil, decision.Stuck); err != nil {
+		return Result{}, fmt.Errorf("invalid recovery identities: %w", err)
+	}
 	attempt := NewAttempt(observedAt, decision.Stuck)
 	acquired, err := store.Begin(ctx, attempt)
 	if err != nil {
@@ -141,7 +159,9 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 }
 
 func recoverAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
-	result := Result{AttemptID: attempt.ID}
+	// Until a complete proof is validated every original subject is unresolved,
+	// including when checkpointing or the restart command fails first.
+	result := Result{AttemptID: attempt.ID, Remaining: slices.Clone(attempt.Stuck)}
 	finish := func(operationErr error) (Result, error) {
 		result.FinishedAt = now().UTC()
 		if operationErr != nil {
@@ -161,11 +181,15 @@ func recoverAcquired(ctx context.Context, attempt Attempt, store AttemptStore, e
 		return finish(fmt.Errorf("restart dispatcher: %w", err))
 	}
 	progressed, remaining, err := executor.AwaitProgress(ctx, attempt)
-	result.Progressed = slices.Clone(progressed)
-	result.Remaining = slices.Clone(remaining)
+	if err == nil {
+		err = validateProgress(attempt.Stuck, progressed, remaining)
+	}
 	if err != nil {
+		result.Remaining = slices.Clone(attempt.Stuck)
 		return finish(fmt.Errorf("verify dispatcher progress: %w", err))
 	}
+	result.Progressed = slices.Clone(progressed)
+	result.Remaining = slices.Clone(remaining)
 	result.Recovered = len(remaining) == 0
 	if !result.Recovered {
 		return finish(fmt.Errorf("recovery incomplete: %d stuck instances remain", len(remaining)))

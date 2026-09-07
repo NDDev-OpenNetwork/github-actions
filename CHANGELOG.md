@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Recovery requires exact complete progress evidence, preserves unresolved
+  identities on checkpoint/restart failures, and never replays interrupted
+  restart authorization. Blocked/suppressed stalled work remains unhealthy;
+  FileStore admits only one unfinished attempt across concurrent decisions.
+  Scoped action ownership and admission fencing remain separate rollout work.
+
 - Publish background CI failures as unassigned repository-local issues with
   exact run/attempt/job identity. Classify `actions/ci-feedback/feedback.py` in
   the network-bootstrap inventory. The in-repo `workflow_run` caller includes
