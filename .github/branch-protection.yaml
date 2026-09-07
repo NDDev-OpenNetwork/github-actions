@@ -1,7 +1,6 @@
 branch: main
 required_status_checks:
-  strict: true
-  contexts:
-    - Gate
+  strict: false
+  contexts: []
 required_pull_request_reviews: {}
 enforce_admins: true

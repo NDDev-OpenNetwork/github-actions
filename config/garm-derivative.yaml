@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.92
+derivative_version: v0.2.1-nddev.93
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -97,6 +97,9 @@ patches:
   - path: third_party/garm/patches/0030-confirm-live-scale-set-demand.patch
     sha256: 102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497
     purpose: Confirm current GitHub scale-set demand with a bounded read before JIT registration, preserving admission limits and queued identities while rejecting stale local-only demand.
+  - path: third_party/garm/patches/0031-retire-excess-idle-online-runners.patch
+    sha256: 4b6c7ac3366fc1e6668e830546ba1428f7fb6f709e46c4e09bb6d8753929ca14
+    purpose: Require Actions RemoveRunner to return 204 and call excess idle-online retirement before provider delete so MinIdle-zero undemanded JIT registrations cannot occupy members forever.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
     sha256: be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7
@@ -116,6 +119,12 @@ overlays:
   - path: third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go
     sha256: 32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8
     purpose: Prove fresh zero demand prevents allocation, stale persisted zero can recover against fresh positive demand, positive observations are not reused, and missing, mismatched or unavailable evidence fails closed.
+  - path: third_party/garm/overlay/workers/scaleset/idle_online_retire.go
+    sha256: 9fbc42a6222ca40317bf083af0eb6e62f7a27db0d7ad9ba9cc3152d1e5eb694c
+    purpose: Retire excess undemanded idle ephemeral JIT registrations through Actions RemoveRunner after two matching observations, requiring REST busy to be explicit false and refusing omitted busy, identity change, demand, or JobStillRunningException.
+  - path: third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go
+    sha256: 520fc7a713f812018c190b8e221a6b816fd11af5f3e1f5c61038e5d0c05aaa86
+    purpose: Prove omitted REST busy is unknown, Actions list Busy defaults are untrusted, all-zero scale-set statistics do not prove idle, mixed identity restarts observation, and two matching observations are required before RemoveRunner.
 build:
   container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
   go_version: go1.26.6
@@ -130,7 +139,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: c112777344debf7e9c0b82524b6de381872ff6576e700cc4c4469b136770b560
+  binary_sha256: e4da5f7ba06ee8f6cb1356adfcd2a76224596ce673e6198fe88e179e719a09e8
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true
@@ -168,6 +177,7 @@ runtime_contract:
   authoritative_repository_binding: true
   authoritative_running_repository_binding: true
   authoritative_idle_offline_runner_reaping: true
+  authoritative_idle_online_runner_retirement: true
   authoritative_access_refusal_backoff_seconds: 900
   job_started_runner_identity: true
   job_available_correlation_binding: true

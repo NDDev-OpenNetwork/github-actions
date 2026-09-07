@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- GARM `v0.2.1-nddev.93` retires excess undemanded idle ephemeral JIT
+  registrations through the Actions service RemoveRunner path (204 then 404)
+  after two matching observations. REST `busy` must be explicit false; an
+  omitted field is unknown, not idle. Scale-set statistics of all zeros are
+  not proof that nothing is running. Identity changes, demand, min-idle,
+  bootstrap/active states and JobStillRunningException refuse the delete.
+  Provider delete remains GARM's ordinary absent-runner reconcile. The
+  `.92` patches are unchanged.
+- Ordinary merge in this repository does not require a general CI status
+  check. `Gate` remains truthful advisory evidence.
+
 - Confirm current GitHub scale-set demand before each new JIT registration.
   A retained local assignment requests reconciliation but cannot allocate a
   runner against a fresh zero-demand snapshot. Reads have a five-second

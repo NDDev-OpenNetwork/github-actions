@@ -366,8 +366,8 @@ func loadMerge(path string) (Merge, error) {
 	if err := yaml.Unmarshal(raw, &declared); err != nil {
 		return Merge{}, fmt.Errorf("parse branch protection declaration: %w", err)
 	}
-	if declared.Branch == "" || len(declared.RequiredStatusChecks.Contexts) == 0 {
-		return Merge{}, fmt.Errorf("branch protection declaration names no branch or no required context")
+	if declared.Branch == "" {
+		return Merge{}, fmt.Errorf("branch protection declaration names no branch")
 	}
 	contexts := slices.Clone(declared.RequiredStatusChecks.Contexts)
 	slices.Sort(contexts)

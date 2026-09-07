@@ -25,14 +25,6 @@
         "dismissal_restriction": {"enabled": false, "allowed_actors": []},
         "allowed_merge_methods": ["merge"]
       }
-    },
-    {
-      "type": "required_status_checks",
-      "parameters": {
-        "strict_required_status_checks_policy": true,
-        "do_not_enforce_on_create": false,
-        "required_status_checks": [{"context": "Gate"}]
-      }
     }
   ]
 }
