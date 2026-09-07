@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Publish background CI failures as unassigned repository-local issues with
+  exact run/attempt/job identity. Classify `actions/ci-feedback/feedback.py` in
+  the network-bootstrap inventory. A cancelled attempt still reports jobs that
+  already failed; a clean cancel does not. Dedup trusts GitHub App bots, not
+  only `github-actions[bot]`, and recovers a durable marker after a lost POST
+  reply. This publisher does not invent an agent consumer or execute log text.
+
 - Scale up from durable admitted queue ownership, not GitHub
   `DesiredRunnerCount`. After a sibling runner is deleted, GitHub reports
   zero assigned jobs while `JobAssigned` waiters still need a runner, so

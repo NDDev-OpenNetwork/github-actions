@@ -48,9 +48,12 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(evidence["source"]["run_attempt"], 2)
         self.assertEqual(evidence["source"]["head_sha"], "a" * 40)
         self.assertFalse(evidence["blocking"])
-        self.assertEqual(evidence["delivery_state"], "pending-agent-consumption")
+        self.assertEqual(evidence["delivery_state"], "unassigned")
+        self.assertNotIn("repair_owner", evidence)
+        self.assertNotIn("pending-agent-consumption", body)
         self.assertNotIn("untrusted $(payload)", body)
         self.assertIn("/attempts/2/jobs", " ".join(api.calls))
+        self.assertNotIn("assignees", api.posts[0])
 
     def test_large_failure_set_is_explicitly_bounded(self):
         api = API()
@@ -61,13 +64,35 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(evidence["failed_jobs_total"], 101)
         self.assertEqual(evidence["failed_jobs_omitted"], 1)
 
-    def test_cancelled_and_successful_runs_create_no_work(self):
-        for conclusion in feedback.NON_FAILURES:
+    def test_successful_runs_create_no_work(self):
+        for conclusion in feedback.CLEAN_CONCLUSIONS:
             api = API()
             api.run["conclusion"] = conclusion
             self.assertEqual(self.publish(api)["status"], "not-a-failure")
             self.assertEqual(len(api.calls), 1)
             self.assertEqual(api.posts, [])
+
+    def test_cancelled_run_without_failed_jobs_creates_no_work(self):
+        api = API()
+        api.run["conclusion"] = "cancelled"
+        api.jobs = [{"id": 101, "run_id": 100, "conclusion": "cancelled"}]
+        self.assertEqual(self.publish(api), {"status": "not-a-failure", "conclusion": "cancelled"})
+        self.assertEqual(api.posts, [])
+        self.assertTrue(any("/jobs?" in call for call in api.calls))
+
+    def test_cancelled_run_with_failed_job_is_published_unassigned(self):
+        api = API()
+        api.run["conclusion"] = "cancelled"
+        api.jobs = [
+            {"id": 101, "run_id": 100, "conclusion": "failure"},
+            {"id": 102, "run_id": 100, "conclusion": "cancelled"},
+        ]
+        self.assertEqual(self.publish(api), {"status": "published", "issue_number": 1})
+        evidence = json.loads(api.posts[0]["body"].split("```json\n")[1].split("\n```")[0])
+        self.assertEqual(evidence["conclusion"], "cancelled")
+        self.assertEqual(evidence["delivery_state"], "unassigned")
+        self.assertEqual(evidence["failed_jobs_total"], 1)
+        self.assertEqual(evidence["failed_jobs"][0]["id"], 101)
 
     def test_wrong_repository_attempt_sha_and_incomplete_run_are_rejected(self):
         for updates in ({"run_attempt": 3}, {"repository": {"id": 11, "full_name": REPO}},
@@ -86,10 +111,33 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 9})
         self.assertEqual(api.posts, [])
 
+    def test_app_bot_publisher_is_trusted_for_dedup(self):
+        api = API()
+        api.issues = [{"number": 4, "user": {"login": "nddev-gds[bot]", "type": "Bot"},
+                       "body": "<!-- ci-feedback:v1:10:100:2 -->\nprevious evidence"}]
+        self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 4})
+        self.assertEqual(api.posts, [])
+
     def test_user_authored_marker_cannot_suppress_feedback(self):
         api = API()
-        api.issues = [{"number": 9, "user": {"login": "other"}, "body": "<!-- ci-feedback:v1:10:100:2 -->\n"}]
+        api.issues = [{"number": 9, "user": {"login": "other", "type": "User"},
+                       "body": "<!-- ci-feedback:v1:10:100:2 -->\n"}]
         self.assertEqual(self.publish(api)["status"], "published")
+
+    def test_lost_post_reply_recovers_durable_marker(self):
+        api = API()
+        real = api.request
+
+        def request(path, data=None):
+            if data is not None:
+                api.issues = [{"number": 12, "user": {"login": "github-actions[bot]", "type": "Bot"},
+                               "body": "<!-- ci-feedback:v1:10:100:2 -->\npublished"}]
+                raise TimeoutError("POST reply lost")
+            return real(path, data)
+
+        api.request = request
+        self.assertEqual(self.publish(api), {"status": "already-published", "issue_number": 12})
+        self.assertEqual(api.posts, [])
 
     def test_foreign_and_duplicate_jobs_rejected(self):
         for jobs in ([{"id": 101, "run_id": 999}], [{"id": 101, "run_id": 100}] * 2):

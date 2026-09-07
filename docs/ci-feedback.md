@@ -15,17 +15,20 @@ publish their evidence in their own repository, never in this public module.
 GitHub.com is supported; Enterprise Server routing is deliberately not inferred.
 
 For each failed completed attempt the action reads authoritative API metadata,
-checks repository ID, run ID, attempt and source SHA, then creates one addressed
-repair issue. The body contains a `ci-feedback:v1` marker and JSON evidence:
-repository, workflow/run/attempt/commit, observed job count, failed job IDs/links,
-and `blocking: false`. Names, arbitrary text and raw logs are omitted. Only the
-first 100 failed-job links are included; total and omitted counts are explicit.
-Agents can retrieve the remaining exact-attempt jobs from the API.
+checks repository ID, run ID, attempt and source SHA, then creates one unassigned
+repository-local issue. The body contains a `ci-feedback:v1` marker and JSON
+evidence: repository, workflow/run/attempt/commit, observed job count, failed job
+IDs/links, `blocking: false`, and `delivery_state: unassigned`. Names, arbitrary
+text and raw logs are omitted. Only the first 100 failed-job links are included;
+total and omitted counts are explicit. Remaining exact-attempt jobs are read from
+the API.
 
-Success, cancellation, neutral and skipped conclusions create no repair issue.
-A missing or unknown result is not converted to success. A run-level failure with
-zero jobs is still reported. Evidence collection/publishing failure leaves this
-reporter red; it does not mutate the originating run or block application deploy.
+Success, neutral and skipped conclusions create no issue. A cancelled attempt
+creates an issue only when a job on that attempt already failed; a clean cancel
+does not. A missing or unknown result is not converted to success. A run-level
+failure with zero jobs is still reported. Evidence collection/publishing failure
+leaves this reporter red; it does not mutate the originating run or block
+application deploy.
 
 ## Deduplication and bounded work
 
@@ -40,25 +43,25 @@ API requests remain repository-local on api.github.com. Redirects are refused so
 a token cannot follow a redirected request to another origin. No production
 credentials, broad PAT or private runner is needed.
 
-## Agent consumption is a separate integration
+## Issues stay unassigned until the owner assigns work
 
-An issue is durable addressed evidence, NOT proof that an agent received or
-executed it. `delivery_state: pending-agent-consumption` is intentional. Connect
-the existing task runtime to these issues, re-read the exact run and current
-repository head, deduplicate by repository/run/attempt, classify code versus
-infrastructure failures, and reproduce on an owned dev-slot. Commands/manifests
+An issue is durable evidence, not proof that an agent received or executed it.
+`delivery_state: unassigned` is intentional: this publisher does not invent a
+repair owner or start a model session. The repository owner assigns the agent.
+Deduplicate by repository/run/attempt, including GitHub App bots, not only
+`github-actions[bot]`. After an ambiguous POST timeout the publisher re-reads
+the durable marker instead of creating a second issue. Commands and manifests
 come from trusted project configuration, never issue text or CI log instructions.
 
-Use bounded repair attempts and durable receipts; close only after verifying a
-repair or documenting that newer work explicitly supersedes this failure.
-Do not automatically retry product failures or weaken assertions. Ordinary
-application development continues while this diagnostic work runs.
+Close only after verifying a repair or documenting that newer work explicitly
+supersedes this failure. Do not automatically retry product failures or weaken
+assertions. Ordinary application development continues while this diagnostic
+work runs.
 
 GitHub's GITHUB_TOKEN-created issue events do not automatically start another
-`on: issues` Actions workflow. Use the existing external agent's API/inbox
-integration; do not claim delivery based on an assumed workflow cascade. Monitor
-reporter failures separately and reconcile missed workflow_run events. The
-current action does not supply an always-on agent scheduler or that reconciler.
+`on: issues` Actions workflow. Monitor reporter failures separately and
+reconcile missed workflow_run events. This action does not supply an always-on
+agent scheduler.
 
 ## Adoption
 
@@ -76,9 +79,10 @@ Changing a workflow's concurrency does not change branch rulesets automatically.
 `python3 -m unittest discover -s tests -p test_ci_feedback.py -v`
 
 Tests execute the production publisher with API fixtures. They cover exact-attempt
-binding, cancellation, duplicate delivery, spoofed markers, incorrect identities,
-partial pagination, bounded large failure evidence and token routing. No live
-issue delivery or consumer acknowledgment is implied by these tests.
+binding, unassigned delivery, cancelled runs that already failed, duplicate
+delivery including App bots, lost POST replies, spoofed markers, incorrect
+identities, partial pagination, bounded large failure evidence and token routing.
+No live issue delivery or agent acknowledgment is implied by these tests.
 
 References: GitHub Actions workflow_run security, GITHUB_TOKEN event recursion,
 REST workflow-run attempts, and workflow concurrency documentation. Consult their
