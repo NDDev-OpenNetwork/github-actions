@@ -65,3 +65,23 @@ func TestWorkflowResolvesTheProviderBoundaryItEnforces(t *testing.T) {
 		t.Fatal("observer-only providerretry package still invalidates the external provider artifact")
 	}
 }
+
+func TestRootModuleDoesNotRequireStarlark(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "go.starlark.net") {
+		t.Fatal("root go.mod requires go.starlark.net; that is provider-derivative drift")
+	}
+}
+
+func TestWorkflowVetsTheNestedStarlarkHarness(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "go vet -C internal/incusplacement/starlarkexec") {
+		t.Fatal("static CI no longer vets the nested Starlark placement harness")
+	}
+}
