@@ -1242,6 +1242,63 @@ func TestQueueCoordinatorUnexpiredRequestlessYieldsToDispatchableAvailable(t *te
 	}
 }
 
+func TestQueueCoordinatorQuotaBlockedAvailableMustNotEvictUsefulBootstrap(t *testing.T) {
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinatorOfWidth(t, &now, nil, 2, 1)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	scaleSetB := testQueueScaleSet(6, "nddev-linux-standard")
+	busy := testQueueJob(303, "example-owner", "busy-repo", now)
+	if _, err := coordinator.ObserveLifecycle(scaleSetB, testQueueEntityForJob(busy), nil, []params.ScaleSetJobMessage{busy}, nil); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := testQueueJob(101, "example-owner", "bootstrap-repo", now)
+	bootstrap.RunnerRequestID = 0
+	bootstrap.RunnerName = ""
+	bootstrap.MessageType = params.MessageTypeJobAssigned
+	if _, err := coordinator.ObserveLifecycle(scaleSet, testQueueEntityForJob(bootstrap), []params.ScaleSetJobMessage{bootstrap}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapKey := queueIntentKey(int64(scaleSet.ScaleSetID), bootstrap.JobID)
+	reservation := before.Intents[bootstrapKey]
+	if reservation.State != queueStateAssigned {
+		t.Fatalf("fixture did not grant A: %+v", reservation)
+	}
+
+	available := testQueueJob(202, "example-owner", "busy-repo", now.Add(time.Second))
+	if err := coordinator.ObserveAvailable(scaleSetB, []params.ScaleSetJobMessage{available}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSetB, []params.ScaleSetJobMessage{available})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, testQueueEntityForJob(bootstrap))
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, _ := queueInFlight(&after)
+	waiter := after.Intents[bootstrapKey]
+	blocked := after.Intents[queueIntentKey(int64(scaleSetB.ScaleSetID), available.JobID)]
+	if waiter.State != queueStateAssigned || waiter.JobID != bootstrap.JobID ||
+		waiter.QueueTime != reservation.QueueTime || waiter.FirstQueuedAt != reservation.FirstQueuedAt ||
+		waiter.Priority != reservation.Priority || waiter.Key != reservation.Key {
+		t.Fatalf("quota-blocked B revoked A bootstrap: before=%#v after=%#v selected=%v target=%d total=%d B=%#v",
+			reservation, waiter, selected, target, total, blocked)
+	}
+	if target != 1 || total != 2 || len(selected) != 0 || blocked.State != queueStateQueued {
+		t.Fatalf("quota-blocked B must stay queued while A keeps the unused-safe slot: selected=%v target=%d total=%d B=%#v",
+			selected, target, total, blocked)
+	}
+}
+
 func TestQueueCoordinatorSameGUIDJobAvailableKeepsOccupancy(t *testing.T) {
 	now := time.Date(2026, 9, 7, 4, 22, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)

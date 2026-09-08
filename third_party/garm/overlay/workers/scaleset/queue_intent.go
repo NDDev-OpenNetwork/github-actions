@@ -1020,8 +1020,8 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	// JobAvailable is the dispatch token. A request-less JobAssigned may occupy
 	// the slot to bootstrap an empty scale set, but admit above can re-grant that
 	// occupancy after TTL before this transaction records a newer available job.
-	// Yield that occupancy here so SelectForAcquire can take the dispatchable GUID
-	// without deleting the original waiter or its FIFO clock.
+	// Yield only the occupancy a currently admissible dispatchable job can use,
+	// so a quota-blocked or over-size available job cannot idle a useful slot.
 	yieldRequestlessOccupancy(&journal, config, now)
 	admitQueuedToBudget(&journal, config, now)
 	if err := journal.Validate(); err != nil {
@@ -1269,60 +1269,140 @@ func baseQueuePriority(config queueAdmissionConfig, scaleSetName string, job par
 	return 1
 }
 
-func hasDispatchableQueued(journal *queueIntentJournal) bool {
-	for _, intent := range journal.Intents {
-		if intent.State == queueStateQueued && intent.RunnerRequestID != 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func yieldRequestlessOccupancy(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
-	if !hasDispatchableQueued(journal) {
-		return
+func cloneQueueIntentJournal(journal *queueIntentJournal) queueIntentJournal {
+	clone := queueIntentJournal{
+		SchemaVersion: journal.SchemaVersion,
+		Generation:    journal.Generation,
+		UpdatedAt:     journal.UpdatedAt,
+		Intents:       make(map[string]queueIntent, len(journal.Intents)),
+		Repositories:  make(map[string]queueRepositoryState, len(journal.Repositories)),
+		TerminalJobs:  make(map[string]time.Time, len(journal.TerminalJobs)),
 	}
 	for key, intent := range journal.Intents {
-		if intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
-			continue
-		}
-		intent.State = queueStateQueued
-		intent.StateEnteredAt = now
-		intent.UpdatedAt = now
-		if intent.FirstQueuedAt.IsZero() {
-			intent.FirstQueuedAt = intent.QueueTime
-			if intent.FirstQueuedAt.IsZero() {
-				intent.FirstQueuedAt = now
-			}
-		}
-		next := expiryForState(config, queueStateQueued, now)
-		horizon := intent.FirstQueuedAt.Add(time.Duration(config.ExecutionTTLSeconds) * time.Second)
-		if next.After(horizon) {
-			next = horizon
-		}
-		intent.ExpiresAt = next
-		journal.Intents[key] = intent
+		clone.Intents[key] = intent
 	}
+	for key, repository := range journal.Repositories {
+		clone.Repositories[key] = repository
+	}
+	for key, expiry := range journal.TerminalJobs {
+		clone.TerminalJobs[key] = expiry
+	}
+	return clone
 }
 
-func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
-	candidates := make([]queueIntent, 0)
+func queueIntentAdmissionBlocked(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, backgroundInFlight int, now time.Time, intent queueIntent) bool {
+	limit := repositoryPolicy(config, intent.Repository).MaxInFlight
+	if queueHasCompetingRepository(journal, intent.Repository) {
+		limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
+	}
+	terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
+	return intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
+		inFlight[intent.Repository] >= limit ||
+		(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight)
+}
+
+func dispatchableAdmissionCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	backgroundInFlight := queueBackgroundInFlight(journal)
-	dispatchableQueued := hasDispatchableQueued(journal)
+	candidates := make([]queueIntent, 0)
 	for _, intent := range journal.Intents {
-		limit := repositoryPolicy(config, intent.Repository).MaxInFlight
-		if queueHasCompetingRepository(journal, intent.Repository) {
-			limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
-		}
-		terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
-		if intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
-			inFlight[intent.Repository] >= limit ||
-			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) ||
-			(dispatchableQueued && intent.RunnerRequestID == 0) {
+		if intent.RunnerRequestID == 0 || queueIntentAdmissionBlocked(journal, config, inFlight, backgroundInFlight, now, intent) {
 			continue
 		}
 		candidates = append(candidates, intent)
 	}
+	sortQueueAdmissionCandidates(journal, config, now, candidates)
+	return candidates
+}
+
+func dispatchableQueuedWouldFit(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) bool {
+	_, exists := resourceFitCandidate(journal, config, dispatchableAdmissionCandidates(journal, config, inFlight, now), now)
+	return exists
+}
+
+func yieldableRequestlessKeys(journal *queueIntentJournal) []string {
+	keys := make([]string, 0)
+	for key, intent := range journal.Intents {
+		if intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		leftIntent := journal.Intents[keys[left]]
+		rightIntent := journal.Intents[keys[right]]
+		if leftWait, rightWait := queueWaitSince(leftIntent), queueWaitSince(rightIntent); !leftWait.Equal(rightWait) {
+			return leftWait.Before(rightWait)
+		}
+		return keys[left] < keys[right]
+	})
+	return keys
+}
+
+func demoteRequestlessAssigned(journal *queueIntentJournal, key string, config queueAdmissionConfig, now time.Time) {
+	intent, exists := journal.Intents[key]
+	if !exists || intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
+		return
+	}
+	intent.State = queueStateQueued
+	intent.StateEnteredAt = now
+	intent.UpdatedAt = now
+	if intent.FirstQueuedAt.IsZero() {
+		intent.FirstQueuedAt = intent.QueueTime
+		if intent.FirstQueuedAt.IsZero() {
+			intent.FirstQueuedAt = now
+		}
+	}
+	next := expiryForState(config, queueStateQueued, now)
+	horizon := intent.FirstQueuedAt.Add(time.Duration(config.ExecutionTTLSeconds) * time.Second)
+	if next.After(horizon) {
+		next = horizon
+	}
+	intent.ExpiresAt = next
+	journal.Intents[key] = intent
+}
+
+func yieldRequestlessOccupancy(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
+	for {
+		_, repositoryInFlight := queueInFlight(journal)
+		if dispatchableQueuedWouldFit(journal, config, repositoryInFlight, now) {
+			return
+		}
+		yielded := false
+		for _, key := range yieldableRequestlessKeys(journal) {
+			clone := cloneQueueIntentJournal(journal)
+			demoteRequestlessAssigned(&clone, key, config, now)
+			_, cloneInFlight := queueInFlight(&clone)
+			if !dispatchableQueuedWouldFit(&clone, config, cloneInFlight, now) {
+				continue
+			}
+			demoteRequestlessAssigned(journal, key, config, now)
+			yielded = true
+			break
+		}
+		if !yielded {
+			return
+		}
+	}
+}
+
+func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
+	blockRequestless := dispatchableQueuedWouldFit(journal, config, inFlight, now)
+	backgroundInFlight := queueBackgroundInFlight(journal)
+	candidates := make([]queueIntent, 0)
+	for _, intent := range journal.Intents {
+		if queueIntentAdmissionBlocked(journal, config, inFlight, backgroundInFlight, now, intent) {
+			continue
+		}
+		if blockRequestless && intent.RunnerRequestID == 0 {
+			continue
+		}
+		candidates = append(candidates, intent)
+	}
+	sortQueueAdmissionCandidates(journal, config, now, candidates)
+	return candidates
+}
+
+func sortQueueAdmissionCandidates(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time, candidates []queueIntent) {
 	sort.Slice(candidates, func(left, right int) bool {
 		leftPriority := effectiveQueuePriority(candidates[left], config, now)
 		rightPriority := effectiveQueuePriority(candidates[right], config, now)
@@ -1339,7 +1419,6 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		}
 		return candidates[left].Key < candidates[right].Key
 	})
-	return candidates
 }
 
 func percentageCeiling(total, percent int) int {
