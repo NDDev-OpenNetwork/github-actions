@@ -46,7 +46,10 @@ type MemberSnapshot struct {
 	PoolTotalBytes   uint64
 	PoolUsedBytes    uint64
 	Instances        []InstanceSnapshot
-	PendingCount     int
+	// PendingCount is get_instances_count(project, location, true): current
+	// instances plus InstanceCreate operations. It is not extras-only; the
+	// script subtracts len(instances) to size creates that have no record yet.
+	PendingCount int
 }
 
 type InstanceSnapshot struct {

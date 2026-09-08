@@ -94,6 +94,19 @@ func TestMaintenancePlacesOnClosedEmptyMember(t *testing.T) {
 	}
 }
 
+func TestPendingCreateWithoutRecordReservesMaxWorker(t *testing.T) {
+	script := renderExample(t)
+	cluster := fourEmptyMembers()
+	cluster.Members[0].PendingCount = 1
+	outcome, err := Execute(script, eightGiBRequest(), cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Failed || outcome.Target == "gha-runner-1" {
+		t.Fatalf("pending create on runner-1 still took the 8GiB worker: %#v", outcome)
+	}
+}
+
 func TestWrongProjectIsANoOp(t *testing.T) {
 	script := renderExample(t)
 	outcome, err := Execute(script, PlacementRequest{
