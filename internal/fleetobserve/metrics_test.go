@@ -61,6 +61,8 @@ func TestRenderPrometheusIsDeterministicAndBounded(t *testing.T) {
 		`gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"} 0`,
 		`gha_fleet_queue_intents_by_priority{priority="0"} 0`,
 		`gha_fleet_queue_intents_by_scale_set{scale_set="nddev-linux-integration"} 0`,
+		`gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set{job_id="none",scale_set="nddev-linux-integration"} 0`,
+		`gha_fleet_queue_oldest_assigned_state_age_seconds{job_id="none",scale_set="none"} 0`,
 		"gha_fleet_incus_orphan_instances 0\n",
 		"gha_fleet_diagnostic_bundles 2\n",
 		"gha_fleet_diagnostic_export_exported_bundles 2\n",

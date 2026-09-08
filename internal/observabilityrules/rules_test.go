@@ -24,6 +24,7 @@ func TestRepositoryRulesUseCurrentMetricSemantics(t *testing.T) {
 	wanted := map[string]string{
 		"github_correlation_persistent":     "min_over_time(gha_fleet_queue_missing_workflow_run_id_beyond_grace[2m])",
 		"lifecycle_queued_delivery_stall":   "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
+		"lifecycle_assigned_stall":          "gha_fleet_queue_oldest_assigned_state_age_seconds",
 		"memory_psi_slow_burn":              `window_seconds="10"`,
 		"queue_wait_slow_burn":              "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set",
 		"provider_retry_error_persistent":   `gha_fleet_provider_retry_deferred_records_by_error_class{error_class=~"identity|intent|provider|timeout|unknown"}`,
@@ -317,8 +318,8 @@ func TestQueueWaitRulesPartitionTheSameSeries(t *testing.T) {
 	// The gate is a bool-modified product of the rule's own series with itself,
 	// so above the page threshold the ticket evaluates to zero rather than to
 	// an empty result. Checked structurally rather than by pinning the literal
-	// "* (max(": the aggregation now keeps `by (scale_set)` so the message can
-	// say which scale set is waiting, and a textual pin turned that into a
+	// "* (max(": the aggregation now keeps `by (job_id, scale_set)` so the
+	// message names the waiter, and a textual pin turned that into a
 	// failure about a form instead of about the invariant.
 	factor, gate, split := strings.Cut(burn.Expression, " * (")
 	if !split || !strings.HasSuffix(strings.TrimSpace(gate), ")") {
@@ -710,6 +711,7 @@ func TestEveryPromQLAlertCarriesASubjectLabel(t *testing.T) {
 		switch {
 		case strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "host_name")`),
 			strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "scale_set")`),
+			strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "job_id")`),
 			strings.HasPrefix(promQL, "label_join(") && strings.HasSuffix(promQL, `, "subject", "", "error_class")`):
 			grouped++
 			if !alert.QueryCondition.PromQLMultiAlert {

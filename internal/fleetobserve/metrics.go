@@ -172,10 +172,18 @@ func RenderPrometheus(snapshot Snapshot, now time.Time, maxStaleness time.Durati
 	// is a lower bound for that many intents, so "under the threshold" and
 	// "under the threshold with nothing to measure by" stay distinguishable.
 	gauge(&output, "gha_fleet_queue_queued_without_first_stamp", "Waiting intents with no immutable first-queued stamp, whose wait is therefore a lower bound.", float64(snapshot.Queue.QueuedWithoutFirstStamp))
-	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", "Longest wait since GitHub queued a still-queued intent, per configured scale set.")
+	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", "Longest wait since GitHub queued a still-queued intent, per configured scale set, labeled with that waiter's journal job_id.")
 	for _, scaleSet := range scaleSets {
-		metric(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", map[string]string{"scale_set": scaleSet}, float64(snapshot.Queue.OldestQueuedWaitSecondsByScaleSet[scaleSet]))
+		metric(&output, "gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set", map[string]string{
+			"scale_set": scaleSet,
+			"job_id":    metricIdentity(snapshot.Queue.OldestQueuedJobIDByScaleSet[scaleSet]),
+		}, float64(snapshot.Queue.OldestQueuedWaitSecondsByScaleSet[scaleSet]))
 	}
+	labeledGaugeHeader(&output, "gha_fleet_queue_oldest_assigned_state_age_seconds", "Assigned-state age of the oldest admitted intent that has not started, labeled with its journal job_id.")
+	metric(&output, "gha_fleet_queue_oldest_assigned_state_age_seconds", map[string]string{
+		"job_id":    metricIdentity(snapshot.Queue.OldestAssignedJobID),
+		"scale_set": metricIdentity(snapshot.Queue.OldestAssignedScaleSet),
+	}, float64(snapshot.Queue.OldestStateAgeSeconds[string(queueintent.StateAssigned)]))
 	gauge(&output, "gha_fleet_queue_started_wait_samples", "Jobs whose runner started within the completed-wait window.", float64(snapshot.Queue.StartedWaitSamples))
 	gauge(&output, "gha_fleet_queue_started_wait_median_seconds", "Median wait, first queued to runner running, over jobs that started in the window.", float64(snapshot.Queue.StartedWaitMedianSeconds))
 	gauge(&output, "gha_fleet_queue_started_wait_p90_seconds", "Ninetieth-percentile wait, first queued to runner running, over jobs that started in the window.", float64(snapshot.Queue.StartedWaitP90Seconds))

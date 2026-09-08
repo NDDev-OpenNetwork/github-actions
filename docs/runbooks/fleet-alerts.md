@@ -8,6 +8,11 @@ count. The notification's `since` value is the alert observation timestamp;
 use the exact journal identity and its first-queued/state-entry timestamps to
 reconstruct the wait. A lower aggregate maximum can mean that one job advanced
 or was cancelled while other work remains stalled. Check its actual outcome.
+After the schema-17 observer and rule reconcile are live,
+`lifecycle_queued_delivery_stall`, `queue_wait_slow_burn` and
+`lifecycle_assigned_stall` copy that waiter's journal GUID into `{subject}`;
+`scale_set` remains a label. Until that pair is deployed, `{subject}` is
+still the scale set or the queue host.
 
 Idle online JIT registrations with local pending/idle status are not reaped
 by the `.92` offline-only timeout path. Excess undemanded idle capacity is

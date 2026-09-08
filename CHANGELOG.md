@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Observer schema 17 labels the oldest queued waiter per scale set and the
+  oldest assigned waiter with journal `job_id`.
+  `lifecycle_queued_delivery_stall`, `queue_wait_slow_burn` and
+  `lifecycle_assigned_stall` aggregate `max by (job_id, scale_set)` so
+  `{subject}` is that GUID. A cancelled or advanced waiter dropping out of
+  the gauge is a new incident, not a quieter reading of the previous one.
+  The global Telegram template is unchanged. `queue_started_wait_slow_burn`
+  still names the scale set. Deploy the observer before reconciling
+  OpenObserve: the assigned stall stream is new.
+
 - GARM `v0.2.1-nddev.94` binds stale scale-set job mutation to exact identity:
   check-run `external_id`, `workflow_job.check_run_url`, repository, exact
   attempt, numeric job ID and source SHA. A job name is never terminal proof.

@@ -920,10 +920,43 @@ func TestQueuedWaitSurvivesAQueueTimeRewrite(t *testing.T) {
 	if summary.OldestQueuedWaitSecondsByScaleSet["nddev-linux-integration"] != int64(time.Hour/time.Second) {
 		t.Fatalf("per-scale-set wait = %#v", summary.OldestQueuedWaitSecondsByScaleSet)
 	}
+	if summary.OldestQueuedJobIDByScaleSet["nddev-linux-integration"] != rewritten.JobID {
+		t.Fatalf("oldest queued job_id = %#v", summary.OldestQueuedJobIDByScaleSet)
+	}
 	// The state clock is what the old threshold used; it must stay short here,
 	// or this test would pass for the wrong reason.
 	if summary.OldestStateAgeSeconds[string(queueintent.StateQueued)] != 30 {
 		t.Fatalf("state age = %d, want 30", summary.OldestStateAgeSeconds[string(queueintent.StateQueued)])
+	}
+}
+
+func TestAssignedStallKeepsJobIdentity(t *testing.T) {
+	assigned := queueintent.Intent{
+		Key: "assigned", ScaleSetID: 4, JobID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		ScaleSetName: "nddev-linux-standard", Repository: "owner/repo",
+		WorkflowRef: "authoritative-rehydration", EventName: "push",
+		QueueTime:      observationTime.Add(-time.Hour),
+		FirstQueuedAt:  observationTime.Add(-time.Hour),
+		State:          queueintent.StateAssigned,
+		Priority:       1,
+		StateEnteredAt: observationTime.Add(-8 * time.Minute),
+		UpdatedAt:      observationTime.Add(-time.Second),
+		ExpiresAt:      observationTime.Add(time.Minute),
+	}
+	summary, err := summarizeQueue(
+		queueintent.Snapshot{Active: []queueintent.Intent{assigned}}, testPlatform(t), observationTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.OldestStateAgeSeconds[string(queueintent.StateAssigned)] != 480 {
+		t.Fatalf("assigned state age = %d, want 480", summary.OldestStateAgeSeconds[string(queueintent.StateAssigned)])
+	}
+	if summary.OldestAssignedJobID != assigned.JobID {
+		t.Fatalf("oldest assigned job_id = %q, want %q", summary.OldestAssignedJobID, assigned.JobID)
+	}
+	if summary.OldestAssignedScaleSet != assigned.ScaleSetName {
+		t.Fatalf("oldest assigned scale_set = %q, want %q", summary.OldestAssignedScaleSet, assigned.ScaleSetName)
 	}
 }
 
