@@ -1,4 +1,6 @@
-package incusplacement
+// Nested module so packing tests can import go.starlark.net without
+// changing the root go.mod that pins the provider derivative.
+package starlarkexec
 
 import (
 	"errors"

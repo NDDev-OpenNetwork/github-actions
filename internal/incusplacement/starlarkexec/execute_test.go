@@ -1,11 +1,14 @@
-package incusplacement
+package starlarkexec
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/NDDev-OpenNetwork/github-actions/internal/config"
+	"github.com/NDDev-OpenNetwork/github-actions/internal/incusplacement"
 )
 
 const (
@@ -107,11 +110,15 @@ func TestWrongProjectIsANoOp(t *testing.T) {
 
 func renderExample(t *testing.T) string {
 	t.Helper()
-	cfg, err := config.Load("../../config/example-runner-1.yaml")
+	_, current, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	cfg, err := config.Load(filepath.Join(filepath.Dir(current), "../../../config/example-runner-1.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, err := Render(cfg)
+	script, err := incusplacement.Render(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
