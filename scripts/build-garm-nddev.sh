@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="44721568b2f8839e643a1976414de56a41e453854b5f41467a2cf2775b99bdad"
+readonly expected_binary_sha256="75ec2a259092859bbb42b448f99b549bc33606649b4c953bf4292b006c7652a9"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -114,16 +114,22 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go"
   "third_party/garm/overlay/workers/scaleset/idle_online_retire.go"
   "third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go"
+  "third_party/garm/overlay/runner/pool/scale_set_identity.go"
+  "third_party/garm/overlay/runner/pool/scale_set_identity_test.go"
+  "third_party/garm/overlay/runner/pool/authoritative_reconcile_backoff_test.go"
 )
 readonly overlay_sha256s=(
-  "44197acff7b8643827ab02637d60d2bbb06470313665a94e27c419291b2428ac"
-  "5678a469b4fac0270fce611b1e3d2f7b0a1bc4785d7a358c0a232f688d6b4fc7"
+  "c15fb2a6b82ad6cc6b79708d1608aa7ee026bbf2a3c17f247775dfd8e51d2735"
+  "abafa5100ee6bbf8ee1dd94d79e34222a3fbc5ed628c022487137896cd1fc5dd"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
   "8a99d172b4aaf7f113081c776bbde471db6f85420bf5eca5a856a40c4e59606b"
-  "453e6252ab13f29feff0b1fbae6c418e081bb89222accf1551c90bf7eac12a3f"
+  "bfec56436411c87873b75bf1c398428079202f7b56ce5ed6403ebf84b8c82b2a"
   "c77cc8fff92b5b23eb4691d24acdd58548f21cce065f9837ad6f2f70fd207eb4"
   "d8dbd3b5d3ca0c89cc8f869e27e1a074166be705a1b65e76b70e2f6cdf92d7dc"
+  "a022ffa920b31655e0101ed60263a2375b7f1258f32bb6e44cc16cb55bca5ee2"
+  "952708658cbd15a489bc9084678ddad4ac27d9ea19a82af53a334e15d5813be6"
+  "d0c8f58b0fe98f5aa496dc161d8064b4029f430b8836c1d37f4429f27a7de620"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
@@ -134,6 +140,9 @@ readonly overlay_targets=(
   "workers/scaleset/confirmed_demand_test.go"
   "workers/scaleset/idle_online_retire.go"
   "workers/scaleset/idle_online_retire_test.go"
+  "runner/pool/scale_set_identity.go"
+  "runner/pool/scale_set_identity_test.go"
+  "runner/pool/authoritative_reconcile_backoff_test.go"
 )
 # END GENERATED REGION
 
@@ -186,27 +195,58 @@ work_dir=$(mktemp -d)
 cidfile=""
 container_pid=""
 cleanup() {
-  if [[ -n "${container_pid}" ]]; then
-    if [[ -n "${cidfile}" && -f "${cidfile}" ]]; then
-      cid=$(cat "${cidfile}" 2>/dev/null || true)
-      if [[ -n "${cid}" ]]; then
-        "${container_engine}" stop --time 20 "${cid}" >/dev/null 2>&1 || true
-      fi
-    fi
-    wait "${container_pid}" 2>/dev/null || true
-    container_pid=""
+  local stop_proven=0
+  local cid=""
+  if [[ -z "${container_pid}" && ( -z "${cidfile}" || ! -f "${cidfile}" ) ]]; then
+    stop_proven=1
   fi
   if [[ -n "${cidfile}" && -f "${cidfile}" ]]; then
     cid=$(cat "${cidfile}" 2>/dev/null || true)
-    if [[ -n "${cid}" ]]; then
-      "${container_engine}" wait "${cid}" >/dev/null 2>&1 || true
-      "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
-    fi
-    rm -f -- "${cidfile}"
-    cidfile=""
   fi
-  if [[ -n "${work_dir:-}" && "${work_dir}" == /tmp/* && -d "${work_dir}" ]]; then
-    rm -rf -- "${work_dir}"
+  if [[ -n "${container_pid}" ]]; then
+    if [[ -n "${cid}" ]]; then
+      if "${container_engine}" stop --time 20 "${cid}" >/dev/null 2>&1 \
+        || ! "${container_engine}" inspect "${cid}" >/dev/null 2>&1; then
+        "${container_engine}" wait "${cid}" >/dev/null 2>&1 || true
+        "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
+        stop_proven=1
+      fi
+    fi
+    local waited=0
+    while kill -0 "${container_pid}" 2>/dev/null; do
+      if (( waited >= 30 )); then
+        break
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if ! kill -0 "${container_pid}" 2>/dev/null; then
+      wait "${container_pid}" 2>/dev/null || true
+      container_pid=""
+      if [[ -z "${cid}" ]]; then
+        stop_proven=1
+      fi
+    fi
+  elif [[ -n "${cid}" ]]; then
+    if "${container_engine}" inspect "${cid}" >/dev/null 2>&1; then
+      if "${container_engine}" wait "${cid}" >/dev/null 2>&1; then
+        "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
+        stop_proven=1
+      fi
+    else
+      stop_proven=1
+    fi
+  fi
+  if [[ "${stop_proven}" -eq 1 ]]; then
+    if [[ -n "${cidfile}" ]]; then
+      rm -f -- "${cidfile}"
+      cidfile=""
+    fi
+    if [[ -n "${work_dir:-}" && "${work_dir}" == /tmp/* && -d "${work_dir}" ]]; then
+      rm -rf -- "${work_dir}"
+    fi
+  else
+    echo "preserving GARM build tree; container stop was not proven: ${work_dir:-unknown}" >&2
   fi
 }
 trap cleanup EXIT

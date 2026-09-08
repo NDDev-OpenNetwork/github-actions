@@ -97,6 +97,16 @@ func TestIdleFreshRequiresRecentMessageNotSessionCreate(t *testing.T) {
 	if started.unchangedIdleZero(fresh, now) {
 		t.Fatal("JobStarted demand must refuse idle removal")
 	}
+	changedBeforeRemove := fresh
+	changedBeforeRemove.messageID = 11
+	changedBeforeRemove.generation = 4
+	changedBeforeRemove.observedAt = now
+	if changedBeforeRemove.unchangedIdleZero(fresh, now) {
+		t.Fatal("demand that changed after the runner lock must not authorize RemoveRunner")
+	}
+	if sessionCreate.unchangedIdleZero(fresh, now) {
+		t.Fatal("messageID 0 must not confirm idle removal")
+	}
 }
 
 func TestConfirmedDemandSessionCreateZeroDoesNotExpireScaling(t *testing.T) {

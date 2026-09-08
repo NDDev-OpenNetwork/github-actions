@@ -7,7 +7,11 @@
   attempt, numeric job ID and source SHA. A job name is never terminal proof.
   Missing fields, incomplete pagination, omitted or changing page totals,
   another attempt, a non-Actions producer and no exact match retain the
-  intent. Scaling uses the latest MESSAGE `statistics.TotalAssignedJobs`;
+  intent. `check_run_url` and the check URL must share an https origin and
+  `repos/{owner}/{repo}/check-runs/{id}` path; a missing check URL or a
+  foreign host does not bind. GitHub 404 retains the intent and does not
+  start the 15-minute access-refusal backoff used for 403/429. Scaling uses
+  the latest MESSAGE `statistics.TotalAssignedJobs`;
   idle retirement requires a recent MESSAGE with `messageID > 0` and
   re-checks that observation before RemoveRunner. Session-create zeros and
   202/nil long-polls are not idle evidence. Start failure deletes the new
@@ -16,10 +20,12 @@
   workflow-job terminal; REST still-queued exact identity can clear that
   tombstone. A later same-run/name GUID is not aliased onto it. JobStarted
   of another GUID does not delete or rename an assigned waiter or copy its
-  FIFO clock. A request-less JobAssigned yields occupancy when a different
-  GUID becomes JobAvailable, including while that reservation is still
-  unexpired; the original waiter and FIFO stay in the journal. Same-GUID
-  JobAvailable keeps occupancy. A replayed MESSAGE with the same session and
+  FIFO clock.   A request-less JobAssigned yields occupancy only when a dispatchable
+  JobAvailable would actually fit after that yield, including while that
+  reservation is still unexpired; a quota-blocked available job does not
+  evict a useful foreign bootstrap reservation. The original waiter and FIFO
+  stay in the journal. Same-GUID JobAvailable keeps occupancy. An official
+  build preserves the source tree when container stop is not proven. A replayed MESSAGE with the same session and
   messageID does not refresh idle-retirement freshness. A late message from a
   replaced session does not overwrite current demand.
   `golang.org/x/text` is v0.39.0. The `.92` and `.93`
