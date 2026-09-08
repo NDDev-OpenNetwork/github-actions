@@ -39,6 +39,10 @@ func TestFileStoreSerializesDifferentConcurrentAttempts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, active, 1)
 	require.NoError(t, store.Finish(context.Background(), Result{AttemptID: active[0].ID, FinishedAt: at, Remaining: active[0].Stuck}))
+	history, err := store.History(context.Background())
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, active[0].Stuck, history[0].Remaining)
 	loser := 0
 	if acquired[0] {
 		loser = 1

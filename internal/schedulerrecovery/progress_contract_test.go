@@ -67,6 +67,9 @@ func (s *evidenceStore) Finish(_ context.Context, r Result) error {
 	s.results = append(s.results, r)
 	return nil
 }
+func (s *evidenceStore) History(context.Context) ([]Result, error) {
+	return append([]Result(nil), s.results...), nil
+}
 
 type evidenceExecutor struct {
 	progressed, remaining []string

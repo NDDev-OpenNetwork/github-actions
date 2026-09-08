@@ -105,6 +105,15 @@ func (store FileStore) Finish(_ context.Context, result Result) error {
 	})
 }
 
+func (store FileStore) History(_ context.Context) ([]Result, error) {
+	var history []Result
+	err := store.locked(func(state *fileState) error {
+		history = slices.Clone(state.Finished)
+		return nil
+	})
+	return history, err
+}
+
 func (store FileStore) locked(update func(*fileState) error) error {
 	if store.Path == "" || store.LockPath == "" {
 		return fmt.Errorf("state and lock paths are required")
