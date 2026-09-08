@@ -121,6 +121,23 @@ func TestWrongProjectIsANoOp(t *testing.T) {
 	}
 }
 
+func TestForeignProjectInstancesDoNotConsumeFleetRAM(t *testing.T) {
+	script := renderExample(t)
+	cluster := fourEmptyMembers()
+	cluster.Members[0].Instances = []InstanceSnapshot{
+		{Name: "other-1", Project: "not-fleet", MemoryLimitMiB: 8192},
+		{Name: "other-2", Project: "not-fleet", MemoryLimitMiB: 8192},
+	}
+	cluster.Members[0].PendingCount = 0
+	outcome, err := Execute(script, eightGiBRequest(), cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Failed || outcome.Target != "gha-runner-1" {
+		t.Fatalf("other-project occupancy filled gha-fleet RAM: %#v", outcome)
+	}
+}
+
 func renderExample(t *testing.T) string {
 	t.Helper()
 	_, current, _, ok := runtime.Caller(0)
