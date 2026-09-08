@@ -84,10 +84,59 @@ func (result *Result) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+const (
+	originalRecoveryAttempt     = 1
+	maxInfrastructureRetries    = 2
+	maxIncidentRecoveryAttempts = originalRecoveryAttempt + maxInfrastructureRetries
+)
+
 type AttemptStore interface {
 	Active(context.Context) ([]Attempt, error)
 	Begin(context.Context, Attempt) (bool, error)
 	Finish(context.Context, Result) error
+	History(context.Context) ([]Result, error)
+}
+
+func subjectSetsOverlap(left []string, right map[string]struct{}) bool {
+	for _, id := range left {
+		if _, exists := right[id]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func incidentSubjects(result Result) []string {
+	subjects := make([]string, 0, len(result.Progressed)+len(result.Remaining))
+	subjects = append(subjects, result.Progressed...)
+	subjects = append(subjects, result.Remaining...)
+	return subjects
+}
+
+// incidentRecoveryAttempts counts unfinished recoveries that overlap the
+// current stuck set. A later successful overlapping recovery resets the count.
+// The attempt ID, observation time and the lexicographic max subject may change
+// without starting a new incident.
+func incidentRecoveryAttempts(history []Result, stuck []string) int {
+	if len(stuck) == 0 {
+		return 0
+	}
+	current := make(map[string]struct{}, len(stuck))
+	for _, id := range stuck {
+		current[id] = struct{}{}
+	}
+	count := 0
+	for _, result := range history {
+		if result.Suppressed || !subjectSetsOverlap(incidentSubjects(result), current) {
+			continue
+		}
+		if result.Recovered {
+			count = 0
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func resumeAcquired(ctx context.Context, attempt Attempt, store AttemptStore, executor Executor, now func() time.Time) (Result, error) {
@@ -146,6 +195,13 @@ func Recover(ctx context.Context, observedAt time.Time, decision Decision, store
 	}
 	if err := validateProgress(decision.Stuck, nil, decision.Stuck); err != nil {
 		return Result{}, fmt.Errorf("invalid recovery identities: %w", err)
+	}
+	history, err := store.History(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("read recovery history: %w", err)
+	}
+	if incidentRecoveryAttempts(history, decision.Stuck) >= maxIncidentRecoveryAttempts {
+		return Result{}, fmt.Errorf("recovery refused: recovery-retry-budget-exhausted")
 	}
 	attempt := NewAttempt(observedAt, decision.Stuck)
 	acquired, err := store.Begin(ctx, attempt)

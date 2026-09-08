@@ -52,6 +52,12 @@ func (store *memoryAttempts) Active(_ context.Context) ([]Attempt, error) {
 	return attempts, nil
 }
 
+func (store *memoryAttempts) History(_ context.Context) ([]Result, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return append([]Result(nil), store.finished...), nil
+}
+
 type faultExecutor struct {
 	mu          sync.Mutex
 	checkpoints int

@@ -74,6 +74,16 @@ func (controller Controller) Tick(ctx context.Context) (Decision, Result, error)
 	}
 	observation.HeartbeatAt = heartbeat.At
 	decision := Evaluate(controller.Policy, observation)
+	if decision.Recover {
+		history, historyErr := controller.Attempts.History(ctx)
+		if historyErr != nil {
+			return decision, Result{}, fmt.Errorf("read recovery history: %w", historyErr)
+		}
+		if incidentRecoveryAttempts(history, decision.Stuck) >= maxIncidentRecoveryAttempts {
+			decision.Recover = false
+			decision.Reason = "recovery-retry-budget-exhausted"
+		}
+	}
 	state := "healthy"
 	if decision.Recover || len(decision.Stuck) > 0 {
 		state = "unhealthy"
