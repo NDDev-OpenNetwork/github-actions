@@ -1,0 +1,1319 @@
+diff --git a/runner/common/mocks/GithubClient.go b/runner/common/mocks/GithubClient.go
+index 5b8f3d4..c2f11fd 100644
+--- a/runner/common/mocks/GithubClient.go
++++ b/runner/common/mocks/GithubClient.go
+@@ -582,6 +582,77 @@ func (_c *GithubClient_GetWorkflowRunByID_Call) RunAndReturn(run func(context.Co
+ 	return _c
+ }
+ 
++// ListCheckRunsCheckSuite provides a mock function with given fields: ctx, owner, repo, checkSuiteID, opts
++func (_m *GithubClient) ListCheckRunsCheckSuite(ctx context.Context, owner string, repo string, checkSuiteID int64, opts *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error) {
++	ret := _m.Called(ctx, owner, repo, checkSuiteID, opts)
++
++	if len(ret) == 0 {
++		panic("no return value specified for ListCheckRunsCheckSuite")
++	}
++
++	var r0 *github.ListCheckRunsResults
++	var r1 *github.Response
++	var r2 error
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error)); ok {
++		return rf(ctx, owner, repo, checkSuiteID, opts)
++	}
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *github.ListCheckRunsOptions) *github.ListCheckRunsResults); ok {
++		r0 = rf(ctx, owner, repo, checkSuiteID, opts)
++	} else {
++		if ret.Get(0) != nil {
++			r0 = ret.Get(0).(*github.ListCheckRunsResults)
++		}
++	}
++
++	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, *github.ListCheckRunsOptions) *github.Response); ok {
++		r1 = rf(ctx, owner, repo, checkSuiteID, opts)
++	} else {
++		if ret.Get(1) != nil {
++			r1 = ret.Get(1).(*github.Response)
++		}
++	}
++
++	if rf, ok := ret.Get(2).(func(context.Context, string, string, int64, *github.ListCheckRunsOptions) error); ok {
++		r2 = rf(ctx, owner, repo, checkSuiteID, opts)
++	} else {
++		r2 = ret.Error(2)
++	}
++
++	return r0, r1, r2
++}
++
++// GithubClient_ListCheckRunsCheckSuite_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCheckRunsCheckSuite'
++type GithubClient_ListCheckRunsCheckSuite_Call struct {
++	*mock.Call
++}
++
++// ListCheckRunsCheckSuite is a helper method to define mock.On call
++//   - ctx context.Context
++//   - owner string
++//   - repo string
++//   - checkSuiteID int64
++//   - opts *github.ListCheckRunsOptions
++func (_e *GithubClient_Expecter) ListCheckRunsCheckSuite(ctx interface{}, owner interface{}, repo interface{}, checkSuiteID interface{}, opts interface{}) *GithubClient_ListCheckRunsCheckSuite_Call {
++	return &GithubClient_ListCheckRunsCheckSuite_Call{Call: _e.mock.On("ListCheckRunsCheckSuite", ctx, owner, repo, checkSuiteID, opts)}
++}
++
++func (_c *GithubClient_ListCheckRunsCheckSuite_Call) Run(run func(ctx context.Context, owner string, repo string, checkSuiteID int64, opts *github.ListCheckRunsOptions)) *GithubClient_ListCheckRunsCheckSuite_Call {
++	_c.Call.Run(func(args mock.Arguments) {
++		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int64), args[4].(*github.ListCheckRunsOptions))
++	})
++	return _c
++}
++
++func (_c *GithubClient_ListCheckRunsCheckSuite_Call) Return(_a0 *github.ListCheckRunsResults, _a1 *github.Response, _a2 error) *GithubClient_ListCheckRunsCheckSuite_Call {
++	_c.Call.Return(_a0, _a1, _a2)
++	return _c
++}
++
++func (_c *GithubClient_ListCheckRunsCheckSuite_Call) RunAndReturn(run func(context.Context, string, string, int64, *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error)) *GithubClient_ListCheckRunsCheckSuite_Call {
++	_c.Call.Return(run)
++	return _c
++}
++
+ // GithubBaseURL provides a mock function with no fields
+ func (_m *GithubClient) GithubBaseURL() *url.URL {
+ 	ret := _m.Called()
+@@ -903,6 +974,51 @@ func (_c *GithubClient_ListWorkflowJobs_Call) RunAndReturn(run func(context.Cont
+ 	return _c
+ }
+ 
++// ListWorkflowJobsAttempt provides a mock function with given fields: ctx, owner, repo, runID, attemptNumber, opts
++func (_m *GithubClient) ListWorkflowJobsAttempt(ctx context.Context, owner string, repo string, runID int64, attemptNumber int64, opts *github.ListOptions) (*github.Jobs, *github.Response, error) {
++	ret := _m.Called(ctx, owner, repo, runID, attemptNumber, opts)
++
++	if len(ret) == 0 {
++		panic("no return value specified for ListWorkflowJobsAttempt")
++	}
++
++	var r0 *github.Jobs
++	var r1 *github.Response
++	var r2 error
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, int64, *github.ListOptions) (*github.Jobs, *github.Response, error)); ok {
++		return rf(ctx, owner, repo, runID, attemptNumber, opts)
++	}
++	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, int64, *github.ListOptions) *github.Jobs); ok {
++		r0 = rf(ctx, owner, repo, runID, attemptNumber, opts)
++	} else if ret.Get(0) != nil {
++		r0 = ret.Get(0).(*github.Jobs)
++	}
++	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, int64, *github.ListOptions) *github.Response); ok {
++		r1 = rf(ctx, owner, repo, runID, attemptNumber, opts)
++	} else if ret.Get(1) != nil {
++		r1 = ret.Get(1).(*github.Response)
++	}
++	if rf, ok := ret.Get(2).(func(context.Context, string, string, int64, int64, *github.ListOptions) error); ok {
++		r2 = rf(ctx, owner, repo, runID, attemptNumber, opts)
++	} else {
++		r2 = ret.Error(2)
++	}
++	return r0, r1, r2
++}
++
++type GithubClient_ListWorkflowJobsAttempt_Call struct {
++	*mock.Call
++}
++
++func (_e *GithubClient_Expecter) ListWorkflowJobsAttempt(ctx interface{}, owner interface{}, repo interface{}, runID interface{}, attemptNumber interface{}, opts interface{}) *GithubClient_ListWorkflowJobsAttempt_Call {
++	return &GithubClient_ListWorkflowJobsAttempt_Call{Call: _e.mock.On("ListWorkflowJobsAttempt", ctx, owner, repo, runID, attemptNumber, opts)}
++}
++
++func (_c *GithubClient_ListWorkflowJobsAttempt_Call) Return(_a0 *github.Jobs, _a1 *github.Response, _a2 error) *GithubClient_ListWorkflowJobsAttempt_Call {
++	_c.Call.Return(_a0, _a1, _a2)
++	return _c
++}
++
+ // PingEntityHook provides a mock function with given fields: ctx, id
+ func (_m *GithubClient) PingEntityHook(ctx context.Context, id int64) (*github.Response, error) {
+ 	ret := _m.Called(ctx, id)
+diff --git a/runner/common/util.go b/runner/common/util.go
+index 2ad20a3..eccfc6f 100644
+--- a/runner/common/util.go
++++ b/runner/common/util.go
+@@ -58,4 +58,6 @@ type GithubClient interface {
+ 	GetWorkflowJobByID(ctx context.Context, owner, repo string, jobID int64) (*github.WorkflowJob, *github.Response, error)
+ 	GetWorkflowRunByID(ctx context.Context, owner, repo string, runID int64) (*github.WorkflowRun, *github.Response, error)
+ 	ListWorkflowJobs(ctx context.Context, owner, repo string, runID int64, opts *github.ListWorkflowJobsOptions) (*github.Jobs, *github.Response, error)
++	ListWorkflowJobsAttempt(ctx context.Context, owner, repo string, runID, attemptNumber int64, opts *github.ListOptions) (*github.Jobs, *github.Response, error)
++	ListCheckRunsCheckSuite(ctx context.Context, owner, repo string, checkSuiteID int64, opts *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error)
+ }
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+index 7d8a5ce..7f2635a 100644
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -2139,98 +2139,235 @@ func (r *basePoolManager) reconcileStaleJobs() error {
+ 	return nil
+ }
+ 
+-// reconcileStaleScaleSetJob returns true only when GitHub authoritatively proves
+-// that a queued scale-set job is absent or no longer queued. Ambiguous matrix
+-// jobs are retained so reconciliation cannot delete live work.
++// reconcileStaleScaleSetJob mutates a queued scale-set DB row only after the
++// check-run external GUID, repository, run, exact attempt, check_run_url and
++// source SHA bind to one GitHub Actions workflow job. A name is never identity.
+ func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
+-	if job.ScaleSetJobID == "" || job.RunID == 0 || job.Name == "" {
+-		slog.WarnContext(r.ctx, "scale set job is missing reconciliation identity", "scale_set_job_id", job.ScaleSetJobID)
++	if job.ScaleSetJobID == "" || job.RunID == 0 || job.RepositoryOwner == "" || job.RepositoryName == "" {
++		slog.WarnContext(r.ctx, "scale set job is missing exact reconciliation identity", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	forgeType, err := r.entity.GetForgeType()
++	if err != nil || forgeType != params.GithubEndpointType {
++		slog.WarnContext(r.ctx, "scale set job identity is unsupported on this provider", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if r.entity.EntityType == params.ForgeEntityTypeRepository &&
++		(!strings.EqualFold(r.entity.Owner, job.RepositoryOwner) || !strings.EqualFold(r.entity.Name, job.RepositoryName)) {
++		slog.WarnContext(r.ctx, "scale set job repository does not match pool entity", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+ 	}
+ 
+-	matched := make([]*github.WorkflowJob, 0, 1)
+-	opts := &github.ListWorkflowJobsOptions{Filter: "latest", ListOptions: github.ListOptions{PerPage: 100}}
+-	for {
+-		jobs, resp, err := r.ghcli.ListWorkflowJobs(r.ctx, job.RepositoryOwner, job.RepositoryName, job.RunID, opts)
+-		if err != nil {
+-			if resp != nil && resp.StatusCode == http.StatusNotFound {
+-				return r.deleteStaleScaleSetJob(job, "workflow run no longer exists", true)
+-			}
+-			if resp != nil && r.deferAuthoritativeReconcile(time.Now(), resp.StatusCode) {
+-				slog.WarnContext(r.ctx, "authoritative job reconciliation deferred after GitHub access refusal",
+-					"status_code", resp.StatusCode,
+-					"backoff", authoritativeReconcileAccessBackoff)
+-			}
+-			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to list workflow run jobs", "run_id", job.RunID)
+-			return false
+-		}
+-		for _, candidate := range jobs.Jobs {
+-			if candidate.GetName() == job.Name {
+-				matched = append(matched, candidate)
+-			}
+-		}
+-		if resp == nil || resp.NextPage == 0 {
+-			break
+-		}
+-		opts.Page = resp.NextPage
++	workflowRun, resp, err := r.ghcli.GetWorkflowRunByID(r.ctx, job.RepositoryOwner, job.RepositoryName, job.RunID)
++	if err != nil {
++		r.noteAuthoritativeScaleSetRead(resp, err, "failed to get workflow run", job)
++		return false
++	}
++	if workflowRun == nil || workflowRun.GetID() != job.RunID || workflowRun.GetCheckSuiteID() == 0 ||
++		workflowRun.GetHeadSHA() == "" || workflowRun.GetRunAttempt() <= 0 {
++		slog.WarnContext(r.ctx, "workflow run is missing exact identity fields", "scale_set_job_id", job.ScaleSetJobID, "run_id", job.RunID)
++		return false
++	}
++	repo := workflowRun.GetRepository()
++	if repo == nil || repo.GetOwner() == nil || repo.GetOwner().GetLogin() == "" || repo.GetName() == "" {
++		slog.WarnContext(r.ctx, "workflow run is missing repository identity", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if !strings.EqualFold(repo.GetOwner().GetLogin(), job.RepositoryOwner) || !strings.EqualFold(repo.GetName(), job.RepositoryName) {
++		slog.WarnContext(r.ctx, "workflow run repository does not match scale set job", "scale_set_job_id", job.ScaleSetJobID)
++		return false
+ 	}
+ 
+-	if len(matched) == 0 {
+-		return r.deleteStaleScaleSetJob(job, "job is absent from workflow run", true)
++	checkRun, complete, err := r.listExactScaleSetCheckRun(job, workflowRun)
++	if err != nil || !complete {
++		slog.WarnContext(r.ctx, "scale set job identity is incomplete or unknown; retaining intent",
++			"scale_set_job_id", job.ScaleSetJobID, "run_id", job.RunID)
++		return false
+ 	}
+-	if len(matched) > 1 {
+-		slog.WarnContext(r.ctx, "ambiguous scale set job retained", "scale_set_job_id", job.ScaleSetJobID, "matches", len(matched))
++	if !isGitHubActionsCheckRun(checkRun) {
++		slog.WarnContext(r.ctx, "matched check run is not a GitHub Actions producer", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+ 	}
+-	if matched[0].GetStatus() != "queued" {
+-		if matched[0].GetStatus() == "in_progress" {
+-			if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
+-				slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to bind authoritative running job", "scale_set_job_id", job.ScaleSetJobID)
+-				return false
+-			}
+-			return r.deleteStaleScaleSetJob(job, "job is no longer queued", false)
+-		}
+-		return r.deleteStaleScaleSetJob(job, "job is no longer queued", true)
++	if checkRun.GetHeadSHA() == "" || checkRun.GetID() == 0 {
++		slog.WarnContext(r.ctx, "matched check run is missing identity fields", "scale_set_job_id", job.ScaleSetJobID)
++		return false
+ 	}
+-	workflowRun, resp, err := r.ghcli.GetWorkflowRunByID(r.ctx, job.RepositoryOwner, job.RepositoryName, job.RunID)
++	if checkRun.CheckSuite == nil || checkRun.CheckSuite.GetID() != workflowRun.GetCheckSuiteID() {
++		slog.WarnContext(r.ctx, "check run suite does not match workflow run", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++
++	listedJob, complete, err := r.listExactAttemptJobForCheckRun(job, workflowRun, checkRun)
++	if err != nil || !complete {
++		slog.WarnContext(r.ctx, "exact-attempt workflow job is incomplete or unknown; retaining intent",
++			"scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	ghJob, resp, err := r.ghcli.GetWorkflowJobByID(r.ctx, job.RepositoryOwner, job.RepositoryName, listedJob.GetID())
+ 	if err != nil {
+-		if resp != nil && resp.StatusCode == http.StatusNotFound {
+-			return r.deleteStaleScaleSetJob(job, "workflow run no longer exists", true)
++		r.noteAuthoritativeScaleSetRead(resp, err, "failed to get workflow job bound by check_run_url", job)
++		return false
++	}
++	if ghJob == nil || ghJob.GetID() != listedJob.GetID() || ghJob.GetID() == 0 || ghJob.GetRunID() != job.RunID {
++		slog.WarnContext(r.ctx, "workflow job does not bind to the matched check run URL", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if !workflowJobBindsCheckRun(ghJob, checkRun) {
++		slog.WarnContext(r.ctx, "workflow job check_run_url does not match the check run", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if ghJob.GetRunAttempt() <= 0 || ghJob.GetRunAttempt() != int64(workflowRun.GetRunAttempt()) {
++		slog.WarnContext(r.ctx, "workflow job attempt does not match workflow run", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if _, ok := exactHeadSHA(workflowRun.GetHeadSHA(), checkRun.GetHeadSHA(), ghJob.GetHeadSHA()); !ok {
++		slog.WarnContext(r.ctx, "scale set job source SHA is missing or mismatched", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if len(ghJob.Labels) == 0 {
++		slog.WarnContext(r.ctx, "matched job has no scale-set labels", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++	if _, err := r.exactScaleSetForJobFromLabels(ghJob.Labels); err != nil {
++		slog.With(slog.Any("error", err)).WarnContext(r.ctx, "matched job labels do not uniquely identify an entity scale set", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++
++	switch ghJob.GetStatus() {
++	case "queued":
++		if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
++			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to rehydrate authoritative queued job", "scale_set_job_id", job.ScaleSetJobID)
++		}
++		return false
++	case "in_progress":
++		if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
++			slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to bind authoritative running job", "scale_set_job_id", job.ScaleSetJobID)
++			return false
+ 		}
+-		if resp != nil && r.deferAuthoritativeReconcile(time.Now(), resp.StatusCode) {
+-			slog.WarnContext(r.ctx, "authoritative workflow run reconciliation deferred after GitHub access refusal",
+-				"status_code", resp.StatusCode,
+-				"backoff", authoritativeReconcileAccessBackoff)
++		return r.deleteStaleScaleSetJob(job, "exact scale set job is in progress", false)
++	case "completed":
++		if !validTerminalConclusion(ghJob.GetConclusion()) {
++			slog.WarnContext(r.ctx, "completed job is missing a valid terminal conclusion; retaining intent",
++				"scale_set_job_id", job.ScaleSetJobID, "conclusion", ghJob.GetConclusion())
++			return false
+ 		}
+-		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to get workflow run", "run_id", job.RunID)
++		return r.deleteStaleScaleSetJob(job, "exact scale set job is completed", true)
++	default:
++		slog.WarnContext(r.ctx, "exact scale set job has unknown status; retaining intent",
++			"scale_set_job_id", job.ScaleSetJobID, "github_status", ghJob.GetStatus())
+ 		return false
+ 	}
+-	if workflowRun.GetStatus() == "completed" {
+-		return r.deleteStaleScaleSetJob(job, "workflow run is completed", true)
++}
++
++func (r *basePoolManager) noteAuthoritativeScaleSetRead(resp *github.Response, err error, message string, job params.Job) {
++	if resp != nil && r.deferAuthoritativeReconcile(time.Now(), resp.StatusCode) {
++		slog.WarnContext(r.ctx, "authoritative scale set job reconciliation deferred after GitHub access refusal",
++			"status_code", resp.StatusCode,
++			"backoff", authoritativeReconcileAccessBackoff,
++			"scale_set_job_id", job.ScaleSetJobID)
+ 	}
+-	if err := r.ensureAuthoritativeQueueIntent(job); err != nil {
+-		slog.With(slog.Any("error", err)).ErrorContext(r.ctx, "failed to rehydrate authoritative queued job", "scale_set_job_id", job.ScaleSetJobID)
++	slog.With(slog.Any("error", err)).ErrorContext(r.ctx, message, "run_id", job.RunID, "scale_set_job_id", job.ScaleSetJobID)
++}
++
++func (r *basePoolManager) listExactScaleSetCheckRun(job params.Job, workflowRun *github.WorkflowRun) (*github.CheckRun, bool, error) {
++	opts := &github.ListCheckRunsOptions{
++		Filter: github.Ptr("all"),
++		ListOptions: github.ListOptions{
++			PerPage: scaleSetListPageSize,
++		},
+ 	}
+-	return false
++	cursor := newGitHubListCursor()
++	var matched *github.CheckRun
++	requestedPage := 0
++	for page := 1; page <= scaleSetListMaxPages; page++ {
++		results, resp, err := r.ghcli.ListCheckRunsCheckSuite(r.ctx, job.RepositoryOwner, job.RepositoryName, workflowRun.GetCheckSuiteID(), opts)
++		if err != nil {
++			r.noteAuthoritativeScaleSetRead(resp, err, "failed to list check runs for workflow suite", job)
++			return nil, false, err
++		}
++		if results == nil {
++			return nil, false, nil
++		}
++		ids := make([]int64, 0, len(results.CheckRuns))
++		for _, candidate := range results.CheckRuns {
++			if candidate == nil {
++				return nil, false, nil
++			}
++			ids = append(ids, candidate.GetID())
++			if candidate.GetExternalID() != job.ScaleSetJobID {
++				continue
++			}
++			if matched != nil && matched.GetID() != candidate.GetID() {
++				return nil, false, nil
++			}
++			matched = candidate
++		}
++		done, ok := cursor.accept(requestedPage, resp, ids, results.Total)
++		if !ok {
++			return nil, false, nil
++		}
++		if done {
++			if matched == nil {
++				return nil, false, nil
++			}
++			return matched, true, nil
++		}
++		requestedPage = resp.NextPage
++		opts.Page = resp.NextPage
++	}
++	return nil, false, nil
+ }
+ 
+-func exactScaleSetForJob(scaleSets []params.ScaleSet, job params.Job) (params.ScaleSet, error) {
+-	matches := make([]params.ScaleSet, 0, 1)
+-	for _, scaleSet := range scaleSets {
+-		if !scaleSet.Enabled {
+-			continue
++func (r *basePoolManager) listExactAttemptJobForCheckRun(job params.Job, workflowRun *github.WorkflowRun, checkRun *github.CheckRun) (*github.WorkflowJob, bool, error) {
++	opts := &github.ListOptions{PerPage: scaleSetListPageSize}
++	cursor := newGitHubListCursor()
++	var matched *github.WorkflowJob
++	requestedPage := 0
++	for page := 1; page <= scaleSetListMaxPages; page++ {
++		results, resp, err := r.ghcli.ListWorkflowJobsAttempt(r.ctx, job.RepositoryOwner, job.RepositoryName, job.RunID, int64(workflowRun.GetRunAttempt()), opts)
++		if err != nil {
++			r.noteAuthoritativeScaleSetRead(resp, err, "failed to list jobs for workflow run attempt", job)
++			return nil, false, err
+ 		}
+-		for _, label := range job.Labels {
+-			if label == scaleSet.Name {
+-				matches = append(matches, scaleSet)
+-				break
++		if results == nil {
++			return nil, false, nil
++		}
++		ids := make([]int64, 0, len(results.Jobs))
++		for _, candidate := range results.Jobs {
++			if candidate == nil {
++				return nil, false, nil
+ 			}
++			ids = append(ids, candidate.GetID())
++			if !workflowJobBindsCheckRun(candidate, checkRun) {
++				continue
++			}
++			if matched != nil && matched.GetID() != candidate.GetID() {
++				return nil, false, nil
++			}
++			matched = candidate
++		}
++		done, ok := cursor.accept(requestedPage, resp, ids, results.TotalCount)
++		if !ok {
++			return nil, false, nil
++		}
++		if done {
++			if matched == nil {
++				return nil, false, nil
++			}
++			return matched, true, nil
+ 		}
++		requestedPage = resp.NextPage
++		opts.Page = resp.NextPage
+ 	}
+-	if len(matches) != 1 {
+-		return params.ScaleSet{}, fmt.Errorf("queued job matches %d enabled scale sets", len(matches))
++	return nil, false, nil
++}
++
++func (r *basePoolManager) exactScaleSetForJobFromLabels(labels []string) (params.ScaleSet, error) {
++	scaleSets, err := r.store.ListEntityScaleSets(r.ctx, r.entity)
++	if err != nil {
++		return params.ScaleSet{}, fmt.Errorf("list entity scale sets: %w", err)
+ 	}
+-	return matches[0], nil
++	return exactScaleSetForJob(scaleSets, params.Job{Labels: labels})
+ }
+ 
+ func (r *basePoolManager) ensureAuthoritativeQueueIntent(job params.Job) error {
+diff --git a/runner/pool/pool_test.go b/runner/pool/pool_test.go
+index 53ee134..362c65c 100644
+--- a/runner/pool/pool_test.go
++++ b/runner/pool/pool_test.go
+@@ -18,8 +18,11 @@ package pool
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
++	"net/http"
+ 	"sync"
++	"sync/atomic"
+ 	"testing"
+ 	"time"
+ 
+@@ -833,77 +836,215 @@ func (s *PoolStressTestSuite) TestExactScaleSetForJobFailsClosedOnMissingOrAmbig
+ 	job.Labels = []string{"nddev-linux-standard", "nddev-linux-integration"}
+ 	_, err = exactScaleSetForJob(sets, job)
+ 	s.Error(err)
++	job.Labels = nil
++	_, err = exactScaleSetForJob(sets, job)
++	s.Error(err)
+ }
+ 
+-func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobPaginatesAndDeletesAbsentJob() {
+-	reconciledJobID := ""
+-	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
+-		reconciledJobID = jobID
+-		return true, nil
++func scaleSetIdentityRun(runID, suiteID int64, sha string, attempt int) *github.WorkflowRun {
++	return &github.WorkflowRun{
++		ID:           github.Ptr(runID),
++		CheckSuiteID: github.Ptr(suiteID),
++		HeadSHA:      github.Ptr(sha),
++		RunAttempt:   github.Ptr(attempt),
++		Status:       github.Ptr("in_progress"),
++		Repository: &github.Repository{
++			Name:  github.Ptr("test-repo"),
++			Owner: &github.User{Login: github.Ptr("test-owner")},
++		},
++	}
++}
++
++func scaleSetIdentityCheckRun(id int64, externalID, status, sha string, suiteID int64) *github.CheckRun {
++	return &github.CheckRun{
++		ID:         github.Ptr(id),
++		ExternalID: github.Ptr(externalID),
++		Status:     github.Ptr(status),
++		HeadSHA:    github.Ptr(sha),
++		URL:        github.Ptr(fmt.Sprintf("https://api.github.com/repos/test-owner/test-repo/check-runs/%d", id)),
++		CheckSuite: &github.CheckSuite{ID: github.Ptr(suiteID)},
++		Name:       github.Ptr("wanted"),
++		App:        &github.App{Slug: github.Ptr("github-actions")},
++	}
++}
++
++func scaleSetIdentityJob(id, checkID, runID, attempt int64, status, conclusion, sha string, labels []string) *github.WorkflowJob {
++	return &github.WorkflowJob{
++		ID:          github.Ptr(id),
++		RunID:       github.Ptr(runID),
++		RunAttempt:  github.Ptr(attempt),
++		Status:      github.Ptr(status),
++		Conclusion:  github.Ptr(conclusion),
++		HeadSHA:     github.Ptr(sha),
++		Name:        github.Ptr("wanted"),
++		Labels:      labels,
++		CheckRunURL: github.Ptr(fmt.Sprintf("https://api.github.com/repos/test-owner/test-repo/check-runs/%d", checkID)),
+ 	}
++}
++
++func completeCheckPage(runs []*github.CheckRun, total, next int) (*github.ListCheckRunsResults, *github.Response) {
++	return &github.ListCheckRunsResults{Total: github.Ptr(total), CheckRuns: runs}, &github.Response{NextPage: next}
++}
++
++func completeJobPage(jobs []*github.WorkflowJob, total, next int) (*github.Jobs, *github.Response) {
++	return &github.Jobs{TotalCount: github.Ptr(total), Jobs: jobs}, &github.Response{NextPage: next}
++}
++
++func allCheckRuns(opts *github.ListCheckRunsOptions) bool {
++	return opts != nil && opts.Filter != nil && *opts.Filter == "all" && opts.CheckName == nil && opts.PerPage == 100
++}
++
++func (s *PoolStressTestSuite) storeQueuedScaleSetJob(id string, runID int64, name string) params.Job {
++	s.T().Helper()
+ 	job := params.Job{
+-		ScaleSetJobID: "scale-job-1", RunID: 4242, Name: "wanted",
++		ScaleSetJobID: id, RunID: runID, Name: name,
+ 		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++		Labels: []string{"nddev-linux-standard"},
+ 	}
+ 	_, err := s.store.CreateOrUpdateJob(s.adminCtx, job)
+ 	s.Require().NoError(err)
++	return job
++}
+ 
+-	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4242), mock.MatchedBy(func(opts *github.ListWorkflowJobsOptions) bool {
+-		return opts.Page == 0 && opts.PerPage == 100 && opts.Filter == "latest"
+-	})).Return(&github.Jobs{Jobs: []*github.WorkflowJob{{Name: github.Ptr("other")}}}, &github.Response{NextPage: 2}, nil).Once()
+-	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4242), mock.MatchedBy(func(opts *github.ListWorkflowJobsOptions) bool {
+-		return opts.Page == 2
+-	})).Return(&github.Jobs{}, &github.Response{}, nil).Once()
+-
+-	s.True(s.mgr.reconcileStaleScaleSetJob(job))
+-	s.Equal(job.ScaleSetJobID, reconciledJobID)
+-	jobs, err := s.store.ListAllJobs(s.adminCtx)
++func (s *PoolStressTestSuite) requireScaleSet() {
++	s.T().Helper()
++	_, err := s.store.CreateEntityScaleSet(s.adminCtx, s.entity, params.CreateScaleSetParams{
++		ProviderName: "test-provider", Name: "nddev-linux-standard", Image: "test-image", Flavor: "test-flavor",
++		MaxRunners: 1, OSType: commonParams.Linux, OSArch: commonParams.Amd64, Enabled: true,
++	})
+ 	s.Require().NoError(err)
+-	s.Empty(jobs)
+ }
+ 
+-func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsAmbiguousMatrixJob() {
+-	job := params.Job{
+-		ScaleSetJobID: "scale-job-2", RunID: 4343, Name: "matrix",
+-		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsUnknownGUIDAfterCompleteSuite() {
++	released := false
++	nddevRemoveAuthoritativeQueueIntent = func(context.Context, string) (bool, error) {
++		released = true
++		return true, nil
+ 	}
+-	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4343), mock.Anything).
+-		Return(&github.Jobs{Jobs: []*github.WorkflowJob{
+-			{Name: github.Ptr("matrix"), Status: github.Ptr("completed")},
+-			{Name: github.Ptr("matrix"), Status: github.Ptr("queued")},
+-		}}, &github.Response{}, nil).Once()
++	job := s.storeQueuedScaleSetJob("scale-job-unknown", 4242, "wanted")
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4242)).
++		Return(scaleSetIdentityRun(4242, 9001, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), &github.Response{}, nil).Once()
++	page1, resp1 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "replacement-same-name", "completed", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 9001),
++	}, 2, 2)
++	page2, resp2 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(102, "unrelated", "queued", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 9001),
++	}, 2, 0)
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9001), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 0
++	})).Return(page1, resp1, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9001), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 2
++	})).Return(page2, resp2, nil).Once()
+ 
+ 	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++	s.False(released)
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Require().Len(jobs, 1)
++	s.Equal(job.ScaleSetJobID, jobs[0].ScaleSetJobID)
+ }
+ 
+-func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobDeletesQueuedChildOfCompletedRun() {
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsWrongAttemptSameName() {
+ 	released := false
+-	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
+-		released = jobID == "scale-job-terminal-run"
++	nddevRemoveAuthoritativeQueueIntent = func(context.Context, string) (bool, error) {
++		released = true
+ 		return true, nil
+ 	}
+-	job := params.Job{
+-		ScaleSetJobID: "scale-job-terminal-run", RunID: 4545, Name: "cargo-audit",
+-		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
++	job := s.storeQueuedScaleSetJob("scale-job-attempt-1", 4343, "matrix")
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4343)).
++		Return(scaleSetIdentityRun(4343, 9002, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 2), &github.Response{}, nil).Once()
++	page, resp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(201, "other-attempt-guid", "completed", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 9002),
++	}, 1, 0)
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9002), mock.MatchedBy(allCheckRuns)).
++		Return(page, resp, nil).Once()
++
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++	s.False(released)
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Require().Len(jobs, 1)
++	s.Equal("scale-job-attempt-1", jobs[0].ScaleSetJobID)
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsWrongExternalID() {
++	job := s.storeQueuedScaleSetJob("scale-job-expected", 4440, "wanted")
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4440)).
++		Return(scaleSetIdentityRun(4440, 9003, "cccccccccccccccccccccccccccccccccccccccc", 1), &github.Response{}, nil).Once()
++	page, resp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(301, "scale-job-other", "queued", "cccccccccccccccccccccccccccccccccccccccc", 9003),
++	}, 1, 0)
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9003), mock.MatchedBy(allCheckRuns)).
++		Return(page, resp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Len(jobs, 1)
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsMissingFieldsAndAccessRefusal() {
++	job := params.Job{ScaleSetJobID: "scale-job-incomplete", RunID: 0, RepositoryOwner: "test-owner", RepositoryName: "test-repo"}
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++
++	job = s.storeQueuedScaleSetJob("scale-job-no-name-ok", 4500, "")
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4500)).
++		Return(&github.WorkflowRun{ID: github.Ptr(int64(4500)), Status: github.Ptr("in_progress")}, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++
++	job = s.storeQueuedScaleSetJob("scale-job-forbidden", 4501, "wanted")
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4501)).
++		Return((*github.WorkflowRun)(nil), &github.Response{Response: &http.Response{StatusCode: http.StatusForbidden}}, errors.New("forbidden")).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsUnsupportedProvider() {
++	job := s.storeQueuedScaleSetJob("scale-job-gitea", 4600, "wanted")
++	original := s.mgr.entity.Credentials.ForgeType
++	s.mgr.entity.Credentials.ForgeType = params.GiteaEndpointType
++	s.T().Cleanup(func() { s.mgr.entity.Credentials.ForgeType = original })
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobKeepsQueuedExactMatch() {
++	s.requireScaleSet()
++	hydrated := false
++	nddevEnsureAuthoritativeQueueIntent = func(_ context.Context, _ params.ScaleSet, _ params.ForgeEntity, got params.Job) (bool, error) {
++		hydrated = got.ScaleSetJobID == "scale-job-queued"
++		return true, nil
+ 	}
+-	_, err := s.store.CreateOrUpdateJob(s.adminCtx, job)
++	job := s.storeQueuedScaleSetJob("scale-job-queued", 4242, "")
++	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++	s.expectBoundScaleSetIdentity(4242, 9001, 900, 800, 1, sha, "scale-job-queued", "queued", "")
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++	s.True(hydrated)
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
+ 	s.Require().NoError(err)
+-	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4545), mock.Anything).
+-		Return(&github.Jobs{Jobs: []*github.WorkflowJob{{Name: github.Ptr("cargo-audit"), Status: github.Ptr("queued")}}}, &github.Response{}, nil).Once()
+-	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4545)).
+-		Return(&github.WorkflowRun{Status: github.Ptr("completed"), Conclusion: github.Ptr("cancelled")}, &github.Response{}, nil).Once()
++	s.Len(jobs, 1)
++}
+ 
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobDeletesExactCompletedMatch() {
++	s.requireScaleSet()
++	released := ""
++	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
++		released = jobID
++		return true, nil
++	}
++	job := s.storeQueuedScaleSetJob("scale-job-terminal", 4545, "cargo-audit")
++	sha := "dddddddddddddddddddddddddddddddddddddddd"
++	s.expectBoundScaleSetIdentity(4545, 9010, 501, 8001, 1, sha, "scale-job-terminal", "completed", "cancelled")
+ 	s.True(s.mgr.reconcileStaleScaleSetJob(job))
+-	s.True(released)
++	s.Equal("scale-job-terminal", released)
+ 	jobs, err := s.store.ListAllJobs(s.adminCtx)
+ 	s.Require().NoError(err)
+ 	s.Empty(jobs)
+ }
+ 
+ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQueueIntent() {
++	s.requireScaleSet()
+ 	released := false
+ 	reconciled := false
+-	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, _ string) (bool, error) {
++	nddevRemoveAuthoritativeQueueIntent = func(context.Context, string) (bool, error) {
+ 		released = true
+ 		return true, nil
+ 	}
+@@ -911,19 +1052,9 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
+ 		reconciled = got.ScaleSetJobID == "scale-job-started" && got.RepositoryOwner == "test-owner" && got.RepositoryName == "test-repo"
+ 		return true, nil
+ 	}
+-	_, err := s.store.CreateEntityScaleSet(s.adminCtx, s.entity, params.CreateScaleSetParams{ProviderName: "test-provider", Name: "nddev-linux-standard", Image: "test-image", Flavor: "test-flavor", MaxRunners: 1, OSType: commonParams.Linux, OSArch: commonParams.Amd64, Enabled: true})
+-	s.Require().NoError(err)
+-	job := params.Job{
+-		ScaleSetJobID: "scale-job-started", RunID: 4444, Name: "soak-fast-cpu-1",
+-		Status: string(params.JobStatusQueued), RepositoryOwner: "test-owner", RepositoryName: "test-repo",
+-		Labels: []string{"nddev-linux-standard"},
+-	}
+-	_, err = s.store.CreateOrUpdateJob(s.adminCtx, job)
+-	s.Require().NoError(err)
+-	s.ghcliMock.EXPECT().ListWorkflowJobs(mock.Anything, "test-owner", "test-repo", int64(4444), mock.Anything).
+-		Return(&github.Jobs{Jobs: []*github.WorkflowJob{{
+-			Name: github.Ptr("soak-fast-cpu-1"), Status: github.Ptr("in_progress"),
+-		}}}, &github.Response{}, nil).Once()
++	job := s.storeQueuedScaleSetJob("scale-job-started", 4444, "soak-fast-cpu-1")
++	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
++	s.expectBoundScaleSetIdentity(4444, 9020, 601, 7001, 1, sha, "scale-job-started", "in_progress", "")
+ 
+ 	s.True(s.mgr.reconcileStaleScaleSetJob(job))
+ 	s.False(released, "a stale queued DB duplicate released the running capacity intent")
+@@ -933,6 +1064,314 @@ func (s *PoolStressTestSuite) TestReconcileStartedScaleSetJobPreservesRunningQue
+ 	s.Empty(jobs)
+ }
+ 
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsAmbiguousExternalID() {
++	job := s.storeQueuedScaleSetJob("scale-job-dup", 4700, "wanted")
++	sha := "ffffffffffffffffffffffffffffffffffffffff"
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4700)).
++		Return(scaleSetIdentityRun(4700, 9030, sha, 1), &github.Response{}, nil).Once()
++	page, resp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(701, "scale-job-dup", "queued", sha, 9030),
++		scaleSetIdentityCheckRun(702, "scale-job-dup", "completed", sha, 9030),
++	}, 2, 0)
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9030), mock.MatchedBy(allCheckRuns)).
++		Return(page, resp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) expectBoundScaleSetIdentity(runID, suiteID, checkID, jobID int64, attempt int, sha, guid, status, conclusion string) {
++	s.T().Helper()
++	listed := scaleSetIdentityJob(jobID, checkID, runID, int64(attempt), status, conclusion, sha, []string{"nddev-linux-standard"})
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(checkID, guid, status, sha, suiteID),
++	}, 1, 0)
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{listed}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", runID).
++		Return(scaleSetIdentityRun(runID, suiteID, sha, attempt), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", suiteID, mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", runID, int64(attempt), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.ghcliMock.EXPECT().GetWorkflowJobByID(mock.Anything, "test-owner", "test-repo", jobID).
++		Return(listed, &github.Response{}, nil).Once()
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobBindsDistinctCheckAndJobIDs() {
++	s.requireScaleSet()
++	released := ""
++	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
++		released = jobID
++		return true, nil
++	}
++	job := s.storeQueuedScaleSetJob("scale-job-distinct", 4800, "wanted")
++	sha := "1111111111111111111111111111111111111111"
++	s.expectBoundScaleSetIdentity(4800, 9040, 900, 800, 1, sha, "scale-job-distinct", "completed", "success")
++	s.True(s.mgr.reconcileStaleScaleSetJob(job))
++	s.Equal("scale-job-distinct", released)
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsWrongCheckRunURL() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-url", 4801, "wanted")
++	sha := "2222222222222222222222222222222222222222"
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(900, "scale-job-url", "completed", sha, 9041),
++	}, 1, 0)
++	wrong := scaleSetIdentityJob(800, 901, 4801, 1, "completed", "success", sha, []string{"nddev-linux-standard"})
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{wrong}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4801)).
++		Return(scaleSetIdentityRun(4801, 9041, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9041), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", int64(4801), int64(1), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsIncompleteCheckTotal() {
++	job := s.storeQueuedScaleSetJob("scale-job-total", 4802, "wanted")
++	sha := "3333333333333333333333333333333333333333"
++	page, resp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "scale-job-total", "queued", sha, 9042),
++	}, 16, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4802)).
++		Return(scaleSetIdentityRun(4802, 9042, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9042), mock.MatchedBy(allCheckRuns)).
++		Return(page, resp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsMissingConclusionAndLabels() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-fields", 4803, "wanted")
++	sha := "4444444444444444444444444444444444444444"
++	s.expectBoundScaleSetIdentity(4803, 9043, 910, 810, 1, sha, "scale-job-fields", "completed", "")
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsMissingJobSHA() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-sha", 4804, "wanted")
++	sha := "5555555555555555555555555555555555555555"
++	listed := scaleSetIdentityJob(820, 920, 4804, 1, "completed", "success", "", []string{"nddev-linux-standard"})
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(920, "scale-job-sha", "completed", sha, 9044),
++	}, 1, 0)
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{listed}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4804)).
++		Return(scaleSetIdentityRun(4804, 9044, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9044), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", int64(4804), int64(1), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.ghcliMock.EXPECT().GetWorkflowJobByID(mock.Anything, "test-owner", "test-repo", int64(820)).
++		Return(listed, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsMissingLabels() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-labels", 4805, "wanted")
++	sha := "6666666666666666666666666666666666666666"
++	listed := scaleSetIdentityJob(821, 921, 4805, 1, "completed", "success", sha, nil)
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(921, "scale-job-labels", "completed", sha, 9045),
++	}, 1, 0)
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{listed}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4805)).
++		Return(scaleSetIdentityRun(4805, 9045, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9045), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", int64(4805), int64(1), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.ghcliMock.EXPECT().GetWorkflowJobByID(mock.Anything, "test-owner", "test-repo", int64(821)).
++		Return(listed, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsWrongScaleSet() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-set", 4806, "wanted")
++	sha := "7777777777777777777777777777777777777777"
++	listed := scaleSetIdentityJob(822, 922, 4806, 1, "completed", "success", sha, []string{"other-scale-set"})
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(922, "scale-job-set", "completed", sha, 9046),
++	}, 1, 0)
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{listed}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4806)).
++		Return(scaleSetIdentityRun(4806, 9046, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9046), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", int64(4806), int64(1), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.ghcliMock.EXPECT().GetWorkflowJobByID(mock.Anything, "test-owner", "test-repo", int64(822)).
++		Return(listed, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsNonActionsProducer() {
++	job := s.storeQueuedScaleSetJob("scale-job-app", 4807, "wanted")
++	sha := "8888888888888888888888888888888888888888"
++	check := scaleSetIdentityCheckRun(923, "scale-job-app", "completed", sha, 9047)
++	check.App = &github.App{Slug: github.Ptr("dependabot")}
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{check}, 1, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4807)).
++		Return(scaleSetIdentityRun(4807, 9047, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9047), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsOmittedCheckTotal() {
++	job := s.storeQueuedScaleSetJob("scale-job-omit-total", 4809, "wanted")
++	sha := "abababababababababababababababababababab"
++	page := &github.ListCheckRunsResults{CheckRuns: []*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "scale-job-omit-total", "queued", sha, 9049),
++	}}
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4809)).
++		Return(scaleSetIdentityRun(4809, 9049, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9049), mock.MatchedBy(allCheckRuns)).
++		Return(page, &github.Response{}, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsChangingCheckTotal() {
++	job := s.storeQueuedScaleSetJob("scale-job-changing-total", 4810, "wanted")
++	sha := "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
++	page1, resp1 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(101, "scale-job-changing-total", "queued", sha, 9050),
++	}, 2, 2)
++	page2, resp2 := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(102, "unrelated", "queued", sha, 9050),
++	}, 3, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4810)).
++		Return(scaleSetIdentityRun(4810, 9050, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9050), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 0
++	})).Return(page1, resp1, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9050), mock.MatchedBy(func(opts *github.ListCheckRunsOptions) bool {
++		return allCheckRuns(opts) && opts.Page == 2
++	})).Return(page2, resp2, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobConcurrentCompletedAndUnknown() {
++	s.requireScaleSet()
++	var released atomic.Value
++	nddevRemoveAuthoritativeQueueIntent = func(_ context.Context, jobID string) (bool, error) {
++		released.Store(jobID)
++		return true, nil
++	}
++	unknown := s.storeQueuedScaleSetJob("scale-job-concurrent-unknown", 4811, "wanted")
++	terminal := s.storeQueuedScaleSetJob("scale-job-concurrent-terminal", 4812, "wanted")
++	unknownSHA := "1111111111111111111111111111111111111111"
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4811)).
++		Return(scaleSetIdentityRun(4811, 9051, unknownSHA, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9051), mock.MatchedBy(allCheckRuns)).
++		Return(&github.ListCheckRunsResults{CheckRuns: []*github.CheckRun{
++			scaleSetIdentityCheckRun(111, "other-guid", "queued", unknownSHA, 9051),
++		}, Total: github.Ptr(1)}, &github.Response{}, nil).Once()
++	s.expectBoundScaleSetIdentity(4812, 9052, 930, 830, 1, "2222222222222222222222222222222222222222", "scale-job-concurrent-terminal", "completed", "success")
++
++	var wg sync.WaitGroup
++	var unknownRetained, terminalDeleted bool
++	wg.Add(2)
++	go func() {
++		defer wg.Done()
++		unknownRetained = !s.mgr.reconcileStaleScaleSetJob(unknown)
++	}()
++	go func() {
++		defer wg.Done()
++		terminalDeleted = s.mgr.reconcileStaleScaleSetJob(terminal)
++	}()
++	wg.Wait()
++	s.True(unknownRetained)
++	s.True(terminalDeleted)
++	s.Equal("scale-job-concurrent-terminal", released.Load())
++	jobs, err := s.store.ListAllJobs(s.adminCtx)
++	s.Require().NoError(err)
++	s.Require().Len(jobs, 1)
++	s.Equal("scale-job-concurrent-unknown", jobs[0].ScaleSetJobID)
++}
++
++func (s *PoolStressTestSuite) TestReconcileStaleScaleSetJobRetainsIncompleteJobTotal() {
++	s.requireScaleSet()
++	job := s.storeQueuedScaleSetJob("scale-job-jobs", 4808, "wanted")
++	sha := "9999999999999999999999999999999999999999"
++	listed := scaleSetIdentityJob(824, 924, 4808, 1, "completed", "success", sha, []string{"nddev-linux-standard"})
++	checkPage, checkResp := completeCheckPage([]*github.CheckRun{
++		scaleSetIdentityCheckRun(924, "scale-job-jobs", "completed", sha, 9048),
++	}, 1, 0)
++	jobPage, jobResp := completeJobPage([]*github.WorkflowJob{listed}, 16, 0)
++	s.ghcliMock.EXPECT().GetWorkflowRunByID(mock.Anything, "test-owner", "test-repo", int64(4808)).
++		Return(scaleSetIdentityRun(4808, 9048, sha, 1), &github.Response{}, nil).Once()
++	s.ghcliMock.EXPECT().ListCheckRunsCheckSuite(mock.Anything, "test-owner", "test-repo", int64(9048), mock.MatchedBy(allCheckRuns)).
++		Return(checkPage, checkResp, nil).Once()
++	s.ghcliMock.EXPECT().ListWorkflowJobsAttempt(mock.Anything, "test-owner", "test-repo", int64(4808), int64(1), mock.Anything).
++		Return(jobPage, jobResp, nil).Once()
++	s.False(s.mgr.reconcileStaleScaleSetJob(job))
++}
++
++func TestGitHubListCursorRejectsDuplicatesAndMissingResponse(t *testing.T) {
++	cursor := newGitHubListCursor()
++	if _, ok := cursor.accept(0, nil, []int64{1}, github.Ptr(1)); ok {
++		t.Fatal("missing response must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{}, []int64{1}, nil); ok {
++		t.Fatal("missing total must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	done, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2))
++	if !ok || done {
++		t.Fatal("first page should continue")
++	}
++	if _, ok := cursor.accept(2, &github.Response{}, []int64{1}, github.Ptr(2)); ok {
++		t.Fatal("duplicate IDs must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	_, ok = cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2))
++	if !ok {
++		t.Fatal("first page")
++	}
++	if _, ok := cursor.accept(2, &github.Response{NextPage: 2}, []int64{2}, github.Ptr(2)); ok {
++		t.Fatal("repeating next page must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2)); !ok {
++		t.Fatal("first page")
++	}
++	if _, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{2}, github.Ptr(2)); ok {
++		t.Fatal("duplicate page must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{}, []int64{1}, github.Ptr(2)); ok {
++		t.Fatal("incomplete total must be incomplete")
++	}
++	cursor = newGitHubListCursor()
++	if _, ok := cursor.accept(0, &github.Response{NextPage: 2}, []int64{1}, github.Ptr(2)); !ok {
++		t.Fatal("first page")
++	}
++	if _, ok := cursor.accept(2, &github.Response{}, []int64{2}, github.Ptr(3)); ok {
++		t.Fatal("changing total must be incomplete")
++	}
++}
++
++func TestWorkflowJobBindsCheckRunByURLPathID(t *testing.T) {
++	check := scaleSetIdentityCheckRun(12, "guid", "queued", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1)
++	job := scaleSetIdentityJob(800, 12, 1, 1, "queued", "", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
++	if !workflowJobBindsCheckRun(job, check) {
++		t.Fatal("matching check-run path ID must bind")
++	}
++	job.CheckRunURL = github.Ptr("https://api.github.com/repos/test-owner/test-repo/check-runs/2")
++	if workflowJobBindsCheckRun(job, check) {
++		t.Fatal("a shorter numeric suffix must not bind a different check ID")
++	}
++	job.CheckRunURL = github.Ptr("https://api.github.com/repos/test-owner/test-repo/check-runs/12?per_page=100")
++	if !workflowJobBindsCheckRun(job, check) {
++		t.Fatal("query string on check_run_url must still bind by path ID")
++	}
++}
++
+ func mustParseUUID(s string) uuid.UUID {
+ 	u, err := uuid.Parse(s)
+ 	if err != nil {
+diff --git a/runner/pool/scale_set_identity.go b/runner/pool/scale_set_identity.go
+new file mode 100644
+index 0000000..204bc71
+--- /dev/null
++++ b/runner/pool/scale_set_identity.go
+@@ -0,0 +1,175 @@
++// Copyright 2026 Cloudbase Solutions SRL
++//
++//    Licensed under the Apache License, Version 2.0 (the "License"); you may
++//    not use this file except in compliance with the License. You may obtain
++//    a copy of the License at
++//
++//         http://www.apache.org/licenses/LICENSE-2.0
++//
++//    Unless required by applicable law or agreed to in writing, software
++//    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++//    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++//    License for the specific language governing permissions and limitations
++//    under the License.
++
++package pool
++
++import (
++	"fmt"
++	"net/url"
++	"strconv"
++	"strings"
++
++	"github.com/google/go-github/v84/github"
++
++	"github.com/cloudbase/garm/params"
++)
++
++const (
++	scaleSetListPageSize = 100
++	scaleSetListMaxPages = 10
++	githubActionsAppSlug = "github-actions"
++)
++
++func checkRunIDFromURL(raw string) (int64, bool) {
++	parsed, err := url.Parse(raw)
++	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" {
++		return 0, false
++	}
++	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
++	if len(parts) < 2 || parts[len(parts)-2] != "check-runs" {
++		return 0, false
++	}
++	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
++	if err != nil || id <= 0 {
++		return 0, false
++	}
++	return id, true
++}
++
++func workflowJobBindsCheckRun(job *github.WorkflowJob, check *github.CheckRun) bool {
++	if job == nil || check == nil || check.GetID() == 0 {
++		return false
++	}
++	jobCheckID, ok := checkRunIDFromURL(job.GetCheckRunURL())
++	if !ok || jobCheckID != check.GetID() {
++		return false
++	}
++	if check.GetURL() == "" {
++		return true
++	}
++	listedID, ok := checkRunIDFromURL(check.GetURL())
++	return ok && listedID == check.GetID()
++}
++
++func isGitHubActionsCheckRun(check *github.CheckRun) bool {
++	if check == nil || check.App == nil || check.App.GetSlug() == "" {
++		return false
++	}
++	return strings.EqualFold(check.App.GetSlug(), githubActionsAppSlug)
++}
++
++func validTerminalConclusion(conclusion string) bool {
++	switch conclusion {
++	case "success", "failure", "cancelled", "skipped", "timed_out", "startup_failure":
++		return true
++	default:
++		return false
++	}
++}
++
++func exactHeadSHA(values ...string) (string, bool) {
++	var sha string
++	for _, value := range values {
++		if value == "" {
++			return "", false
++		}
++		if sha == "" {
++			sha = value
++			continue
++		}
++		if !strings.EqualFold(sha, value) {
++			return "", false
++		}
++	}
++	return sha, sha != ""
++}
++
++type githubListCursor struct {
++	seenPages     map[int]struct{}
++	seenIDs       map[int64]struct{}
++	collected     int
++	expectedTotal int
++	hasTotal      bool
++}
++
++func newGitHubListCursor() githubListCursor {
++	return githubListCursor{
++		seenPages: map[int]struct{}{},
++		seenIDs:   map[int64]struct{}{},
++	}
++}
++
++func (c *githubListCursor) accept(requestedPage int, resp *github.Response, ids []int64, total *int) (done bool, ok bool) {
++	if c == nil || resp == nil || total == nil || *total < 0 {
++		return false, false
++	}
++	if !c.hasTotal {
++		c.expectedTotal = *total
++		c.hasTotal = true
++	} else if *total != c.expectedTotal {
++		return false, false
++	}
++	if _, exists := c.seenPages[requestedPage]; exists {
++		return false, false
++	}
++	c.seenPages[requestedPage] = struct{}{}
++	for _, id := range ids {
++		if id == 0 {
++			return false, false
++		}
++		if _, exists := c.seenIDs[id]; exists {
++			return false, false
++		}
++		c.seenIDs[id] = struct{}{}
++	}
++	c.collected += len(ids)
++	if c.collected > c.expectedTotal {
++		return false, false
++	}
++	if resp.NextPage != 0 {
++		if resp.NextPage == requestedPage || resp.NextPage < 0 {
++			return false, false
++		}
++		if _, exists := c.seenPages[resp.NextPage]; exists {
++			return false, false
++		}
++		return false, true
++	}
++	if c.collected != c.expectedTotal {
++		return false, false
++	}
++	return true, true
++}
++
++func exactScaleSetForJob(scaleSets []params.ScaleSet, job params.Job) (params.ScaleSet, error) {
++	if len(job.Labels) == 0 {
++		return params.ScaleSet{}, fmt.Errorf("queued job has no scale-set labels")
++	}
++	matches := make([]params.ScaleSet, 0, 1)
++	for _, scaleSet := range scaleSets {
++		if !scaleSet.Enabled {
++			continue
++		}
++		for _, label := range job.Labels {
++			if label == scaleSet.Name {
++				matches = append(matches, scaleSet)
++				break
++			}
++		}
++	}
++	if len(matches) != 1 {
++		return params.ScaleSet{}, fmt.Errorf("queued job matches %d enabled scale sets", len(matches))
++	}
++	return matches[0], nil
++}
+diff --git a/runner/pool/stub_client.go b/runner/pool/stub_client.go
+index 3b41c24..3f3fb7c 100644
+--- a/runner/pool/stub_client.go
++++ b/runner/pool/stub_client.go
+@@ -79,6 +79,14 @@ func (s *stubGithubClient) ListWorkflowJobs(_ context.Context, _, _ string, _ in
+ 	return nil, nil, s.err
+ }
+ 
++func (s *stubGithubClient) ListWorkflowJobsAttempt(_ context.Context, _, _ string, _, _ int64, _ *github.ListOptions) (*github.Jobs, *github.Response, error) {
++	return nil, nil, s.err
++}
++
++func (s *stubGithubClient) ListCheckRunsCheckSuite(_ context.Context, _, _ string, _ int64, _ *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error) {
++	return nil, nil, s.err
++}
++
+ func (s *stubGithubClient) GetEntity() params.ForgeEntity {
+ 	return params.ForgeEntity{}
+ }
+diff --git a/util/github/client.go b/util/github/client.go
+index 530ad0f..e9286ab 100644
+--- a/util/github/client.go
++++ b/util/github/client.go
+@@ -572,6 +572,52 @@ func (g *githubClient) RateLimit(ctx context.Context) (*github.RateLimits, error
+ 	return limits, nil
+ }
+ 
++func (g *githubClient) ListCheckRunsCheckSuite(ctx context.Context, owner, repo string, checkSuiteID int64, opts *github.ListCheckRunsOptions) (ret *github.ListCheckRunsResults, response *github.Response, err error) {
++	metrics.GithubOperationCount.WithLabelValues(
++		"ListCheckRunsCheckSuite",
++		g.entity.LabelScope(),
++	).Inc()
++	defer func() {
++		if err != nil {
++			metrics.GithubOperationFailedCount.WithLabelValues(
++				"ListCheckRunsCheckSuite",
++				g.entity.LabelScope(),
++			).Inc()
++		}
++	}()
++	if g.cli == nil || g.cli.Checks == nil {
++		return nil, nil, errors.New("github checks client is unavailable")
++	}
++	ret, response, err = g.cli.Checks.ListCheckRunsCheckSuite(ctx, owner, repo, checkSuiteID, opts)
++	if err == nil && response != nil {
++		g.recordLimits(response.Rate)
++	}
++	return ret, response, err
++}
++
++func (g *githubClient) ListWorkflowJobsAttempt(ctx context.Context, owner, repo string, runID, attemptNumber int64, opts *github.ListOptions) (ret *github.Jobs, response *github.Response, err error) {
++	metrics.GithubOperationCount.WithLabelValues(
++		"ListWorkflowJobsAttempt",
++		g.entity.LabelScope(),
++	).Inc()
++	defer func() {
++		if err != nil {
++			metrics.GithubOperationFailedCount.WithLabelValues(
++				"ListWorkflowJobsAttempt",
++				g.entity.LabelScope(),
++			).Inc()
++		}
++	}()
++	if g.ActionsService == nil {
++		return nil, nil, errors.New("github actions client is unavailable")
++	}
++	ret, response, err = g.ActionsService.ListWorkflowJobsAttempt(ctx, owner, repo, runID, attemptNumber, opts)
++	if err == nil && response != nil {
++		g.recordLimits(response.Rate)
++	}
++	return ret, response, err
++}
++
+ func (g *githubClient) GetEntity() params.ForgeEntity {
+ 	return g.entity
+ }

@@ -1,0 +1,1068 @@
+diff --git a/util/github/scalesets/client_testing.go b/util/github/scalesets/client_testing.go
+new file mode 100644
+index 0000000..bb0000f
+--- /dev/null
++++ b/util/github/scalesets/client_testing.go
+@@ -0,0 +1,27 @@
++//go:build testing
++
++package scalesets
++
++import (
++	"net/http"
++
++	"github.com/google/go-github/v84/github"
++
++	"github.com/cloudbase/garm/params"
++	"github.com/cloudbase/garm/runner/common"
++)
++
++func NewClientWithActionsService(
++	gh common.GithubClient,
++	httpClient *http.Client,
++	info params.ActionsServiceAdminInfoResponse,
++	token *github.RegistrationToken,
++) *ScaleSetClient {
++	infoCopy := info
++	return &ScaleSetClient{
++		ghCli:                   gh,
++		httpClient:              httpClient,
++		actionsServiceInfo:      &infoCopy,
++		runnerRegistrationToken: token,
++	}
++}
+diff --git a/util/github/scalesets/message_sessions.go b/util/github/scalesets/message_sessions.go
+index b75890c..3fe40b0 100644
+--- a/util/github/scalesets/message_sessions.go
++++ b/util/github/scalesets/message_sessions.go
+@@ -61,20 +61,63 @@ func (m *MessageSession) Close() error {
+ }
+ 
+ func (m *MessageSession) MessageQueueAccessToken() string {
+-	return m.session.MessageQueueAccessToken
++	session := m.snapshot()
++	if session == nil {
++		return ""
++	}
++	return session.MessageQueueAccessToken
++}
++
++func (m *MessageSession) snapshot() *params.RunnerScaleSetSession {
++	if m == nil {
++		return nil
++	}
++	m.mux.Lock()
++	defer m.mux.Unlock()
++	return m.session
++}
++
++func (m *MessageSession) SessionID() string {
++	session := m.snapshot()
++	if session == nil || session.SessionID == nil {
++		return ""
++	}
++	return session.SessionID.String()
++}
++
++func (m *MessageSession) Statistics() *params.RunnerScaleSetStatistic {
++	session := m.snapshot()
++	if session == nil {
++		return nil
++	}
++	return session.Statistics
+ }
+ 
+ func (m *MessageSession) LastError() error {
++	if m == nil {
++		return nil
++	}
++	m.mux.Lock()
++	defer m.mux.Unlock()
+ 	return m.lastErr
+ }
+ 
++func (m *MessageSession) setLastError(err error) {
++	m.mux.Lock()
++	m.lastErr = err
++	m.mux.Unlock()
++}
++
+ func (m *MessageSession) loop() {
+-	slog.DebugContext(m.ctx, "starting message session refresh loop", "session_id", m.session.SessionID.String())
++	slog.DebugContext(m.ctx, "starting message session refresh loop", "session_id", m.SessionID())
+ 	timer := time.NewTicker(1 * time.Minute)
+ 	defer timer.Stop()
+ 	defer m.Close()
+ 
+-	if m.closed {
++	m.mux.Lock()
++	closed := m.closed
++	m.mux.Unlock()
++	if closed {
+ 		slog.DebugContext(m.ctx, "message session refresh loop closed")
+ 		return
+ 	}
+@@ -91,21 +134,30 @@ func (m *MessageSession) loop() {
+ 				// We endlessly retry. If it's a transient error, it should eventually
+ 				// work, if it's credentials issues, users can update them.
+ 				slog.With(slog.Any("error", err)).ErrorContext(m.ctx, "failed to refresh message queue token")
+-				m.lastErr = err
++				m.setLastError(err)
+ 				continue
+ 			}
+-			m.lastErr = nil
++			m.setLastError(nil)
+ 		}
+ 	}
+ }
+ 
+ func (m *MessageSession) SessionsRelativeURL() (string, error) {
++	m.mux.Lock()
++	defer m.mux.Unlock()
++	return m.sessionsRelativeURLLocked()
++}
++
++func (m *MessageSession) sessionsRelativeURLLocked() (string, error) {
+ 	if m.session == nil {
+ 		return "", fmt.Errorf("session is nil")
+ 	}
+ 	if m.session.RunnerScaleSet == nil {
+ 		return "", fmt.Errorf("runner scale set is nil")
+ 	}
++	if m.session.SessionID == nil {
++		return "", fmt.Errorf("session id is nil")
++	}
+ 	relativePath := fmt.Sprintf("%s/%d/sessions/%s", scaleSetEndpoint, m.session.RunnerScaleSet.ID, m.session.SessionID.String())
+ 	return relativePath, nil
+ }
+@@ -118,11 +170,11 @@ func (m *MessageSession) Refresh(ctx context.Context) (err error) {
+ 		}
+ 	}()
+ 
+-	slog.DebugContext(ctx, "refreshing message session token", "session_id", m.session.SessionID.String())
++	slog.DebugContext(ctx, "refreshing message session token", "session_id", m.SessionID())
+ 	m.mux.Lock()
+ 	defer m.mux.Unlock()
+ 
+-	relPath, err := m.SessionsRelativeURL()
++	relPath, err := m.sessionsRelativeURLLocked()
+ 	if err != nil {
+ 		return fmt.Errorf("failed to get session URL: %w", err)
+ 	}
+@@ -146,11 +198,12 @@ func (m *MessageSession) Refresh(ctx context.Context) (err error) {
+ }
+ 
+ func (m *MessageSession) maybeRefreshToken(ctx context.Context) error {
+-	if m.session == nil {
++	session := m.snapshot()
++	if session == nil {
+ 		return fmt.Errorf("session is nil")
+ 	}
+ 
+-	expiresAt, err := m.session.ExiresAt()
++	expiresAt, err := session.ExiresAt()
+ 	if err != nil {
+ 		return fmt.Errorf("failed to get expires at: %w", err)
+ 	}
+@@ -161,7 +214,7 @@ func (m *MessageSession) maybeRefreshToken(ctx context.Context) error {
+ 	}
+ 	expiresIn := time.Duration(randInt.Int64())*time.Second + 10*time.Minute
+ 	slog.DebugContext(ctx, "checking if message session token needs refresh", "expires_at", expiresAt)
+-	if m.session.ExpiresIn(expiresIn) {
++	if session.ExpiresIn(expiresIn) {
+ 		if err := m.Refresh(ctx); err != nil {
+ 			return fmt.Errorf("failed to refresh message queue token: %w", err)
+ 		}
+@@ -178,7 +231,11 @@ func (m *MessageSession) GetMessage(ctx context.Context, lastMessageID int64, ma
+ 		}
+ 	}()
+ 
+-	u, err := url.Parse(m.session.MessageQueueURL)
++	session := m.snapshot()
++	if session == nil {
++		return params.RunnerScaleSetMessage{}, fmt.Errorf("session is nil")
++	}
++	u, err := url.Parse(session.MessageQueueURL)
+ 	if err != nil {
+ 		return params.RunnerScaleSetMessage{}, err
+ 	}
+@@ -195,7 +252,7 @@ func (m *MessageSession) GetMessage(ctx context.Context, lastMessageID int64, ma
+ 	}
+ 
+ 	req.Header.Set("Accept", "application/json; api-version=6.0-preview")
+-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", m.session.MessageQueueAccessToken))
++	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", session.MessageQueueAccessToken))
+ 	req.Header.Set(maxCapacityHeader, fmt.Sprintf("%d", maxCapacity))
+ 
+ 	resp, err := m.ssCli.Do(req)
+@@ -228,7 +285,11 @@ func (m *MessageSession) DeleteMessage(ctx context.Context, messageID int64) (er
+ 		}
+ 	}()
+ 
+-	u, err := url.Parse(m.session.MessageQueueURL)
++	session := m.snapshot()
++	if session == nil {
++		return fmt.Errorf("session is nil")
++	}
++	u, err := url.Parse(session.MessageQueueURL)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -241,7 +302,7 @@ func (m *MessageSession) DeleteMessage(ctx context.Context, messageID int64) (er
+ 	}
+ 
+ 	req.Header.Set("Content-Type", "application/json")
+-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", m.session.MessageQueueAccessToken))
++	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", session.MessageQueueAccessToken))
+ 
+ 	resp, err := m.ssCli.Do(req)
+ 	if err != nil {
+diff --git a/util/github/scalesets/message_sessions_race_test.go b/util/github/scalesets/message_sessions_race_test.go
+new file mode 100644
+index 0000000..7cc66a5
+--- /dev/null
++++ b/util/github/scalesets/message_sessions_race_test.go
+@@ -0,0 +1,64 @@
++package scalesets
++
++import (
++	"context"
++	"errors"
++	"sync"
++	"testing"
++
++	"github.com/google/uuid"
++
++	"github.com/cloudbase/garm/params"
++)
++
++func TestMessageSessionAccessorsRaceWithReplacement(t *testing.T) {
++	first := uuid.MustParse("00000000-0000-4000-8000-000000000001")
++	second := uuid.MustParse("00000000-0000-4000-8000-000000000002")
++	sess := &MessageSession{
++		session: &params.RunnerScaleSetSession{
++			SessionID:               &first,
++			MessageQueueURL:         "https://example.invalid/queue",
++			MessageQueueAccessToken: "token-one",
++			Statistics:              &params.RunnerScaleSetStatistic{TotalAssignedJobs: 1},
++			RunnerScaleSet:          &params.RunnerScaleSet{ID: 9},
++		},
++		ctx:  context.Background(),
++		done: make(chan struct{}),
++	}
++	var wg sync.WaitGroup
++	for i := 0; i < 8; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for n := 0; n < 400; n++ {
++				_ = sess.SessionID()
++				_ = sess.Statistics()
++				_ = sess.MessageQueueAccessToken()
++				_ = sess.LastError()
++				_, _ = sess.SessionsRelativeURL()
++			}
++		}()
++	}
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for n := 0; n < 400; n++ {
++			id := first
++			if n%2 == 1 {
++				id = second
++			}
++			next := id
++			sess.mux.Lock()
++			sess.session = &params.RunnerScaleSetSession{
++				SessionID:               &next,
++				MessageQueueURL:         "https://example.invalid/queue",
++				MessageQueueAccessToken: "token-two",
++				Statistics:              &params.RunnerScaleSetStatistic{TotalAssignedJobs: n % 3},
++				RunnerScaleSet:          &params.RunnerScaleSet{ID: 9},
++			}
++			sess.lastErr = errors.New("refresh")
++			sess.mux.Unlock()
++		}
++	}()
++	wg.Wait()
++}
+diff --git a/workers/scaleset/interfaces.go b/workers/scaleset/interfaces.go
+index 0cc6526..e287e3e 100644
+--- a/workers/scaleset/interfaces.go
++++ b/workers/scaleset/interfaces.go
+@@ -14,6 +14,8 @@
+ package scaleset
+ 
+ import (
++	"time"
++
+ 	"github.com/cloudbase/garm/params"
+ 	"github.com/cloudbase/garm/util/github/scalesets"
+ )
+@@ -24,6 +26,8 @@ type scaleSetHelper interface {
+ 	GetScaleSetClient() (*scalesets.ScaleSetClient, error)
+ 	SetLastMessageID(id int64) error
+ 	SetDesiredRunnerCount(count int) error
++	ObserveLiveMessageDemand(sessionID string, assigned int, messageID int64, observedAt time.Time) error
++	InvalidateLiveMessageDemand()
+ 	Owner() string
+ 	HandleJobsCompleted(jobs []params.ScaleSetJobMessage) error
+ 	HandleJobsStarted(jobs []params.ScaleSetJobMessage) error
+diff --git a/workers/scaleset/listener_session_test.go b/workers/scaleset/listener_session_test.go
+new file mode 100644
+index 0000000..d4ae347
+--- /dev/null
++++ b/workers/scaleset/listener_session_test.go
+@@ -0,0 +1,136 @@
++//go:build testing
++
++package scaleset
++
++import (
++	"context"
++	"encoding/base64"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/google/go-github/v84/github"
++	"github.com/google/uuid"
++
++	"github.com/cloudbase/garm/params"
++	"github.com/cloudbase/garm/runner/common/mocks"
++	"github.com/cloudbase/garm/util/github/scalesets"
++)
++
++func unsignedExpJWT(exp time.Time) string {
++	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
++	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, exp.Unix())))
++	return header + "." + payload + ".sig"
++}
++
++func TestListenerStartCleansSessionWhenObserveFails(t *testing.T) {
++	sessionID := uuid.MustParse("00000000-0000-4000-8000-000000000094")
++	var deleted atomic.Int32
++	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, req *http.Request) {
++		switch {
++		case req.Method == http.MethodPost && strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/sessions"):
++			body := params.RunnerScaleSetSession{
++				SessionID:               &sessionID,
++				OwnerName:               "example-owner",
++				MessageQueueURL:         req.Host,
++				MessageQueueAccessToken: unsignedExpJWT(time.Now().Add(time.Hour)),
++				RunnerScaleSet:          &params.RunnerScaleSet{ID: 9, Name: "example"},
++				Statistics:              &params.RunnerScaleSetStatistic{TotalAssignedJobs: 0},
++			}
++			writer.Header().Set("Content-Type", "application/json")
++			if err := json.NewEncoder(writer).Encode(body); err != nil {
++				t.Errorf("encode session: %v", err)
++			}
++		case req.Method == http.MethodDelete:
++			deleted.Add(1)
++			writer.WriteHeader(http.StatusOK)
++		default:
++			http.NotFound(writer, req)
++		}
++	}))
++	t.Cleanup(server.Close)
++
++	gh := mocks.NewGithubClient(t)
++	gh.EXPECT().GetEntity().Return(params.ForgeEntity{
++		EntityType: params.ForgeEntityTypeRepository,
++		Owner:      "example-owner",
++		Name:       "example-repository",
++	}).Maybe()
++	client := scalesets.NewClientWithActionsService(
++		gh,
++		server.Client(),
++		params.ActionsServiceAdminInfoResponse{
++			URL:   server.URL + "/",
++			Token: unsignedExpJWT(time.Now().Add(time.Hour)),
++		},
++		&github.RegistrationToken{
++			Token:     github.Ptr("registration"),
++			ExpiresAt: &github.Timestamp{Time: time.Now().Add(time.Hour)},
++		},
++	)
++	helper := &startFailureHelper{
++		scaleSet: params.ScaleSet{ID: 1, ScaleSetID: 9, Name: "example", MaxRunners: 1, Enabled: true},
++		client:   client,
++		observe:  errors.New("observe failed"),
++	}
++	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	listener := newListener(context.Background(), helper)
++	listener.intentCoordinator = testQueueCoordinator(t, &now, nil)
++	if err := listener.Start(); err == nil {
++		t.Fatal("Start must fail when live demand observation fails")
++	}
++	if deleted.Load() < 1 {
++		t.Fatal("failed Start leaked the newly created message session")
++	}
++	if helper.invalidated < 2 {
++		t.Fatalf("start and failed adoption must invalidate demand, got %d", helper.invalidated)
++	}
++	if listener.IsRunning() || listener.messageSession != nil {
++		t.Fatal("failed Start left a live listener session")
++	}
++	select {
++	case <-listener.listenerCtx.Done():
++	default:
++		t.Fatal("failed Start leaked the listener context")
++	}
++}
++
++type startFailureHelper struct {
++	scaleSet    params.ScaleSet
++	client      *scalesets.ScaleSetClient
++	observe     error
++	invalidated int
++}
++
++func (s *startFailureHelper) GetScaleSet() params.ScaleSet { return s.scaleSet }
++func (s *startFailureHelper) GetEntity() params.ForgeEntity {
++	return params.ForgeEntity{}
++}
++func (s *startFailureHelper) GetScaleSetClient() (*scalesets.ScaleSetClient, error) {
++	return s.client, nil
++}
++func (s *startFailureHelper) SetLastMessageID(id int64) error {
++	s.scaleSet.LastMessageID = id
++	return nil
++}
++func (s *startFailureHelper) SetDesiredRunnerCount(int) error { return nil }
++func (s *startFailureHelper) ObserveLiveMessageDemand(string, int, int64, time.Time) error {
++	return s.observe
++}
++func (s *startFailureHelper) InvalidateLiveMessageDemand() { s.invalidated++ }
++func (s *startFailureHelper) Owner() string                { return "example-owner" }
++func (s *startFailureHelper) HandleJobsCompleted([]params.ScaleSetJobMessage) error {
++	return nil
++}
++func (s *startFailureHelper) HandleJobsStarted([]params.ScaleSetJobMessage) error {
++	return nil
++}
++func (s *startFailureHelper) HandleJobsAvailable([]params.ScaleSetJobMessage) error {
++	return nil
++}
+diff --git a/workers/scaleset/message_demand_test.go b/workers/scaleset/message_demand_test.go
+new file mode 100644
+index 0000000..1545f4e
+--- /dev/null
++++ b/workers/scaleset/message_demand_test.go
+@@ -0,0 +1,372 @@
++package scaleset
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"sync"
++	"testing"
++	"time"
++
++	dbCommon "github.com/cloudbase/garm/database/common"
++	"github.com/cloudbase/garm/params"
++	"github.com/cloudbase/garm/util/github/scalesets"
++)
++
++type recordingScaleSetHelper struct {
++	scaleSet     params.ScaleSet
++	observed     []liveMessageDemand
++	invalidated  int
++	started      []params.ScaleSetJobMessage
++	desiredCount []int
++}
++
++func (r *recordingScaleSetHelper) GetScaleSet() params.ScaleSet { return r.scaleSet }
++func (r *recordingScaleSetHelper) GetEntity() params.ForgeEntity {
++	return params.ForgeEntity{}
++}
++func (r *recordingScaleSetHelper) GetScaleSetClient() (*scalesets.ScaleSetClient, error) {
++	return nil, errors.New("recording helper does not open a scale set client")
++}
++func (r *recordingScaleSetHelper) SetLastMessageID(id int64) error {
++	r.scaleSet.LastMessageID = id
++	return nil
++}
++func (r *recordingScaleSetHelper) SetDesiredRunnerCount(count int) error {
++	r.desiredCount = append(r.desiredCount, count)
++	r.scaleSet.DesiredRunnerCount = count
++	return nil
++}
++func (r *recordingScaleSetHelper) ObserveLiveMessageDemand(sessionID string, assigned int, messageID int64, observedAt time.Time) error {
++	r.observed = append(r.observed, liveMessageDemand{
++		sessionID:  sessionID,
++		assigned:   assigned,
++		observed:   true,
++		messageID:  messageID,
++		observedAt: observedAt,
++	})
++	return r.SetDesiredRunnerCount(assigned)
++}
++func (r *recordingScaleSetHelper) InvalidateLiveMessageDemand() { r.invalidated++ }
++func (r *recordingScaleSetHelper) Owner() string                { return "example-owner" }
++func (r *recordingScaleSetHelper) HandleJobsCompleted([]params.ScaleSetJobMessage) error {
++	return nil
++}
++func (r *recordingScaleSetHelper) HandleJobsStarted(jobs []params.ScaleSetJobMessage) error {
++	r.started = append(r.started, jobs...)
++	return nil
++}
++func (r *recordingScaleSetHelper) HandleJobsAvailable([]params.ScaleSetJobMessage) error {
++	return nil
++}
++
++func testListener(helper scaleSetHelper, sessionID string) *scaleSetListener {
++	l := newListener(context.Background(), helper)
++	l.sessionID = sessionID
++	l.running.Store(true)
++	l.quit = make(chan struct{})
++	ctx, cancel := context.WithCancel(context.Background())
++	l.listenerCtx = ctx
++	l.cancelFunc = cancel
++	return l
++}
++
++func jobMessage(messageType, jobID string, assigned, running int) params.RunnerScaleSetMessage {
++	body, err := json.Marshal([]params.ScaleSetJobMessage{{
++		MessageType:    messageType,
++		JobID:          jobID,
++		JobDisplayName: "example-job",
++		RunnerName:     "example-runner",
++		WorkflowRunID:  1,
++	}})
++	if err != nil {
++		panic(err)
++	}
++	return params.RunnerScaleSetMessage{
++		MessageID:   7,
++		MessageType: string(params.MessageTypeRunnerScaleSetJobMessages),
++		Body:        string(body),
++		Statistics:  &params.RunnerScaleSetStatistic{TotalAssignedJobs: assigned, TotalRunningJobs: running},
++	}
++}
++
++func TestListenerObservesMessageCountUpdateAndZero(t *testing.T) {
++	helper := &recordingScaleSetHelper{scaleSet: params.ScaleSet{ID: 1, ScaleSetID: 9, Name: "example"}}
++	l := testListener(helper, "sess-live")
++	l.handleSessionMessage(jobMessage(params.MessageTypeJobAssigned, "job-a", 3, 0))
++	if len(helper.observed) != 1 || helper.observed[0].sessionID != "sess-live" || helper.observed[0].assigned != 3 || helper.observed[0].messageID != 7 {
++		t.Fatalf("count update: %#v", helper.observed)
++	}
++	if helper.scaleSet.DesiredRunnerCount != 3 {
++		t.Fatalf("persisted count = %d, want 3", helper.scaleSet.DesiredRunnerCount)
++	}
++	l.handleSessionMessage(jobMessage(params.MessageTypeJobCompleted, "job-a", 0, 0))
++	if len(helper.observed) != 2 || helper.observed[1].assigned != 0 || helper.invalidated != 0 {
++		t.Fatalf("live zero must stay observed on the current session: observed=%#v invalidated=%d", helper.observed, helper.invalidated)
++	}
++}
++
++func TestListenerMissingStatisticsInvalidatesDemand(t *testing.T) {
++	helper := &recordingScaleSetHelper{scaleSet: params.ScaleSet{ID: 1, ScaleSetID: 9}}
++	l := testListener(helper, "sess-live")
++	l.handleSessionMessage(params.RunnerScaleSetMessage{
++		MessageID:   8,
++		MessageType: string(params.MessageTypeRunnerScaleSetJobMessages),
++		Body:        `[]`,
++	})
++	if helper.invalidated != 1 || len(helper.observed) != 0 {
++		t.Fatalf("missing statistics must not become a zero snapshot: observed=%#v invalidated=%d", helper.observed, helper.invalidated)
++	}
++}
++
++func TestListenerStopAndReplacedSessionInvalidateStaleZero(t *testing.T) {
++	helper := &recordingScaleSetHelper{scaleSet: params.ScaleSet{ID: 1, ScaleSetID: 9, DesiredRunnerCount: 0}}
++	l := testListener(helper, "sess-old")
++	l.handleSessionMessage(jobMessage(params.MessageTypeJobAssigned, "job-a", 0, 0))
++	if err := l.Stop(); err != nil {
++		t.Fatal(err)
++	}
++	if helper.invalidated != 1 {
++		t.Fatalf("disconnected session must invalidate live demand, got %d", helper.invalidated)
++	}
++	replaced := testListener(helper, "sess-new")
++	if len(helper.observed) != 1 || helper.observed[0].sessionID != "sess-old" {
++		t.Fatalf("replacement without a new observation must not revive the old zero: %#v", helper.observed)
++	}
++	replaced.handleSessionMessage(jobMessage(params.MessageTypeJobAssigned, "job-b", 2, 0))
++	if got := helper.observed[len(helper.observed)-1]; got.sessionID != "sess-new" || got.assigned != 2 {
++		t.Fatalf("replaced session observation: %#v", helper.observed)
++	}
++}
++
++func TestListenerJobStartedMessageObservesLiveDemand(t *testing.T) {
++	helper := &recordingScaleSetHelper{scaleSet: params.ScaleSet{ID: 1, ScaleSetID: 9}}
++	l := testListener(helper, "sess-live")
++	l.handleSessionMessage(jobMessage(params.MessageTypeJobStarted, "job-started", 1, 1))
++	if len(helper.observed) != 1 || helper.observed[0].assigned != 1 || helper.observed[0].sessionID != "sess-live" {
++		t.Fatalf("JobStarted message must publish live demand before later client work: %#v", helper.observed)
++	}
++}
++
++func TestWorkerLiveDemandIgnoresStaleDatabaseZero(t *testing.T) {
++	w := &Worker{
++		ctx:      context.Background(),
++		scaleSet: params.ScaleSet{ID: 4, DesiredRunnerCount: 0},
++	}
++	if demand := w.liveMessageDemand(); demand.observed {
++		t.Fatal("unstarted worker must not treat a persisted zero as live demand")
++	}
++	w.liveDemand = liveMessageDemand{sessionID: "sess-old", assigned: 0, observed: true}
++	w.InvalidateLiveMessageDemand()
++	if w.liveMessageDemand().observed {
++		t.Fatal("disconnected session left stale zero as authority")
++	}
++	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	got := evaluateIdleRetirement(idleRetirementEvidence{
++		AgentID: 1, Name: "n", ScaleSetID: 1, LocalStatus: params.RunnerIdle,
++		CreatedAt: now.Add(-time.Hour), IdleCount: 2, Now: now, StatisticsPresent: true,
++		MessageDemandKnown: false, AssignedJobs: w.scaleSet.DesiredRunnerCount,
++	})
++	if got.Eligible || got.Reason != "message-demand-unknown" {
++		t.Fatalf("stale DB zero must not retire idle runners: %#v", got)
++	}
++}
++
++func TestHandleScaleSetEventDoesNotRestoreInvalidatedDemand(t *testing.T) {
++	w := &Worker{
++		ctx:           context.Background(),
++		scaleSet:      params.ScaleSet{Enabled: true, MaxRunners: 2},
++		autoscaleWake: make(chan struct{}, 1),
++		liveDemand:    liveMessageDemand{},
++	}
++	w.handleScaleSetEvent(dbCommon.ChangePayload{
++		Operation: dbCommon.UpdateOperation,
++		Payload:   params.ScaleSet{Enabled: true, MaxRunners: 2, DesiredRunnerCount: 0},
++	})
++	if w.liveMessageDemand().observed {
++		t.Fatal("database watcher zero must not become live message demand")
++	}
++}
++
++func TestWorkerLiveDemandConcurrencyWithIdleAndScale(t *testing.T) {
++	w := &Worker{
++		ctx:           context.Background(),
++		scaleSet:      params.ScaleSet{Enabled: true, MaxRunners: 8, Name: "example"},
++		autoscaleWake: make(chan struct{}, 8),
++	}
++	helper := &forwardingDemandHelper{worker: w, scaleSet: w.scaleSet}
++	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	l := testListener(helper, "sess-live")
++	var wg sync.WaitGroup
++	for i := 0; i < 8; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for n := 0; n < 80; n++ {
++				switch n % 5 {
++				case 0:
++					l.handleSessionMessage(jobMessage(params.MessageTypeJobAssigned, "job-a", n%3, 0))
++				case 1:
++					w.InvalidateLiveMessageDemand()
++				case 2:
++					demand := w.liveMessageDemand()
++					_, _ = w.demandGate.target(context.Background(), now, demand, w.scaleSet, 0, 4)
++				case 3:
++					demand := w.liveMessageDemand()
++					ev := baseEvidence(now)
++					ev.MessageDemandKnown = demand.idleFresh(now)
++					ev.AssignedJobs = demand.assigned
++					_ = evaluateIdleRetirement(ev)
++				default:
++					_ = w.liveMessageDemand().unchangedIdleZero(w.liveMessageDemand(), now)
++				}
++			}
++		}()
++	}
++	wg.Wait()
++}
++
++type forwardingDemandHelper struct {
++	worker   *Worker
++	scaleSet params.ScaleSet
++}
++
++func (f *forwardingDemandHelper) GetScaleSet() params.ScaleSet { return f.scaleSet }
++func (f *forwardingDemandHelper) GetEntity() params.ForgeEntity {
++	return params.ForgeEntity{}
++}
++func (f *forwardingDemandHelper) GetScaleSetClient() (*scalesets.ScaleSetClient, error) {
++	return nil, errors.New("concurrency helper does not open a scale set client")
++}
++func (f *forwardingDemandHelper) SetLastMessageID(id int64) error {
++	f.scaleSet.LastMessageID = id
++	return nil
++}
++func (f *forwardingDemandHelper) SetDesiredRunnerCount(count int) error {
++	f.scaleSet.DesiredRunnerCount = count
++	return nil
++}
++func (f *forwardingDemandHelper) ObserveLiveMessageDemand(sessionID string, assigned int, messageID int64, observedAt time.Time) error {
++	return f.worker.ObserveLiveMessageDemand(sessionID, assigned, messageID, observedAt)
++}
++func (f *forwardingDemandHelper) InvalidateLiveMessageDemand() {
++	f.worker.InvalidateLiveMessageDemand()
++}
++func (f *forwardingDemandHelper) Owner() string { return "example-owner" }
++func (f *forwardingDemandHelper) HandleJobsCompleted([]params.ScaleSetJobMessage) error {
++	return nil
++}
++func (f *forwardingDemandHelper) HandleJobsStarted([]params.ScaleSetJobMessage) error {
++	return nil
++}
++func (f *forwardingDemandHelper) HandleJobsAvailable([]params.ScaleSetJobMessage) error {
++	return nil
++}
++
++func TestSessionCreateZeroIsNotIdleAuthority(t *testing.T) {
++	w := &Worker{ctx: context.Background()}
++	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	if err := w.ObserveLiveMessageDemand("sess-live", 0, 0, now); err != nil {
++		t.Fatal(err)
++	}
++	demand := w.liveMessageDemand()
++	if !demand.scalingKnown() || demand.idleFresh(now) {
++		t.Fatalf("session-create zero must scale but not idle-retire: %#v", demand)
++	}
++	ev := baseEvidence(now)
++	ev.MessageDemandKnown = demand.idleFresh(now)
++	ev.AssignedJobs = demand.assigned
++	got := evaluateIdleRetirement(ev)
++	if got.Eligible || got.Reason != "message-demand-unknown" {
++		t.Fatalf("session-create zero retired idle capacity: %#v", got)
++	}
++}
++
++func TestReplayedMessageIDDoesNotRefreshIdleFreshness(t *testing.T) {
++	w := &Worker{ctx: context.Background()}
++	t0 := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	if err := w.ObserveLiveMessageDemand("sess-live", 0, 9, t0); err != nil {
++		t.Fatal(err)
++	}
++	first := w.liveMessageDemand()
++	if !first.idleFresh(t0) || first.generation != 1 || first.messageID != 9 {
++		t.Fatalf("initial MESSAGE zero must be idle-fresh: %#v", first)
++	}
++
++	replayAt := t0.Add(5 * time.Minute)
++	if err := w.ObserveLiveMessageDemand("sess-live", 0, 9, replayAt); err != nil {
++		t.Fatal(err)
++	}
++	replayed := w.liveMessageDemand()
++	if !replayed.observedAt.Equal(first.observedAt) || replayed.generation != first.generation ||
++		replayed.messageID != first.messageID || replayed.assigned != first.assigned {
++		t.Fatalf("replayed messageID refreshed demand: first=%#v replayed=%#v", first, replayed)
++	}
++	if replayed.idleFresh(replayAt) {
++		t.Fatal("a replayed MESSAGE must not look freshly idle five minutes later")
++	}
++
++	ev := baseEvidence(replayAt)
++	ev.MessageDemandKnown = replayed.idleFresh(replayAt)
++	ev.AssignedJobs = replayed.assigned
++	ev.DemandSessionID = replayed.sessionID
++	ev.DemandMessageID = replayed.messageID
++	ev.DemandGeneration = replayed.generation
++	got := evaluateIdleRetirement(ev)
++	if got.Eligible || got.Reason != "message-demand-unknown" {
++		t.Fatalf("replayed idle zero authorized retirement: %#v", got)
++	}
++}
++
++func TestNewMessageIDRefreshesIdleObservation(t *testing.T) {
++	w := &Worker{ctx: context.Background()}
++	t0 := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	if err := w.ObserveLiveMessageDemand("sess-live", 0, 9, t0); err != nil {
++		t.Fatal(err)
++	}
++	next := t0.Add(30 * time.Second)
++	if err := w.ObserveLiveMessageDemand("sess-live", 0, 10, next); err != nil {
++		t.Fatal(err)
++	}
++	demand := w.liveMessageDemand()
++	if demand.messageID != 10 || !demand.observedAt.Equal(next) || demand.generation != 2 {
++		t.Fatalf("a new messageID must be a new observation: %#v", demand)
++	}
++	if !demand.idleFresh(next) {
++		t.Fatal("a new MESSAGE zero must be idle-fresh")
++	}
++}
++
++func TestStaleSessionMessageDoesNotReplaceLiveDemand(t *testing.T) {
++	w := &Worker{ctx: context.Background()}
++	t0 := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	if err := w.ObserveLiveMessageDemand("sess-new", 2, 10, t0); err != nil {
++		t.Fatal(err)
++	}
++	first := w.liveMessageDemand()
++	if err := w.ObserveLiveMessageDemand("sess-old", 0, 11, t0.Add(time.Minute)); err != nil {
++		t.Fatal(err)
++	}
++	got := w.liveMessageDemand()
++	if got.sessionID != first.sessionID || got.messageID != first.messageID ||
++		got.assigned != first.assigned || got.generation != first.generation ||
++		!got.observedAt.Equal(first.observedAt) {
++		t.Fatalf("replaced session overwrote live demand: first=%#v got=%#v", first, got)
++	}
++}
++
++func TestInvalidateAllowsReplacementSessionDemand(t *testing.T) {
++	w := &Worker{ctx: context.Background()}
++	t0 := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
++	if err := w.ObserveLiveMessageDemand("sess-old", 0, 9, t0); err != nil {
++		t.Fatal(err)
++	}
++	w.InvalidateLiveMessageDemand()
++	if err := w.ObserveLiveMessageDemand("sess-new", 3, 1, t0.Add(time.Second)); err != nil {
++		t.Fatal(err)
++	}
++	got := w.liveMessageDemand()
++	if got.sessionID != "sess-new" || got.assigned != 3 || got.messageID != 1 {
++		t.Fatalf("replacement session was refused: %#v", got)
++	}
++}
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index 9883ec9..8b18cd8 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -91,6 +91,8 @@ type Worker struct {
+ 	autoscaleWake chan struct{}
+ 	demandGate    confirmedDemandGate
+ 	idleRetire    idleRetirementGate
++	demandMu      sync.Mutex
++	liveDemand    liveMessageDemand
+ }
+ 
+ func (w *Worker) ensureScaleSetInGitHub() error {
+@@ -178,6 +180,7 @@ func (w *Worker) Stop() error {
+ 		close(w.quit)
+ 	}
+ 	w.listener.Stop()
++	w.InvalidateLiveMessageDemand()
+ 	return nil
+ }
+ 
+@@ -670,6 +673,7 @@ func (w *Worker) handleScaleSetEvent(event dbCommon.ChangePayload) {
+ 			if err := w.listener.Stop(); err != nil {
+ 				slog.ErrorContext(w.ctx, "error stopping listener", "error", err)
+ 			}
++			w.InvalidateLiveMessageDemand()
+ 		}
+ 		w.scaleSet = scaleSet
+ 		w.mux.Unlock()
+@@ -891,7 +895,7 @@ func (w *Worker) handleScaleUp() {
+ 		slog.ErrorContext(w.ctx, "error getting scale set client", "error", err)
+ 		return
+ 	}
+-	confirmed, err := w.demandGate.target(w.ctx, time.Now(), scaleSetCli, w.scaleSet, current, target)
++	confirmed, err := w.demandGate.target(w.ctx, time.Now(), w.liveMessageDemand(), w.scaleSet, current, target)
+ 	if err != nil {
+ 		slog.ErrorContext(w.ctx, "current GitHub demand could not be confirmed; retaining queued jobs", "error", err)
+ 		return
+diff --git a/workers/scaleset/scaleset_helper.go b/workers/scaleset/scaleset_helper.go
+index 449180e..ffe6a46 100644
+--- a/workers/scaleset/scaleset_helper.go
++++ b/workers/scaleset/scaleset_helper.go
+@@ -18,6 +18,7 @@ import (
+ 	"fmt"
+ 	"log/slog"
+ 	"strings"
++	"time"
+ 
+ 	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
+ 	commonParams "github.com/cloudbase/garm-provider-common/params"
+@@ -203,3 +204,57 @@ func (w *Worker) SetDesiredRunnerCount(count int) error {
+ 	}
+ 	return nil
+ }
++
++func (w *Worker) ObserveLiveMessageDemand(sessionID string, assigned int, messageID int64, observedAt time.Time) error {
++	if sessionID == "" {
++		return fmt.Errorf("message session identity is missing")
++	}
++	if assigned < 0 || observedAt.IsZero() {
++		return fmt.Errorf("message demand is invalid")
++	}
++	w.demandMu.Lock()
++	current := w.liveDemand
++	replay := current.observed && current.sessionID == sessionID && current.messageID == messageID
++	staleSession := current.observed && current.sessionID != "" && current.sessionID != sessionID
++	w.demandMu.Unlock()
++	if replay || staleSession {
++		// A retained MESSAGE is not a heartbeat. A late delivery from a replaced
++		// session must not become the current idle/scaling authority.
++		return nil
++	}
++	if w.store != nil {
++		if err := w.SetDesiredRunnerCount(assigned); err != nil {
++			return err
++		}
++	}
++	w.demandMu.Lock()
++	defer w.demandMu.Unlock()
++	current = w.liveDemand
++	if current.observed && current.sessionID == sessionID && current.messageID == messageID {
++		return nil
++	}
++	if current.observed && current.sessionID != "" && current.sessionID != sessionID {
++		return nil
++	}
++	w.liveDemand = liveMessageDemand{
++		sessionID:  sessionID,
++		assigned:   assigned,
++		observed:   true,
++		messageID:  messageID,
++		observedAt: observedAt,
++		generation: current.generation + 1,
++	}
++	return nil
++}
++
++func (w *Worker) InvalidateLiveMessageDemand() {
++	w.demandMu.Lock()
++	w.liveDemand = liveMessageDemand{generation: w.liveDemand.generation + 1}
++	w.demandMu.Unlock()
++}
++
++func (w *Worker) liveMessageDemand() liveMessageDemand {
++	w.demandMu.Lock()
++	defer w.demandMu.Unlock()
++	return w.liveDemand
++}
+diff --git a/workers/scaleset/scaleset_listener.go b/workers/scaleset/scaleset_listener.go
+index a689316..be8910d 100644
+--- a/workers/scaleset/scaleset_listener.go
++++ b/workers/scaleset/scaleset_listener.go
+@@ -59,6 +59,7 @@ type scaleSetListener struct {
+ 
+ 	scaleSetHelper scaleSetHelper
+ 	messageSession *scalesets.MessageSession
++	sessionID      string
+ 	// intentCoordinator is the single durable admission point before
+ 	// AcquireJobs. Every scale-set listener shares its fsync journal and lock.
+ 	intentCoordinator *queueIntentCoordinator
+@@ -83,7 +84,10 @@ func (l *scaleSetListener) Start() error {
+ 	if err := l.intentCoordinator.Validate(); err != nil {
+ 		return fmt.Errorf("validating queue-intent coordinator: %w", err)
+ 	}
++	l.scaleSetHelper.InvalidateLiveMessageDemand()
++	l.sessionID = ""
+ 
++	adopted := false
+ 	listenCtx, listenCancelFunc := context.WithCancel(context.Background())
+ 	listenCtx = garmUtil.CopySlogValuesToNewCtx(l.ctx, listenCtx)
+ 	listenCtx = garmUtil.WithSlogContext(
+@@ -92,6 +96,26 @@ func (l *scaleSetListener) Start() error {
+ 	)
+ 	l.listenerCtx = listenCtx
+ 	l.cancelFunc = listenCancelFunc
++	var session *scalesets.MessageSession
++	defer func() {
++		if adopted {
++			return
++		}
++		listenCancelFunc()
++		if session == nil {
++			return
++		}
++		_ = session.Close()
++		scaleSetClient, clientErr := l.scaleSetHelper.GetScaleSetClient()
++		if clientErr != nil {
++			slog.ErrorContext(l.ctx, "getting scale set client to delete unstarted session", "error", clientErr)
++		} else if err := scaleSetClient.DeleteMessageSession(context.Background(), session); err != nil {
++			slog.ErrorContext(l.ctx, "deleting unstarted message session", "error", err)
++		}
++		l.messageSession = nil
++		l.sessionID = ""
++		l.scaleSetHelper.InvalidateLiveMessageDemand()
++	}()
+ 
+ 	scaleSet := l.scaleSetHelper.GetScaleSet()
+ 	scaleSetClient, err := l.scaleSetHelper.GetScaleSetClient()
+@@ -99,7 +123,7 @@ func (l *scaleSetListener) Start() error {
+ 		return fmt.Errorf("getting scale set client: %w", err)
+ 	}
+ 	slog.DebugContext(l.ctx, "creating new message session", "scale_set", scaleSet.ScaleSetID)
+-	session, err := scaleSetClient.CreateMessageSession(
++	session, err = scaleSetClient.CreateMessageSession(
+ 		l.listenerCtx, scaleSet.ScaleSetID,
+ 		l.scaleSetHelper.Owner(),
+ 	)
+@@ -107,11 +131,23 @@ func (l *scaleSetListener) Start() error {
+ 		return fmt.Errorf("creating message session: %w", err)
+ 	}
+ 	l.messageSession = session
++	l.sessionID = session.SessionID()
++	if l.sessionID == "" {
++		return fmt.Errorf("message session identity is missing")
++	}
++	if stats := session.Statistics(); stats != nil {
++		// Session-create statistics are the latest assigned counter for
++		// ordinary scaling (messageID 0). They are not idle-retirement
++		// evidence; idleFresh requires a later MESSAGE with messageID > 0.
++		if err := l.scaleSetHelper.ObserveLiveMessageDemand(l.sessionID, stats.TotalAssignedJobs, 0, time.Now().UTC()); err != nil {
++			return fmt.Errorf("observing session demand: %w", err)
++		}
++	}
+ 	l.quit = make(chan struct{})
+ 	l.running.Store(true)
+ 	l.loopExited = make(chan struct{})
+ 	go l.loop()
+-
++	adopted = true
+ 	return nil
+ }
+ 
+@@ -122,6 +158,8 @@ func (l *scaleSetListener) Stop() error {
+ 	if !l.running.Load() {
+ 		return nil
+ 	}
++	l.scaleSetHelper.InvalidateLiveMessageDemand()
++	l.sessionID = ""
+ 	if l.messageSession != nil {
+ 		slog.DebugContext(l.ctx, "closing message session", "scale_set", l.scaleSetHelper.GetScaleSet().ScaleSetID)
+ 		if err := l.messageSession.Close(); err != nil {
+@@ -187,6 +225,15 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		}
+ 	}
+ 
++	if msg.Statistics == nil || l.sessionID == "" {
++		slog.WarnContext(l.ctx, "message demand is missing session statistics; retaining unknown authority")
++		l.scaleSetHelper.InvalidateLiveMessageDemand()
++	} else if err := l.scaleSetHelper.ObserveLiveMessageDemand(l.sessionID, msg.Statistics.TotalAssignedJobs, msg.MessageID, time.Now().UTC()); err != nil {
++		slog.ErrorContext(l.ctx, "observing live message demand", "error", err)
++		l.scaleSetHelper.InvalidateLiveMessageDemand()
++		return
++	}
++
+ 	scaleSetClient, err := l.scaleSetHelper.GetScaleSetClient()
+ 	if err != nil {
+ 		slog.ErrorContext(l.ctx, "getting scale set client", "error", err)
+@@ -282,9 +329,6 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
+ 		}
+ 	}
+ 
+-	if err := l.scaleSetHelper.SetDesiredRunnerCount(msg.Statistics.TotalAssignedJobs); err != nil {
+-		slog.ErrorContext(l.ctx, "setting desired runner count", "error", err)
+-	}
+ 	if retainAvailableMessage {
+ 		slog.DebugContext(l.ctx, "retaining unacquired available-job message", "message_id", msg.MessageID)
+ 		timer := time.NewTimer(time.Second)
+@@ -352,7 +396,8 @@ func (l *scaleSetListener) loop() {
+ 			retryAfterUnauthorized = false
+ 			if !msg.IsNil() {
+ 				// Longpoll returns after 50 seconds. If no message arrives during that interval
+-				// we get a nil message. We can simply ignore it and continue.
++				// we get a nil/202 message. That is not a heartbeat and must not refresh
++				// idle-retirement freshness or invent a zero assigned count.
+ 				slog.DebugContext(l.ctx, "handling message", "message_id", msg.MessageID)
+ 				l.handleSessionMessage(msg)
+ 			}

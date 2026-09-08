@@ -19,7 +19,7 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.93"
+readonly derivative_version="v0.2.1-nddev.94"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
 readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="8f6519500e90ad028c62b7fc3f5c8f2c7784fd82ef653c37c8db9e45afcfa841"
+readonly expected_binary_sha256="75ec2a259092859bbb42b448f99b549bc33606649b4c953bf4292b006c7652a9"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -65,6 +65,9 @@ readonly patch_paths=(
   "third_party/garm/patches/0029-scale-up-from-admitted-intent.patch"
   "third_party/garm/patches/0030-confirm-live-scale-set-demand.patch"
   "third_party/garm/patches/0031-retire-excess-idle-online-runners.patch"
+  "third_party/garm/patches/0032-exact-scale-set-job-identity.patch"
+  "third_party/garm/patches/0033-live-message-demand-authority.patch"
+  "third_party/garm/patches/0034-bump-golang-x-text-v0.39.0.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -98,6 +101,9 @@ readonly patch_sha256s=(
   "e63c57a3c0a9d492ba45bc35f02e1f9abbc84e7e7923717b3be6ff45206f8a0d"
   "102aebd1fb51a7d4bd619fbbb5ab6e3e5706677e35cdbd6c76663640a24f1497"
   "62f8a273e86ed19fe80905ad7205fbf5d6fdefdf1847cc085303c613db3f1345"
+  "396eea6c1ee9250843ed8002e57658c8a1a6d853423ecba7ed5f85442ec59d9c"
+  "e2a9bb7cc787a3c1dc7bfe4c8e1af458cff8ed77ddd8d5b135c0402bef4a5dbb"
+  "2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -108,16 +114,22 @@ readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/confirmed_demand_test.go"
   "third_party/garm/overlay/workers/scaleset/idle_online_retire.go"
   "third_party/garm/overlay/workers/scaleset/idle_online_retire_test.go"
+  "third_party/garm/overlay/runner/pool/scale_set_identity.go"
+  "third_party/garm/overlay/runner/pool/scale_set_identity_test.go"
+  "third_party/garm/overlay/runner/pool/authoritative_reconcile_backoff_test.go"
 )
 readonly overlay_sha256s=(
-  "be85eac2126d7723483467958222f401061bd08a68113af61ff4b51208f717d7"
-  "e4680119fd004f56db9801583de3781e70597b1a0f7c79eee9edd7cb95d80cdf"
+  "c15fb2a6b82ad6cc6b79708d1608aa7ee026bbf2a3c17f247775dfd8e51d2735"
+  "abafa5100ee6bbf8ee1dd94d79e34222a3fbc5ed628c022487137896cd1fc5dd"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
-  "5c289dc30a52e5329e3d4887660629e7d12f855b5c8204d2d99e68c003f39458"
-  "32f7485aeae73c15b28148d8d244e93a35cd8fb6dccea99a418db890107604d8"
-  "a7eb84571633d76ce6f3134b362e90b695beb7f4f36c882363bef087ad2d3d69"
-  "94c4d4ba7368adba4e9620c89b116acccba6c09771413896150c4b0c5379dbc4"
+  "8a99d172b4aaf7f113081c776bbde471db6f85420bf5eca5a856a40c4e59606b"
+  "bfec56436411c87873b75bf1c398428079202f7b56ce5ed6403ebf84b8c82b2a"
+  "c77cc8fff92b5b23eb4691d24acdd58548f21cce065f9837ad6f2f70fd207eb4"
+  "d8dbd3b5d3ca0c89cc8f869e27e1a074166be705a1b65e76b70e2f6cdf92d7dc"
+  "a022ffa920b31655e0101ed60263a2375b7f1258f32bb6e44cc16cb55bca5ee2"
+  "952708658cbd15a489bc9084678ddad4ac27d9ea19a82af53a334e15d5813be6"
+  "d0c8f58b0fe98f5aa496dc161d8064b4029f430b8836c1d37f4429f27a7de620"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
@@ -128,6 +140,9 @@ readonly overlay_targets=(
   "workers/scaleset/confirmed_demand_test.go"
   "workers/scaleset/idle_online_retire.go"
   "workers/scaleset/idle_online_retire_test.go"
+  "runner/pool/scale_set_identity.go"
+  "runner/pool/scale_set_identity_test.go"
+  "runner/pool/authoritative_reconcile_backoff_test.go"
 )
 # END GENERATED REGION
 
@@ -177,12 +192,66 @@ for index in "${!overlay_paths[@]}"; do
 done
 
 work_dir=$(mktemp -d)
+cidfile=""
+container_pid=""
 cleanup() {
-  if [[ -n "${work_dir:-}" && "${work_dir}" == /tmp/* && -d "${work_dir}" ]]; then
-    rm -rf -- "${work_dir}"
+  local stop_proven=0
+  local cid=""
+  if [[ -z "${container_pid}" && ( -z "${cidfile}" || ! -f "${cidfile}" ) ]]; then
+    stop_proven=1
+  fi
+  if [[ -n "${cidfile}" && -f "${cidfile}" ]]; then
+    cid=$(cat "${cidfile}" 2>/dev/null || true)
+  fi
+  if [[ -n "${container_pid}" ]]; then
+    if [[ -n "${cid}" ]]; then
+      if "${container_engine}" stop --time 20 "${cid}" >/dev/null 2>&1 \
+        || ! "${container_engine}" inspect "${cid}" >/dev/null 2>&1; then
+        "${container_engine}" wait "${cid}" >/dev/null 2>&1 || true
+        "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
+        stop_proven=1
+      fi
+    fi
+    local waited=0
+    while kill -0 "${container_pid}" 2>/dev/null; do
+      if (( waited >= 30 )); then
+        break
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if ! kill -0 "${container_pid}" 2>/dev/null; then
+      wait "${container_pid}" 2>/dev/null || true
+      container_pid=""
+      if [[ -z "${cid}" ]]; then
+        stop_proven=1
+      fi
+    fi
+  elif [[ -n "${cid}" ]]; then
+    if "${container_engine}" inspect "${cid}" >/dev/null 2>&1; then
+      if "${container_engine}" wait "${cid}" >/dev/null 2>&1; then
+        "${container_engine}" rm -f "${cid}" >/dev/null 2>&1 || true
+        stop_proven=1
+      fi
+    else
+      stop_proven=1
+    fi
+  fi
+  if [[ "${stop_proven}" -eq 1 ]]; then
+    if [[ -n "${cidfile}" ]]; then
+      rm -f -- "${cidfile}"
+      cidfile=""
+    fi
+    if [[ -n "${work_dir:-}" && "${work_dir}" == /tmp/* && -d "${work_dir}" ]]; then
+      rm -rf -- "${work_dir}"
+    fi
+  else
+    echo "preserving GARM build tree; container stop was not proven: ${work_dir:-unknown}" >&2
   fi
 }
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 source_dir="${work_dir}/source"
 artifact_dir="${work_dir}/artifacts"
@@ -216,8 +285,13 @@ git -C "${source_dir}" diff --check
 # region could not reach and the contract test could not see. The derivative
 # version was exactly that -- compiled into the binary from a literal that
 # nothing compared against the manifest.
+# Do not use --rm: EXIT must stop and wait for this container before deleting
+# the bind-mounted source. Killing the launcher otherwise unmounts /src under
+# a still-running compile. --cidfile requires a path that does not already exist.
 # shellcheck disable=SC2016
-"${container_engine}" run --rm \
+cidfile="${work_dir}/container.id"
+"${container_engine}" run \
+  --cidfile="${cidfile}" \
   --network "${build_network}" \
   --mount "type=bind,src=${source_dir},dst=/src,readonly" \
   --mount "type=bind,src=${artifact_dir},dst=/out" \
@@ -260,7 +334,33 @@ git -C "${source_dir}" diff --check
       build "/out/garm.${attempt}"
       cmp /out/garm.1 "/out/garm.${attempt}"
     done
-  '
+  ' &
+container_pid=$!
+container_status=0
+wait "${container_pid}" || container_status=$?
+container_pid=""
+if [[ ! -f "${cidfile}" ]]; then
+  echo "GARM build container identity is missing" >&2
+  if [[ "${container_status}" -ne 0 ]]; then
+    exit "${container_status}"
+  fi
+  exit 1
+fi
+container_id=$(cat "${cidfile}")
+if [[ -z "${container_id}" ]]; then
+  echo "GARM build container identity is empty" >&2
+  exit 1
+fi
+container_exit=$("${container_engine}" inspect -f '{{.State.ExitCode}}' "${container_id}")
+"${container_engine}" rm -f "${container_id}" >/dev/null
+rm -f -- "${cidfile}"
+cidfile=""
+if [[ "${container_status}" -ne 0 ]]; then
+  exit "${container_status}"
+fi
+if [[ "${container_exit}" != "0" ]]; then
+  exit "${container_exit}"
+fi
 
 first_sha256=$(sha256sum "${artifact_dir}/garm.1" | awk '{print $1}')
 for attempt in $(seq 2 "${build_reproducible_rebuilds}"); do

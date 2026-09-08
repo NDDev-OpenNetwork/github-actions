@@ -1,0 +1,288 @@
+diff --git a/go.mod b/go.mod
+index 0fe0c49..5811cde 100644
+--- a/go.mod
++++ b/go.mod
+@@ -28,9 +28,9 @@ require (
+ 	github.com/spf13/cobra v1.10.2
+ 	github.com/stretchr/testify v1.11.1
+ 	golang.org/x/crypto v0.50.0
+-	golang.org/x/mod v0.35.0
++	golang.org/x/mod v0.37.0
+ 	golang.org/x/oauth2 v0.36.0
+-	golang.org/x/sync v0.20.0
++	golang.org/x/sync v0.21.0
+ 	golang.org/x/term v0.42.0
+ 	gopkg.in/DATA-DOG/go-sqlmock.v1 v1.3.0
+ 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+@@ -99,7 +99,7 @@ require (
+ 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+ 	golang.org/x/net v0.53.0 // indirect
+ 	golang.org/x/sys v0.43.0 // indirect
+-	golang.org/x/text v0.36.0 // indirect
++	golang.org/x/text v0.39.0 // indirect
+ 	google.golang.org/protobuf v1.36.11 // indirect
+ 	gopkg.in/yaml.v3 v3.0.1 // indirect
+ )
+diff --git a/go.sum b/go.sum
+index c45535b..bdad52a 100644
+--- a/go.sum
++++ b/go.sum
+@@ -215,6 +215,8 @@ golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4/go.mod h1:jJ57K6gSWd91
+ golang.org/x/mod v0.8.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=
+ golang.org/x/mod v0.35.0 h1:Ww1D637e6Pg+Zb2KrWfHQUnH2dQRLBQyAtpr/haaJeM=
+ golang.org/x/mod v0.35.0/go.mod h1:+GwiRhIInF8wPm+4AoT6L0FA1QWAad3OMdTRx4tFYlU=
++golang.org/x/mod v0.37.0 h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=
++golang.org/x/mod v0.37.0/go.mod h1:m8S8VeM9r4dzDwjrKO0a1sZP3YjeMamRRlD+fmR2Q/0=
+ golang.org/x/net v0.0.0-20190620200207-3b0461eec859/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
+ golang.org/x/net v0.0.0-20210226172049-e18ecbb05110/go.mod h1:m0MpNAwzfU5UDzcl9v0D8zg8gWTRqZa9RBIspLL5mdg=
+ golang.org/x/net v0.0.0-20220722155237-a158d28d115b/go.mod h1:XRhObCWvk6IyKnWLug+ECip1KBveYUHfp+8e9klMJ9c=
+@@ -228,6 +230,8 @@ golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4/go.mod h1:RxMgew5VJxzue5/jJ
+ golang.org/x/sync v0.1.0/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
+ golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
++golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+ golang.org/x/sys v0.0.0-20181122145206-62eef0e2fa9b/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+@@ -250,6 +254,8 @@ golang.org/x/text v0.7.0/go.mod h1:mrYo+phRRbMaCq/xk9113O4dZlRixOauAjOtrjsXDZ8=
+ golang.org/x/text v0.14.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+ golang.org/x/text v0.36.0 h1:JfKh3XmcRPqZPKevfXVpI1wXPTqbkE5f7JA92a55Yxg=
+ golang.org/x/text v0.36.0/go.mod h1:NIdBknypM8iqVmPiuco0Dh6P5Jcdk8lJL0CUebqK164=
++golang.org/x/text v0.39.0 h1:UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=
++golang.org/x/text v0.39.0/go.mod h1:3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=
+ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+ golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e/go.mod h1:b+2E5dAYhXwXZwtnZ6UAqBI28+e2cm9otk0dWdXHAEo=
+ golang.org/x/tools v0.1.12/go.mod h1:hNGJHUnrk76NpqgfD5Aqm5Crs+Hm0VOH/i9J2+nxYbc=
+diff --git a/vendor/golang.org/x/sync/errgroup/errgroup.go b/vendor/golang.org/x/sync/errgroup/errgroup.go
+index f69fd75..c261a8e 100644
+--- a/vendor/golang.org/x/sync/errgroup/errgroup.go
++++ b/vendor/golang.org/x/sync/errgroup/errgroup.go
+@@ -109,7 +109,7 @@ func (g *Group) TryGo(f func() error) bool {
+ 	if g.sem != nil {
+ 		select {
+ 		case g.sem <- token{}:
+-			// Note: this allows barging iff channels in general allow barging.
++			// Note: this allows barging if and only if channels in general allow barging.
+ 		default:
+ 			return false
+ 		}
+diff --git a/vendor/golang.org/x/text/cases/context.go b/vendor/golang.org/x/text/cases/context.go
+index e9aa9e1..a28f45d 100644
+--- a/vendor/golang.org/x/text/cases/context.go
++++ b/vendor/golang.org/x/text/cases/context.go
+@@ -249,7 +249,7 @@ func upper(c *context) bool {
+ 	return c.copy()
+ }
+ 
+-// isUpper writes the isUppercase version of the current rune to dst.
++// isUpper reports whether the current rune is in upper case.
+ func isUpper(c *context) bool {
+ 	ct := c.caseType()
+ 	if c.info&hasMappingMask == 0 || ct == cUpper {
+diff --git a/vendor/golang.org/x/text/cases/map.go b/vendor/golang.org/x/text/cases/map.go
+index 0f7c6a1..51a6830 100644
+--- a/vendor/golang.org/x/text/cases/map.go
++++ b/vendor/golang.org/x/text/cases/map.go
+@@ -774,7 +774,7 @@ func nlTitle(c *context) bool {
+ 	// From CLDR:
+ 	// # Special titlecasing for Dutch initial "ij".
+ 	// ::Any-Title();
+-	// # Fix up Ij at the beginning of a "word" (per Any-Title, notUAX #29)
++	// # Fix up Ij at the beginning of a "word" (per Any-Title, not UAX #29)
+ 	// [:^WB=ALetter:] [:WB=Extend:]* [[:WB=MidLetter:][:WB=MidNumLet:]]? { Ij } → IJ ;
+ 	if c.src[c.pSrc] != 'I' && c.src[c.pSrc] != 'i' {
+ 		return title(c)
+@@ -794,7 +794,7 @@ func nlTitleSpan(c *context) bool {
+ 	// From CLDR:
+ 	// # Special titlecasing for Dutch initial "ij".
+ 	// ::Any-Title();
+-	// # Fix up Ij at the beginning of a "word" (per Any-Title, notUAX #29)
++	// # Fix up Ij at the beginning of a "word" (per Any-Title, not UAX #29)
+ 	// [:^WB=ALetter:] [:WB=Extend:]* [[:WB=MidLetter:][:WB=MidNumLet:]]? { Ij } → IJ ;
+ 	if c.src[c.pSrc] != 'I' {
+ 		return isTitle(c)
+diff --git a/vendor/golang.org/x/text/unicode/norm/forminfo.go b/vendor/golang.org/x/text/unicode/norm/forminfo.go
+index f3a234e..b3cf5d9 100644
+--- a/vendor/golang.org/x/text/unicode/norm/forminfo.go
++++ b/vendor/golang.org/x/text/unicode/norm/forminfo.go
+@@ -121,8 +121,12 @@ func (p Properties) BoundaryAfter() bool {
+ //
+ // When all 6 bits are zero, the character is inert, meaning it is never
+ // influenced by normalization.
++//
++// We set flags to 0x80 (high bit 7 unused in quick check data) to indicate an invalid rune.
+ type qcInfo uint8
+ 
++func (p Properties) isInvalid() bool { return p.flags == 0x80 }
++
+ func (p Properties) isYesC() bool { return p.flags&0x10 == 0 }
+ func (p Properties) isYesD() bool { return p.flags&0x4 == 0 }
+ 
+@@ -247,6 +251,9 @@ func (f Form) PropertiesString(s string) Properties {
+ // to a Properties.  See the comment at the top of the file
+ // for more information on the format.
+ func compInfo(v uint16, sz int) Properties {
++	if sz == 0 {
++		return Properties{flags: 0x80, size: 1}
++	}
+ 	if v == 0 {
+ 		return Properties{size: uint8(sz)}
+ 	} else if v >= 0x8000 {
+@@ -254,7 +261,7 @@ func compInfo(v uint16, sz int) Properties {
+ 			size:  uint8(sz),
+ 			ccc:   uint8(v),
+ 			tccc:  uint8(v),
+-			flags: qcInfo(v >> 8),
++			flags: qcInfo(v>>8) & 0x3f,
+ 		}
+ 		if p.ccc > 0 || p.combinesBackward() {
+ 			p.nLead = uint8(p.flags & 0x3)
+diff --git a/vendor/golang.org/x/text/unicode/norm/iter.go b/vendor/golang.org/x/text/unicode/norm/iter.go
+index 417c6b2..3cc0592 100644
+--- a/vendor/golang.org/x/text/unicode/norm/iter.go
++++ b/vendor/golang.org/x/text/unicode/norm/iter.go
+@@ -376,16 +376,12 @@ func nextComposed(i *Iter) []byte {
+ 			goto doNorm
+ 		}
+ 		prevCC = i.info.tccc
+-		sz := int(i.info.size)
+-		if sz == 0 {
+-			sz = 1 // illegal rune: copy byte-by-byte
+-		}
+-		p := outp + sz
++		p := outp + int(i.info.size)
+ 		if p > len(i.buf) {
+ 			break
+ 		}
+ 		outp = p
+-		i.p += sz
++		i.p += int(i.info.size)
+ 		if i.p >= i.rb.nsrc {
+ 			i.setDone()
+ 			break
+diff --git a/vendor/golang.org/x/text/unicode/norm/normalize.go b/vendor/golang.org/x/text/unicode/norm/normalize.go
+index 4747ad0..60b1511 100644
+--- a/vendor/golang.org/x/text/unicode/norm/normalize.go
++++ b/vendor/golang.org/x/text/unicode/norm/normalize.go
+@@ -148,7 +148,7 @@ func (f Form) IsNormalString(s string) bool {
+ // patched buffer and whether the decomposition is still in progress.
+ func patchTail(rb *reorderBuffer) bool {
+ 	info, p := lastRuneStart(&rb.f, rb.out)
+-	if p == -1 || info.size == 0 {
++	if p == -1 || info.isInvalid() {
+ 		return true
+ 	}
+ 	end := p + int(info.size)
+@@ -225,7 +225,7 @@ func doAppend(rb *reorderBuffer, out []byte, p int) []byte {
+ 	}
+ 	fd := &rb.f
+ 	if doMerge {
+-		var info Properties
++		info := Properties{flags: 0x80, size: 1} // invalid rune
+ 		if p < n {
+ 			info = fd.info(src, p)
+ 			if !info.BoundaryBefore() || info.nLeadingNonStarters() > 0 {
+@@ -235,7 +235,7 @@ func doAppend(rb *reorderBuffer, out []byte, p int) []byte {
+ 				p = decomposeSegment(rb, p, true)
+ 			}
+ 		}
+-		if info.size == 0 {
++		if info.isInvalid() {
+ 			rb.doFlush()
+ 			// Append incomplete UTF-8 encoding.
+ 			return src.appendSlice(rb.out, p, n)
+@@ -314,7 +314,7 @@ func (f *formInfo) quickSpan(src input, i, end int, atEOF bool) (n int, ok bool)
+ 			continue
+ 		}
+ 		info := f.info(src, i)
+-		if info.size == 0 {
++		if info.isInvalid() {
+ 			if atEOF {
+ 				// include incomplete runes
+ 				return n, true
+@@ -379,7 +379,7 @@ func (f Form) firstBoundary(src input, nsrc int) int {
+ 	// CGJ insertion points correctly. Luckily it doesn't have to.
+ 	for {
+ 		info := fd.info(src, i)
+-		if info.size == 0 {
++		if info.isInvalid() {
+ 			return -1
+ 		}
+ 		if s := ss.next(info); s != ssSuccess {
+@@ -424,7 +424,7 @@ func (f Form) nextBoundary(src input, nsrc int, atEOF bool) int {
+ 	}
+ 	fd := formTable[f]
+ 	info := fd.info(src, 0)
+-	if info.size == 0 {
++	if info.isInvalid() {
+ 		if atEOF {
+ 			return 1
+ 		}
+@@ -435,7 +435,7 @@ func (f Form) nextBoundary(src input, nsrc int, atEOF bool) int {
+ 
+ 	for i := int(info.size); i < nsrc; i += int(info.size) {
+ 		info = fd.info(src, i)
+-		if info.size == 0 {
++		if info.isInvalid() {
+ 			if atEOF {
+ 				return i
+ 			}
+@@ -465,7 +465,7 @@ func lastBoundary(fd *formInfo, b []byte) int {
+ 	if p == -1 {
+ 		return -1
+ 	}
+-	if info.size == 0 { // ends with incomplete rune
++	if info.isInvalid() { // ends with incomplete rune
+ 		if p == 0 { // starts with incomplete rune
+ 			return -1
+ 		}
+@@ -504,7 +504,7 @@ func lastBoundary(fd *formInfo, b []byte) int {
+ func decomposeSegment(rb *reorderBuffer, sp int, atEOF bool) int {
+ 	// Force one character to be consumed.
+ 	info := rb.f.info(rb.src, sp)
+-	if info.size == 0 {
++	if info.isInvalid() {
+ 		return 0
+ 	}
+ 	if s := rb.ss.next(info); s == ssStarter {
+@@ -528,7 +528,7 @@ func decomposeSegment(rb *reorderBuffer, sp int, atEOF bool) int {
+ 			break
+ 		}
+ 		info = rb.f.info(rb.src, sp)
+-		if info.size == 0 {
++		if info.isInvalid() {
+ 			if !atEOF {
+ 				return int(iShortSrc)
+ 			}
+diff --git a/vendor/modules.txt b/vendor/modules.txt
+index b43d43d..e0ca9e7 100644
+--- a/vendor/modules.txt
++++ b/vendor/modules.txt
+@@ -344,7 +344,7 @@ golang.org/x/crypto/chacha20poly1305
+ golang.org/x/crypto/hkdf
+ golang.org/x/crypto/internal/alias
+ golang.org/x/crypto/internal/poly1305
+-# golang.org/x/mod v0.35.0
++# golang.org/x/mod v0.37.0
+ ## explicit; go 1.25.0
+ golang.org/x/mod/semver
+ # golang.org/x/net v0.53.0
+@@ -356,7 +356,7 @@ golang.org/x/net/proxy
+ ## explicit; go 1.25.0
+ golang.org/x/oauth2
+ golang.org/x/oauth2/internal
+-# golang.org/x/sync v0.20.0
++# golang.org/x/sync v0.21.0
+ ## explicit; go 1.25.0
+ golang.org/x/sync/errgroup
+ # golang.org/x/sys v0.43.0
+@@ -368,7 +368,7 @@ golang.org/x/sys/windows
+ # golang.org/x/term v0.42.0
+ ## explicit; go 1.25.0
+ golang.org/x/term
+-# golang.org/x/text v0.36.0
++# golang.org/x/text v0.39.0
+ ## explicit; go 1.25.0
+ golang.org/x/text/cases
+ golang.org/x/text/encoding

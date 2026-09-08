@@ -76,31 +76,35 @@ type idleRetirementDecision struct {
 }
 
 type idleRetirementEvidence struct {
-	AgentID           int64
-	Name              string
-	ScaleSetID        int
-	LocalStatus       params.RunnerStatus
-	CreatedAt         time.Time
-	MinIdle           uint
-	IdleCount         int
-	Now               time.Time
-	RESTID            int64
-	RESTName          string
-	RESTStatus        string
-	RESTBusy          *bool
-	ActionsID         int64
-	ActionsName       string
-	ActionsScaleSetID int
-	ActionsEphemeral  bool
-	ActionsEnabled    bool
-	ActionsState      string
-	ActionsStatus     string
-	AssignedJobs      int
-	AcquiredJobs      int
-	AvailableJobs     int
-	RunningJobs       int
-	BusyRunners       int
-	StatisticsPresent bool
+	AgentID            int64
+	Name               string
+	ScaleSetID         int
+	LocalStatus        params.RunnerStatus
+	CreatedAt          time.Time
+	MinIdle            uint
+	IdleCount          int
+	Now                time.Time
+	RESTID             int64
+	RESTName           string
+	RESTStatus         string
+	RESTBusy           *bool
+	ActionsID          int64
+	ActionsName        string
+	ActionsScaleSetID  int
+	ActionsEphemeral   bool
+	ActionsEnabled     bool
+	ActionsState       string
+	ActionsStatus      string
+	AssignedJobs       int
+	AcquiredJobs       int
+	AvailableJobs      int
+	RunningJobs        int
+	BusyRunners        int
+	StatisticsPresent  bool
+	MessageDemandKnown bool
+	DemandSessionID    string
+	DemandMessageID    int64
+	DemandGeneration   uint64
 }
 
 func evaluateIdleRetirement(ev idleRetirementEvidence) idleRetirementDecision {
@@ -117,6 +121,9 @@ func evaluateIdleRetirement(ev idleRetirementEvidence) idleRetirementDecision {
 	}
 	if ev.IdleCount <= int(ev.MinIdle) {
 		return idleRetirementDecision{Reason: "at-or-below-min-idle"}
+	}
+	if !ev.MessageDemandKnown {
+		return idleRetirementDecision{Reason: "message-demand-unknown"}
 	}
 	if !ev.StatisticsPresent {
 		return idleRetirementDecision{Reason: "scale-set-statistics-absent"}
@@ -354,32 +361,41 @@ func (w *Worker) retireExcessIdleCapacity() error {
 			continue
 		}
 		actionsListBusyUntrusted(actionsRunner.Busy)
+		nowUTC := now
+		// Assigned demand for idle retirement comes from a recent MESSAGE
+		// observation. GetRunnerScaleSetByID statistics remain fail-closed
+		// corroboration of identity/enabled state, not assigned-demand authority.
+		demand := w.liveMessageDemand()
 		evidence := idleRetirementEvidence{
-			AgentID:           runner.AgentID,
-			Name:              runner.Name,
-			ScaleSetID:        w.scaleSet.ScaleSetID,
-			LocalStatus:       runner.RunnerStatus,
-			CreatedAt:         runner.CreatedAt,
-			MinIdle:           w.scaleSet.MinIdleRunners,
-			IdleCount:         idleCount,
-			Now:               now,
-			RESTID:            restRunner.GetID(),
-			RESTName:          restRunner.GetName(),
-			RESTStatus:        restRunner.GetStatus(),
-			RESTBusy:          restRunner.Busy,
-			ActionsID:         actionsRunner.ID,
-			ActionsName:       actionsRunner.Name,
-			ActionsScaleSetID: actionsRunner.RunnerScaleSetID,
-			ActionsEphemeral:  actionsRunner.Ephemeral,
-			ActionsEnabled:    actionsRunner.Enabled,
-			ActionsState:      actionsRunner.ProvisioningState,
-			ActionsStatus:     actionsStatusString(actionsRunner.Status),
-			AssignedJobs:      remote.Statistics.TotalAssignedJobs,
-			AcquiredJobs:      remote.Statistics.TotalAcquiredJobs,
-			AvailableJobs:     remote.Statistics.TotalAvailableJobs,
-			RunningJobs:       remote.Statistics.TotalRunningJobs,
-			BusyRunners:       remote.Statistics.TotalBusyRunners,
-			StatisticsPresent: true,
+			AgentID:            runner.AgentID,
+			Name:               runner.Name,
+			ScaleSetID:         w.scaleSet.ScaleSetID,
+			LocalStatus:        runner.RunnerStatus,
+			CreatedAt:          runner.CreatedAt,
+			MinIdle:            w.scaleSet.MinIdleRunners,
+			IdleCount:          idleCount,
+			Now:                now,
+			RESTID:             restRunner.GetID(),
+			RESTName:           restRunner.GetName(),
+			RESTStatus:         restRunner.GetStatus(),
+			RESTBusy:           restRunner.Busy,
+			ActionsID:          actionsRunner.ID,
+			ActionsName:        actionsRunner.Name,
+			ActionsScaleSetID:  actionsRunner.RunnerScaleSetID,
+			ActionsEphemeral:   actionsRunner.Ephemeral,
+			ActionsEnabled:     actionsRunner.Enabled,
+			ActionsState:       actionsRunner.ProvisioningState,
+			ActionsStatus:      actionsStatusString(actionsRunner.Status),
+			AssignedJobs:       demand.assigned,
+			AcquiredJobs:       remote.Statistics.TotalAcquiredJobs,
+			AvailableJobs:      remote.Statistics.TotalAvailableJobs,
+			RunningJobs:        remote.Statistics.TotalRunningJobs,
+			BusyRunners:        remote.Statistics.TotalBusyRunners,
+			StatisticsPresent:  true,
+			MessageDemandKnown: demand.idleFresh(nowUTC),
+			DemandSessionID:    demand.sessionID,
+			DemandMessageID:    demand.messageID,
+			DemandGeneration:   demand.generation,
 		}
 		decision := w.idleRetire.confirm(evidence)
 		if !decision.Eligible {
@@ -393,8 +409,25 @@ func (w *Worker) retireExcessIdleCapacity() error {
 		if ok := locking.TryLock(runner.Name, w.consumerID); !ok {
 			continue
 		}
-		defer locking.Unlock(runner.Name, false)
-		if err := w.removeIdleRunnerAfterConfirmation(cli, runner); err != nil {
+		lockedName := runner.Name
+		unlockRunner := func() {
+			if lockedName == "" {
+				return
+			}
+			locking.Unlock(lockedName, false)
+			lockedName = ""
+		}
+		latest := w.liveMessageDemand()
+		if !latest.unchangedIdleZero(demand, time.Now().UTC()) {
+			unlockRunner()
+			w.idleRetire.forget(runner.AgentID)
+			slog.InfoContext(w.ctx, "idle retirement skipped; live message demand changed before removal",
+				"runner_name", runner.Name, "agent_id", runner.AgentID)
+			continue
+		}
+		err = w.removeIdleRunnerAfterConfirmation(cli, runner)
+		unlockRunner()
+		if err != nil {
 			w.idleRetire.forget(runner.AgentID)
 			return err
 		}

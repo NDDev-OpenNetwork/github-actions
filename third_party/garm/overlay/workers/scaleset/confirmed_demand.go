@@ -8,52 +8,65 @@ import (
 	"github.com/cloudbase/garm/params"
 )
 
-const (
-	demandReadTimeout = 5 * time.Second
-	demandReadBackoff = 30 * time.Second
-)
-
-type scaleSetDemandReader interface {
-	GetRunnerScaleSetByID(context.Context, int) (params.RunnerScaleSet, error)
+// liveMessageDemand is the last statistics.TotalAssignedJobs observed from the
+// current MESSAGE session. It is not the database DesiredRunnerCount row:
+// GORM may skip rewriting an unchanged value, UpdatedAt is not a heartbeat,
+// and a zero persisted by a previous session is not a fresh observation.
+type liveMessageDemand struct {
+	sessionID  string
+	assigned   int
+	observed   bool
+	messageID  int64
+	observedAt time.Time
+	generation uint64
 }
 
-// confirmedDemandGate bounds new JIT registrations by GitHub's current demand.
-// Retained JobAssigned records preserve audit/FIFO identity, but cannot prove
-// that GitHub still assigns that work to this scale set. Conversely, the last
-// message's persisted count may be stale-low. Read the authoritative snapshot
-// before allocating; keep every existing job and runner untouched on refusal.
-// The owning Worker's mutex serializes access to nextRead.
-type confirmedDemandGate struct {
-	nextRead time.Time
+const idleMessageDemandFreshFor = 2 * time.Minute
+
+func (d liveMessageDemand) idleFresh(now time.Time) bool {
+	if !d.observed || d.sessionID == "" || d.assigned < 0 || d.messageID <= 0 || d.observedAt.IsZero() {
+		return false
+	}
+	return !now.Before(d.observedAt) && now.Sub(d.observedAt) <= idleMessageDemandFreshFor
 }
 
-func (g *confirmedDemandGate) target(ctx context.Context, now time.Time, reader scaleSetDemandReader, scaleSet params.ScaleSet, current, admitted int) (int, error) {
+// scalingKnown is the latest assigned counter from the current session. It is
+// intentionally not age-gated: a long-poll 202/nil is not a heartbeat and must
+// not expire legitimate in-progress scaling. Destructive idle retirement uses
+// idleFresh instead.
+func (d liveMessageDemand) scalingKnown() bool {
+	return d.observed && d.sessionID != ""
+}
+
+func (d liveMessageDemand) unchangedIdleZero(previous liveMessageDemand, now time.Time) bool {
+	if !d.idleFresh(now) || !previous.idleFresh(now) || d.assigned != 0 || previous.assigned != 0 {
+		return false
+	}
+	return d.sessionID == previous.sessionID && d.messageID == previous.messageID && d.generation == previous.generation
+}
+
+// confirmedDemandGate bounds new JIT registrations by live MESSAGE statistics
+// from the current listener session. Official scale-set scaling uses
+// statistics.TotalAssignedJobs from session/message responses, not
+// GetRunnerScaleSetByID metadata and not REST queued job counts.
+//
+// Unsupported freshness contract: a 202/nil long-poll does not carry
+// statistics, so silence is not a heartbeat and not a fresh zero.
+type confirmedDemandGate struct{}
+
+func (g *confirmedDemandGate) target(_ context.Context, _ time.Time, demand liveMessageDemand, scaleSet params.ScaleSet, current, admitted int) (int, error) {
 	if !scaleSet.Enabled || admitted <= current || admitted < 1 || scaleSet.MaxRunners < 1 {
 		return current, nil
 	}
-	if now.Before(g.nextRead) {
-		return current, nil
+	if !demand.scalingKnown() {
+		return current, fmt.Errorf("current message demand is unknown")
 	}
-	// Failed, missing and zero-demand observations all have bounded read cost.
-	// A successful positive observation is never cached across a new create.
-	g.nextRead = now.Add(demandReadBackoff)
-	readCtx, cancel := context.WithTimeout(ctx, demandReadTimeout)
-	defer cancel()
-	remote, err := reader.GetRunnerScaleSetByID(readCtx, scaleSet.ScaleSetID)
-	if err != nil {
-		return current, fmt.Errorf("read current scale-set demand: %w", err)
+	if demand.assigned < 0 {
+		return current, fmt.Errorf("current message demand is invalid")
 	}
-	if remote.ID != scaleSet.ScaleSetID || remote.Name != scaleSet.Name || remote.Enabled == nil || !*remote.Enabled || remote.Statistics == nil {
-		return current, fmt.Errorf("current scale-set demand has missing or mismatched identity, enabled state or statistics")
-	}
-	desired := remote.Statistics.TotalAssignedJobs
-	if desired < 0 || remote.Statistics.TotalRunningJobs < 0 || remote.Statistics.TotalRunningJobs > desired {
-		return current, fmt.Errorf("current scale-set demand has invalid job counts")
-	}
-	target := min(admitted, desired, int(scaleSet.MaxRunners))
+	target := min(admitted, demand.assigned, int(scaleSet.MaxRunners))
 	if target <= current {
 		return current, nil
 	}
-	g.nextRead = time.Time{}
 	return target, nil
 }
