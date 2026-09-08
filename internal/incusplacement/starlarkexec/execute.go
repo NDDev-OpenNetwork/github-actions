@@ -53,7 +53,11 @@ type MemberSnapshot struct {
 }
 
 type InstanceSnapshot struct {
-	Name           string
+	Name string
+	// Project is the Incus project that owns the instance. Empty means the
+	// project passed to get_instances / get_instances_count, so existing
+	// fleet-worker fixtures stay in the queried project.
+	Project        string
 	MemoryLimitMiB int
 }
 
@@ -162,8 +166,9 @@ func Execute(script string, request PlacementRequest, cluster ClusterSnapshot) (
 		if err != nil {
 			return nil, err
 		}
-		instances := make([]api.Instance, 0, len(member.Instances))
-		for _, instance := range member.Instances {
+		filtered := instancesForProject(member, project)
+		instances := make([]api.Instance, 0, len(filtered))
+		for _, instance := range filtered {
 			instances = append(instances, api.Instance{
 				Name: instance.Name, Project: project, Location: location,
 				ExpandedConfig: api.ConfigMap{
@@ -185,7 +190,7 @@ func Execute(script string, request PlacementRequest, cluster ClusterSnapshot) (
 		if err != nil {
 			return nil, err
 		}
-		count := len(member.Instances)
+		count := len(instancesForProject(member, project))
 		if includePending {
 			count = member.PendingCount
 		}
@@ -268,4 +273,21 @@ func lookupMember(members map[string]MemberSnapshot, name string) (MemberSnapsho
 		return MemberSnapshot{}, fmt.Errorf("Invalid member name: %s", name)
 	}
 	return member, nil
+}
+
+func instancesForProject(member MemberSnapshot, project string) []InstanceSnapshot {
+	if project == "" {
+		return append([]InstanceSnapshot(nil), member.Instances...)
+	}
+	matched := make([]InstanceSnapshot, 0, len(member.Instances))
+	for _, instance := range member.Instances {
+		instanceProject := instance.Project
+		if instanceProject == "" {
+			instanceProject = project
+		}
+		if instanceProject == project {
+			matched = append(matched, instance)
+		}
+	}
+	return matched
 }
