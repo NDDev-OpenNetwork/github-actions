@@ -28,3 +28,20 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+
+  # The benchmark fixture is a real npm dependency tree, and nothing watched it.
+  # `next` sat at 16.3.0 through two critical advisories — unauthenticated RCE
+  # in the image-optimization API and on Windows-hosted servers, both fixed in
+  # 16.3.3 — and they surfaced only through advisory scanning, which opens no
+  # pull request. Bun reads the same manifest and lockfile the npm ecosystem
+  # does, so Dependabot can keep this current the way it keeps the other two.
+  - package-ecosystem: npm
+    directory: /benchmark/bun-next
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Almaty
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
