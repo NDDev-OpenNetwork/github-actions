@@ -18,6 +18,23 @@ updates:
           - minor
           - patch
 
+  # internal/incusplacement/starlarkexec is a nested module that requires the
+  # root module, so the root's dependency graph moving is enough to leave its
+  # go.mod stale — `go: updates to go.mod needed`. The harness test shells
+  # `go test` and `go vet` into that directory, so the root-only bump in #446
+  # turned three CI jobs red without touching a line of its own code. Watching
+  # the directory is what keeps the two in step.
+  - package-ecosystem: gomod
+    directory: /internal/incusplacement/starlarkexec
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:15"
+      timezone: Asia/Almaty
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
