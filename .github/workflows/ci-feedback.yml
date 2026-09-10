@@ -1,0 +1,38 @@
+name: Reusable CI feedback
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        required: true
+        type: string
+      run-attempt:
+        required: true
+        type: string
+      allow-in-progress:
+        description: Report completed failed jobs on an unfinished exact attempt.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: ci-feedback-${{ github.repository_id }}-${{ inputs.run-id }}-${{ inputs.run-attempt }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Publish unassigned CI evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # Trusted immutable action code only. No checkout of the triggering PR.
+      - uses: NDDev-OpenNetwork/github-actions/actions/ci-feedback@46c162acf164682bd21bfc74f8e8ce21bffc4a02 # commit:46c162acf164682bd21bfc74f8e8ce21bffc4a02
+        with:
+          run-id: ${{ inputs.run-id }}
+          run-attempt: ${{ inputs.run-attempt }}
+          allow-in-progress: ${{ inputs.allow-in-progress }}
+          token: ${{ github.token }}

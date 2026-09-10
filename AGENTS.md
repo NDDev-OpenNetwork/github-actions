@@ -14,3 +14,7 @@ identity, state/schema integrity, one-job isolation and release provenance.
 Formatting and generated artifacts should be repaired automatically.
 
 Run `make verify` after changes. Preserve unrelated worktree changes.
+
+Ordinary merge does not wait on a required general CI status check. The `Gate`
+job still runs as truthful advisory evidence. Live GitHub settings are not
+applied from this tree.

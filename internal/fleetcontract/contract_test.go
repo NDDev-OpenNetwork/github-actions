@@ -29,10 +29,10 @@ func TestPublicExampleContractBuildsWithoutEstateAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if contract.Repository != "NDDev-OpenNetwork/github-actions" || len(contract.RunnerClasses) == 0 ||
-		len(contract.Tenants) == 0 || len(contract.Merge.RequiredContexts) != 1 || contract.Merge.RequiredContexts[0] != "Gate" {
+		len(contract.Tenants) == 0 || len(contract.Merge.RequiredContexts) != 0 {
 		t.Fatalf("public contract = %#v", contract)
 	}
-	if contract.SchemaVersion != 2 || contract.ContractVersion != 5 || contract.Execution.WorkerKind != "incus-container" ||
+	if contract.SchemaVersion != 2 || contract.ContractVersion != 6 || contract.Execution.WorkerKind != "incus-container" ||
 		!contract.Execution.Ephemeral || contract.Execution.JobsPerWorker != 1 || !contract.ResourceSemantics.HardMemoryExcludesEmergencySwap ||
 		contract.ResourceSemantics.EmergencySwapSchedulable || contract.ResourceSemantics.CPUMode != "weighted-overcommit" {
 		t.Fatalf("contract v2 semantics = %#v", contract)

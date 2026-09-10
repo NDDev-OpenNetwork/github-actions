@@ -527,8 +527,11 @@ rules:
   - id: lifecycle_assigned_stall
     severity: page
     query_language: promql
-    stream_name: gha_fleet_queue_intent_oldest_state_age_seconds
-    expression: max by (host_name) (gha_fleet_queue_intent_oldest_state_age_seconds{state="assigned"})
+    stream_name: gha_fleet_queue_oldest_assigned_state_age_seconds
+    # job_id is first so the renderer copies it into {subject}. The previous
+    # max by (host_name) named the queue host on every cycle of the 600s
+    # assigned TTL, so the same page repeated without saying which GUID.
+    expression: max by (job_id, scale_set) (gha_fleet_queue_oldest_assigned_state_age_seconds)
     operator: ">"
     threshold: 300
     evaluation_seconds: 30
@@ -616,9 +619,11 @@ rules:
     # Per scale set because the aggregate hides the case worth paging for. In one
     # sample nddev-linux-integration was at 43 minutes with a p50 of 16 while
     # nddev-linux-standard was at 14; a max over everything reports one number
-    # and names no pool.
+    # and names no pool. job_id is first so {subject} is the journal GUID: a
+    # cancelled waiter dropping out of the gauge is a new incident, not a
+    # quieter reading of the old one.
     stream_name: gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set
-    expression: max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set)
+    expression: max by (job_id, scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set)
     operator: ">"
     # Thirty minutes, not five. Five was the old ceiling's neighbourhood and is
     # ordinary under load: measured p50 waits ran 7 to 16 minutes across pools
@@ -748,7 +753,7 @@ rules:
     # empty left side. `X * (X < bool 300)` returns 200 for 200 and 0 for 400,
     # which is the intent, and it is never empty, so the sustained subquery
     # always receives a matrix.
-    expression: max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max by (scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
+    expression: max by (job_id, scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) * (max by (job_id, scale_set) (gha_fleet_queue_oldest_queued_wait_seconds_by_scale_set) < bool 1800)
     operator: ">"
     threshold: 300
     evaluation_seconds: 300

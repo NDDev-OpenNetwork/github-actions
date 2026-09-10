@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	// 17 labels the oldest queued and assigned intents with job_id so stall
+	// pages name the GUID instead of only the scale set or queue host.
 	// 16 exports drain-marked members (online or offline) independently of
 	// held-out (offline) members, so a full online drain is observable rather
 	// than inferred from platform health staying up.
@@ -30,7 +32,8 @@ const (
 	// running identity telemetry. Version 8 added role-correct central exporter
 	// health, container admission readiness, phase ages and rollback-compatible
 	// WAL progress semantics.
-	SchemaVersion               = 16
+	SchemaVersion               = 17
+	metricIdentityNone          = "none"
 	queueCorrelationGracePeriod = 2 * time.Minute
 	// A running intent is retired by the cache broker's reclaim, which waits
 	// five minutes for the two ledgers to agree and then runs once a minute.
@@ -340,6 +343,11 @@ type QueueSummary struct {
 	// can never fire.
 	OldestQueuedWaitSeconds           int64            `json:"oldest_queued_wait_seconds"`
 	OldestQueuedWaitSecondsByScaleSet map[string]int64 `json:"oldest_queued_wait_seconds_by_scale_set"`
+	// OldestQueuedJobIDByScaleSet is the journal GUID of that oldest waiter.
+	// Empty scale sets use "none" so the Prometheus series keeps a stable label.
+	OldestQueuedJobIDByScaleSet map[string]string `json:"oldest_queued_job_id_by_scale_set"`
+	OldestAssignedJobID         string            `json:"oldest_assigned_job_id"`
+	OldestAssignedScaleSet      string            `json:"oldest_assigned_scale_set"`
 	// StartedWait* is the wait a developer actually felt: from the moment
 	// GitHub first queued the intent to the moment its runner reported
 	// running, measured over the intents that started within the last
@@ -858,12 +866,16 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		ByPriority:                        make(map[int]int),
 		ByScaleSet:                        make(map[string]int),
 		OldestQueuedWaitSecondsByScaleSet: make(map[string]int64),
+		OldestQueuedJobIDByScaleSet:       make(map[string]string),
+		OldestAssignedJobID:               metricIdentityNone,
+		OldestAssignedScaleSet:            metricIdentityNone,
 	}
 	startedWaits := make([]int64, 0)
 	startedWaitsByScaleSet := make(map[string][]int64)
 	for scaleSet := range knownScaleSets {
 		summary.ByScaleSet[scaleSet] = 0
 		summary.OldestQueuedWaitSecondsByScaleSet[scaleSet] = 0
+		summary.OldestQueuedJobIDByScaleSet[scaleSet] = metricIdentityNone
 	}
 	for _, intent := range snapshot.Active {
 		if _, exists := knownScaleSets[intent.ScaleSetName]; !exists {
@@ -879,6 +891,10 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		stateAge := int64(now.Sub(intent.StateEnteredAt).Seconds())
 		if stateAge > summary.OldestStateAgeSeconds[string(intent.State)] {
 			summary.OldestStateAgeSeconds[string(intent.State)] = stateAge
+			if intent.State == queueintent.StateAssigned {
+				summary.OldestAssignedJobID = metricIdentity(intent.JobID)
+				summary.OldestAssignedScaleSet = metricIdentity(intent.ScaleSetName)
+			}
 		}
 		summary.ByPriority[intent.Priority]++
 		summary.ByScaleSet[intent.ScaleSetName]++
@@ -943,6 +959,7 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 			}
 			if wait > summary.OldestQueuedWaitSecondsByScaleSet[intent.ScaleSetName] {
 				summary.OldestQueuedWaitSecondsByScaleSet[intent.ScaleSetName] = wait
+				summary.OldestQueuedJobIDByScaleSet[intent.ScaleSetName] = metricIdentity(intent.JobID)
 			}
 		}
 	}
@@ -957,6 +974,13 @@ func summarizeQueue(snapshot queueintent.Snapshot, platform config.Config, now t
 		summary.StartedWaitP90ByScaleSet[scaleSet] = quantileSeconds(startedWaitsByScaleSet[scaleSet], 0.9)
 	}
 	return summary, nil
+}
+
+func metricIdentity(id string) string {
+	if id == "" {
+		return metricIdentityNone
+	}
+	return id
 }
 
 // completedWaitWindow bounds how recently an intent must have started running

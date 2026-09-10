@@ -14,6 +14,68 @@ import (
 	"github.com/cloudbase/garm/params"
 )
 
+func TestFastStartedCompletedBatchDoesNotRetainRunningCapacity(t *testing.T) {
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "example-integration")
+	job := testQueueJob(101, "example-owner", "example-repository", now)
+	job.RunnerRequestID = 0
+	job.RunnerName = ""
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	started := job
+	started.RunnerName = "example-runner"
+	started.RunnerID = 202
+	now = now.Add(time.Minute)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, []params.ScaleSetJobMessage{started}, []params.ScaleSetJobMessage{started}); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)]; exists {
+		t.Fatal("completed execution was retained as running capacity")
+	}
+	if !journal.TerminalJobs[job.JobID].After(now) {
+		t.Fatal("completed execution lost its terminal receipt")
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("completed execution still requests a runner: target=%d err=%v", target, err)
+	}
+}
+
+func TestTerminalRunningRecordFromOlderWriterDoesNotRequestCapacity(t *testing.T) {
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "example-integration")
+	job := testQueueJob(101, "example-owner", "example-repository", now)
+	job.RunnerRequestID = 0
+	job.RunnerName = "example-runner"
+	job.RunnerID = 202
+	entity := testQueueEntityForJob(job)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{job}, []params.ScaleSetJobMessage{job}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Older writers could leave a running record alongside its terminal
+	// receipt after a batched start/complete. Read it without erasing evidence.
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markTerminalJob(&journal, job.JobID, now.Add(time.Hour))
+	if err := writeQueueIntentJournal(coordinator.journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("legacy terminal execution requested capacity: target=%d err=%v", target, err)
+	}
+}
+
 func TestAdmittedCapacityIntentDisappearsOnCompletion(t *testing.T) {
 	now := time.Date(2026, 8, 19, 7, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
@@ -66,14 +128,12 @@ func TestAdmittedScaleUpTargetCapsAtMaxRunners(t *testing.T) {
 	}
 }
 
-func TestScaleUpUsesAdmittedWhenGitHubDesiredIsZero(t *testing.T) {
+func TestAdmittedWaiterRequestsDemandReconciliationWhenPersistedDesiredIsZero(t *testing.T) {
 	t.Parallel()
-	// Live 2026-09-06: Candidate certified sat assigned-without-instance for
-	// 17 minutes because handleAutoScale compared runnerCount to GitHub
-	// DesiredRunnerCount (0 after the sibling runner was deleted) and never
-	// called handleScaleUp.
+	// A persisted zero must not prevent the authoritative demand read. The
+	// confirmed-demand tests separately prove that a fresh zero forbids create.
 	if !shouldScaleUp(0, 0, 1) {
-		t.Fatal("assigned-without-instance must scale up when GitHub desired is 0")
+		t.Fatal("an admitted waiter must request current demand when persisted desired is 0")
 	}
 	if shouldScaleDown(0, 0, 1) {
 		t.Fatal("empty pool with an admitted waiter must not scale down")
@@ -125,7 +185,7 @@ func TestCompletedJobCannotBeResurrectedByDelayedAssignedRedelivery(t *testing.T
 	}
 }
 
-func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
+func TestRedeliveredWaiterDoesNotInheritCompletedQueueAge(t *testing.T) {
 	now := time.Date(2026, 8, 31, 1, 46, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
 	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
@@ -133,8 +193,8 @@ func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
 	original.MessageType = params.MessageTypeJobAssigned
 	original.RunnerRequestID = 0
 	original.RunnerName = ""
-	original.WorkflowRunID = 33347335156
-	original.JobDisplayName = "ci-gate"
+	original.WorkflowRunID = 101
+	original.JobDisplayName = "example-job"
 	entity := testQueueEntityForJob(original)
 	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{original}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -143,14 +203,17 @@ func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lineageQueueTime := initial.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)].QueueTime
-	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{original}); err != nil {
+	originalQueueTime := initial.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)].QueueTime
+	completed := original
+	completed.MessageType = params.MessageTypeJobCompleted
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{completed}); err != nil {
 		t.Fatal(err)
 	}
 
 	now = now.Add(5 * time.Minute)
 	replacement := original
 	replacement.JobID = "00000000-0000-4000-8000-000000000702"
+	replacement.MessageType = params.MessageTypeJobAssigned
 	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{replacement}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -158,15 +221,104 @@ func TestRedeliveredWaiterInheritsOriginalQueueAge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)]; exists {
-		t.Fatal("redelivery retained the obsolete job UUID")
+	originalIntent, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), original.JobID)]
+	if !exists || originalIntent.State != queueStateQueued || !originalIntent.QueueTime.Equal(originalQueueTime) {
+		t.Fatalf("listener completion must keep the original GUID instead of aliasing it away: %#v", originalIntent)
 	}
 	intent := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), replacement.JobID)]
-	if intent.JobID != replacement.JobID || !intent.QueueTime.Equal(lineageQueueTime) || intent.State != queueStateAssigned {
-		t.Fatalf("redelivered waiter lost lineage: %#v", intent)
+	if intent.JobID != replacement.JobID || intent.State != queueStateAssigned {
+		t.Fatalf("replacement GUID was not recorded as its own assigned waiter: %#v", intent)
+	}
+	if intent.QueueTime.Equal(originalQueueTime) || intent.FirstQueuedAt.Equal(originalIntent.FirstQueuedAt) {
+		t.Fatalf("run/name heuristic aliased the completed waiter's queue clock: %#v", intent)
 	}
 	if !journal.TerminalJobs[original.JobID].After(now) {
-		t.Fatal("obsolete UUID lost its terminal tombstone")
+		t.Fatal("completed GUID lost its terminal tombstone")
+	}
+}
+
+func TestListenerCompletedGUIDDoesNotBecomeRESTTerminalProof(t *testing.T) {
+	// Empty runner_name JobCompleted ends the scale-set delivery reservation.
+	// The REST workflow job may remain queued under the same external_id.
+	now := time.Date(2026, 9, 7, 4, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	assigned := testQueueJob(801, "example-owner", "example-repository", now)
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.RunnerName = ""
+	entity := testQueueEntityForJob(assigned)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Minute)
+	completed := assigned
+	completed.MessageType = params.MessageTypeJobCompleted
+	completed.RunnerName = ""
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{completed}); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, exists := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), assigned.JobID)]
+	if !exists || intent.State != queueStateQueued {
+		t.Fatalf("listener JobCompleted is not REST terminal deletion: %#v", intent)
+	}
+	if !journal.TerminalJobs[assigned.JobID].After(now) {
+		t.Fatal("listener completion tombstone missing")
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 0 {
+		t.Fatalf("never-started listener completion must release assigned capacity: target=%d err=%v", target, err)
+	}
+}
+
+func TestAuthoritativeQueuedJobClearsListenerDeliveryTombstone(t *testing.T) {
+	now := time.Date(2026, 9, 7, 4, 10, 5, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	assigned := testQueueJob(901, "example-owner", "example-repository", now.Add(-5*time.Minute))
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.RunnerName = ""
+	entity := testQueueEntityForJob(assigned)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	completed := assigned
+	completed.MessageType = params.MessageTypeJobCompleted
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, nil, nil, []params.ScaleSetJobMessage{completed}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || before != 0 {
+		t.Fatalf("listener delivery completion still occupied a slot: target=%d err=%v", before, err)
+	}
+	now = now.Add(time.Minute)
+	job := params.Job{
+		ScaleSetJobID:   assigned.JobID,
+		RepositoryOwner: "example-owner", RepositoryName: "example-repository", Action: "pull_request",
+	}
+	job.CreatedAt = assigned.QueueTime
+	if _, err := coordinator.EnsureAuthoritative(scaleSet, entity, job); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, terminal := journal.TerminalJobs[assigned.JobID]; terminal {
+		t.Fatal("REST still-queued identity left a listener delivery tombstone in place")
+	}
+	intent := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), assigned.JobID)]
+	if intent.JobID != assigned.JobID || intent.State == "" {
+		t.Fatalf("REST-queued GUID was not retained: %#v", intent)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || target != 1 {
+		t.Fatalf("REST-queued exact identity must be admissible again: target=%d err=%v state=%s", target, err, intent.State)
 	}
 }
 
@@ -909,15 +1061,16 @@ func TestQueueCoordinatorTracksAStartedJobWithNoIntent(t *testing.T) {
 	}
 }
 
-func TestQueueCoordinatorTransfersAssignedCapacityToTheJobGitHubActuallyStarted(t *testing.T) {
+func TestQueueCoordinatorJobStartedDoesNotConsumeUnrelatedAssignedWaiter(t *testing.T) {
 	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
 	coordinator := testQueueCoordinator(t, &now, nil)
 	scaleSet := testQueueScaleSet(11, "nddev-linux-standard")
+	entity := testQueueEntityForJob(testQueueJob(101, "example-org", "reserved", now))
 	reserved := testQueueJob(101, "example-org", "reserved", now.Add(-time.Minute))
 	reserved.MessageType = params.MessageTypeJobAssigned
 	reserved.RunnerRequestID = 0
 	if _, err := coordinator.ObserveLifecycle(
-		scaleSet, testQueueEntityForJob(reserved), []params.ScaleSetJobMessage{reserved}, nil, nil,
+		scaleSet, entity, []params.ScaleSetJobMessage{reserved}, nil, nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -925,10 +1078,25 @@ func TestQueueCoordinatorTransfersAssignedCapacityToTheJobGitHubActuallyStarted(
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation := before.Intents[queueIntentKey(11, reserved.JobID)]
+	reservedKey := queueIntentKey(11, reserved.JobID)
+	reservation := before.Intents[reservedKey]
+	if reservation.State != queueStateAssigned {
+		t.Fatalf("assigned waiter was not recorded: %#v", reservation)
+	}
 
 	started := testQueueJob(202, "example-org", "actual", now)
 	started.MessageType = params.MessageTypeJobStarted
+	fromJobID, transferred, err := transferAssignedReservation(
+		&before, queueAdmissionConfig{}, scaleSet, entity, started, now,
+	)
+	if err != nil || transferred || fromJobID != "" {
+		t.Fatalf("helper renamed a foreign waiter: transferred=%t from=%q err=%v", transferred, fromJobID, err)
+	}
+	if waiter, exists := before.Intents[reservedKey]; !exists || waiter != reservation {
+		t.Fatalf("helper mutated the assigned waiter: before=%#v after=%#v", reservation, waiter)
+	}
+
+	now = now.Add(2 * time.Minute)
 	if _, err := coordinator.ObserveLifecycle(
 		scaleSet, testQueueEntityForJob(started), nil, []params.ScaleSetJobMessage{started}, nil,
 	); err != nil {
@@ -938,15 +1106,234 @@ func TestQueueCoordinatorTransfersAssignedCapacityToTheJobGitHubActuallyStarted(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := journal.Intents[queueIntentKey(11, reserved.JobID)]; exists {
-		t.Fatal("the substituted job kept a second capacity token")
+	waiter, exists := journal.Intents[reservedKey]
+	if !exists || waiter.State != queueStateAssigned || waiter.Key != reservation.Key ||
+		waiter.QueueTime != reservation.QueueTime || waiter.FirstQueuedAt != reservation.FirstQueuedAt ||
+		waiter.Priority != reservation.Priority || waiter.JobID != reserved.JobID {
+		t.Fatalf("unrelated JobStarted consumed or renamed the assigned waiter: %#v", waiter)
 	}
 	actual, exists := journal.Intents[queueIntentKey(11, started.JobID)]
-	if !exists || actual.State != queueStateRunning || actual.QueueTime != reservation.QueueTime {
-		t.Fatalf("capacity reservation was not transferred: %#v", actual)
+	if !exists || actual.State != queueStateRunning || actual.JobID != started.JobID {
+		t.Fatalf("started job was not rehydrated on its own key: %#v", actual)
+	}
+	if actual.QueueTime == reservation.QueueTime || actual.FirstQueuedAt == reservation.FirstQueuedAt {
+		t.Fatalf("started job inherited the foreign FIFO clock: started=%#v waiter=%#v", actual, waiter)
+	}
+	if total, _ := queueInFlight(&journal); total != 2 {
+		t.Fatalf("original waiter plus started job must both remain in-flight: %d", total)
+	}
+}
+
+func TestQueueCoordinatorDispatchableAvailableTakesSlotFromRequestlessReservation(t *testing.T) {
+	now := time.Date(2026, 9, 7, 4, 22, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	old := testQueueJob(101, "example-owner", "example-repository", now)
+	old.MessageType = params.MessageTypeJobAssigned
+	old.RunnerRequestID = 0
+	old.RunnerName = ""
+	entity := testQueueEntityForJob(old)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{old}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	oldKey := queueIntentKey(int64(scaleSet.ScaleSetID), old.JobID)
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := before.Intents[oldKey]
+	if reservation.State != queueStateAssigned {
+		t.Fatalf("request-less assigned waiter missing: %#v", reservation)
+	}
+
+	now = now.Add(11 * time.Minute)
+	demandNow := now
+	if _, err := coordinator.AdmittedCapacityTarget(scaleSet, entity); err != nil {
+		t.Fatal(err)
+	}
+	fresh := testQueueJob(202, "example-owner", "example-repository", now)
+	fresh.MessageType = params.MessageTypeJobAvailable
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSet, []params.ScaleSetJobMessage{fresh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 || selected[0] != fresh.RunnerRequestID {
+		t.Fatalf("dispatchable available job was not selected: %v", selected)
+	}
+
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter := journal.Intents[oldKey]
+	if waiter.State != queueStateQueued || waiter.JobID != old.JobID ||
+		waiter.QueueTime != reservation.QueueTime || waiter.FirstQueuedAt != reservation.FirstQueuedAt ||
+		waiter.Priority != reservation.Priority || waiter.RunnerRequestID != 0 {
+		t.Fatalf("original waiter lost identity or FIFO: %#v", waiter)
+	}
+	acquired := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), fresh.JobID)]
+	if acquired.State != queueStateAcquiring || acquired.RunnerRequestID != fresh.RunnerRequestID {
+		t.Fatalf("dispatchable job did not receive occupancy: %#v", acquired)
 	}
 	if total, _ := queueInFlight(&journal); total != 1 {
-		t.Fatalf("reservation transfer changed in-flight width: %d", total)
+		t.Fatalf("request-less waiter plus dispatchable occupancy: %d", total)
+	}
+	admitted, err := coordinator.AdmittedCapacityTarget(scaleSet, entity)
+	if err != nil || admitted != 1 {
+		t.Fatalf("admitted=%d err=%v", admitted, err)
+	}
+	demand := liveMessageDemand{
+		sessionID: "sess-live", assigned: 2, observed: true,
+		messageID: 9, observedAt: demandNow,
+	}
+	local := params.ScaleSet{Enabled: true, MaxRunners: 8, ScaleSetID: scaleSet.ScaleSetID, Name: scaleSet.Name}
+	target, demandErr := (&confirmedDemandGate{}).target(context.Background(), demandNow, demand, local, 0, admitted)
+	if demandErr != nil || target != 1 {
+		t.Fatalf("live demand must follow dispatchable occupancy: target=%d err=%v", target, demandErr)
+	}
+}
+
+func TestQueueCoordinatorUnexpiredRequestlessYieldsToDispatchableAvailable(t *testing.T) {
+	now := time.Date(2026, 9, 7, 4, 22, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	old := testQueueJob(101, "example-owner", "example-repository", now)
+	old.MessageType = params.MessageTypeJobAssigned
+	old.RunnerRequestID = 0
+	old.RunnerName = ""
+	entity := testQueueEntityForJob(old)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{old}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	oldKey := queueIntentKey(int64(scaleSet.ScaleSetID), old.JobID)
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := before.Intents[oldKey]
+	if reservation.State != queueStateAssigned {
+		t.Fatalf("request-less assigned waiter missing: %#v", reservation)
+	}
+
+	now = now.Add(30 * time.Second)
+	fresh := testQueueJob(202, "example-owner", "example-repository", now)
+	fresh.MessageType = params.MessageTypeJobAvailable
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSet, []params.ScaleSetJobMessage{fresh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 || selected[0] != fresh.RunnerRequestID {
+		t.Fatalf("unexpired request-less occupancy must yield to JobAvailable: %v", selected)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter := journal.Intents[oldKey]
+	if waiter.State != queueStateQueued || waiter.QueueTime != reservation.QueueTime ||
+		waiter.FirstQueuedAt != reservation.FirstQueuedAt || waiter.Priority != reservation.Priority {
+		t.Fatalf("unexpired waiter lost FIFO: %#v", waiter)
+	}
+}
+
+func TestQueueCoordinatorQuotaBlockedAvailableMustNotEvictUsefulBootstrap(t *testing.T) {
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	coordinator := testQueueCoordinatorOfWidth(t, &now, nil, 2, 1)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	scaleSetB := testQueueScaleSet(6, "nddev-linux-standard")
+	busy := testQueueJob(303, "example-owner", "busy-repo", now)
+	if _, err := coordinator.ObserveLifecycle(scaleSetB, testQueueEntityForJob(busy), nil, []params.ScaleSetJobMessage{busy}, nil); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := testQueueJob(101, "example-owner", "bootstrap-repo", now)
+	bootstrap.RunnerRequestID = 0
+	bootstrap.RunnerName = ""
+	bootstrap.MessageType = params.MessageTypeJobAssigned
+	if _, err := coordinator.ObserveLifecycle(scaleSet, testQueueEntityForJob(bootstrap), []params.ScaleSetJobMessage{bootstrap}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapKey := queueIntentKey(int64(scaleSet.ScaleSetID), bootstrap.JobID)
+	reservation := before.Intents[bootstrapKey]
+	if reservation.State != queueStateAssigned {
+		t.Fatalf("fixture did not grant A: %+v", reservation)
+	}
+
+	available := testQueueJob(202, "example-owner", "busy-repo", now.Add(time.Second))
+	if err := coordinator.ObserveAvailable(scaleSetB, []params.ScaleSetJobMessage{available}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSetB, []params.ScaleSetJobMessage{available})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := coordinator.AdmittedCapacityTarget(scaleSet, testQueueEntityForJob(bootstrap))
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, _ := queueInFlight(&after)
+	waiter := after.Intents[bootstrapKey]
+	blocked := after.Intents[queueIntentKey(int64(scaleSetB.ScaleSetID), available.JobID)]
+	if waiter.State != queueStateAssigned || waiter.JobID != bootstrap.JobID ||
+		waiter.QueueTime != reservation.QueueTime || waiter.FirstQueuedAt != reservation.FirstQueuedAt ||
+		waiter.Priority != reservation.Priority || waiter.Key != reservation.Key {
+		t.Fatalf("quota-blocked B revoked A bootstrap: before=%#v after=%#v selected=%v target=%d total=%d B=%#v",
+			reservation, waiter, selected, target, total, blocked)
+	}
+	if target != 1 || total != 2 || len(selected) != 0 || blocked.State != queueStateQueued {
+		t.Fatalf("quota-blocked B must stay queued while A keeps the unused-safe slot: selected=%v target=%d total=%d B=%#v",
+			selected, target, total, blocked)
+	}
+}
+
+func TestQueueCoordinatorSameGUIDJobAvailableKeepsOccupancy(t *testing.T) {
+	now := time.Date(2026, 9, 7, 4, 22, 0, 0, time.UTC)
+	coordinator := testQueueCoordinator(t, &now, nil)
+	scaleSet := testQueueScaleSet(5, "nddev-linux-integration")
+	assigned := testQueueJob(101, "example-owner", "example-repository", now)
+	assigned.MessageType = params.MessageTypeJobAssigned
+	assigned.RunnerRequestID = 0
+	assigned.RunnerName = ""
+	entity := testQueueEntityForJob(assigned)
+	if _, err := coordinator.ObserveLifecycle(scaleSet, entity, []params.ScaleSetJobMessage{assigned}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	available := assigned
+	available.MessageType = params.MessageTypeJobAvailable
+	available.RunnerRequestID = 909
+	if err := coordinator.ObserveAvailable(scaleSet, []params.ScaleSetJobMessage{available}); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := coordinator.SelectForAcquire(scaleSet, []params.ScaleSetJobMessage{available})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 || selected[0] != available.RunnerRequestID {
+		t.Fatalf("same-GUID JobAvailable must keep occupancy: %v", selected)
+	}
+	journal, err := readQueueIntentJournal(coordinator.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := journal.Intents[queueIntentKey(int64(scaleSet.ScaleSetID), assigned.JobID)]
+	if intent.State != queueStateAcquiring || intent.RunnerRequestID != available.RunnerRequestID {
+		t.Fatalf("same GUID was yielded or lost its request ID: %#v", intent)
+	}
+	if total, _ := queueInFlight(&journal); total != 1 {
+		t.Fatalf("same GUID must occupy exactly one slot: %d", total)
 	}
 }
 

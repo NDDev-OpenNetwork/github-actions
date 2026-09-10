@@ -2,14 +2,94 @@
 
 ## Unreleased
 
-- Scale up from durable admitted queue ownership, not GitHub
-  `DesiredRunnerCount`. After a sibling runner is deleted, GitHub reports
-  zero assigned jobs while `JobAssigned` waiters still need a runner, so
-  autoscale never called create and Almaty `Candidate certified` cycled a
-  new UUID every five minutes with the scale set at 0. Pre-job creates
+- Observer schema 17 labels the oldest queued waiter per scale set and the
+  oldest assigned waiter with journal `job_id`.
+  `lifecycle_queued_delivery_stall`, `queue_wait_slow_burn` and
+  `lifecycle_assigned_stall` aggregate `max by (job_id, scale_set)` so
+  `{subject}` is that GUID. A cancelled or advanced waiter dropping out of
+  the gauge is a new incident, not a quieter reading of the previous one.
+  The global Telegram template is unchanged. `queue_started_wait_slow_burn`
+  still names the scale set. Deploy the observer before reconciling
+  OpenObserve: the assigned stall stream is new.
+
+- GARM `v0.2.1-nddev.94` binds stale scale-set job mutation to exact identity:
+  check-run `external_id`, `workflow_job.check_run_url`, repository, exact
+  attempt, numeric job ID and source SHA. A job name is never terminal proof.
+  Missing fields, incomplete pagination, omitted or changing page totals,
+  another attempt, a non-Actions producer and no exact match retain the
+  intent. `check_run_url` and the check URL must share an https origin and
+  `repos/{owner}/{repo}/check-runs/{id}` path; a missing check URL or a
+  foreign host does not bind. GitHub 404 retains the intent and does not
+  start the 15-minute access-refusal backoff used for 403/429. Scaling uses
+  the latest MESSAGE `statistics.TotalAssignedJobs`;
+  idle retirement requires a recent MESSAGE with `messageID > 0` and
+  re-checks that observation before RemoveRunner. Session-create zeros and
+  202/nil long-polls are not idle evidence. Start failure deletes the new
+  message session and cancels the listener context. Listener JobCompleted
+  with an empty runner name ends a delivery reservation and is not a REST
+  workflow-job terminal; REST still-queued exact identity can clear that
+  tombstone. A later same-run/name GUID is not aliased onto it. JobStarted
+  of another GUID does not delete or rename an assigned waiter or copy its
+  FIFO clock.   A request-less JobAssigned yields occupancy only when a dispatchable
+  JobAvailable would actually fit after that yield, including while that
+  reservation is still unexpired; a quota-blocked available job does not
+  evict a useful foreign bootstrap reservation. The original waiter and FIFO
+  stay in the journal. Same-GUID JobAvailable keeps occupancy. An official
+  build preserves the source tree when container stop is not proven. A replayed MESSAGE with the same session and
+  messageID does not refresh idle-retirement freshness. A late message from a
+  replaced session does not overwrite current demand.
+  `golang.org/x/text` is v0.39.0. The `.92` and `.93`
+  patches are unchanged. This is a source/artifact candidate, not a fleet
+  rollout.
+
+- GARM `v0.2.1-nddev.93` retires excess undemanded idle ephemeral JIT
+  registrations through the Actions service RemoveRunner path (204 then 404)
+  after two matching observations. REST `busy` must be explicit false; an
+  omitted field is unknown, not idle. Scale-set statistics of all zeros are
+  not proof that nothing is running. Identity changes, demand, min-idle,
+  bootstrap/active states and JobStillRunningException refuse the delete.
+  Provider delete remains GARM's ordinary absent-runner reconcile. Idle
+  retirement is best-effort: a remote read or delete failure is a classified
+  warning and cannot block absent-runner consolidation. The original
+  consolidation lock lifetime is unchanged: runner Unlock stays deferred until
+  consolidateRunnerState returns. Candidate age and
+  min-idle are decided locally before any new API call. The `.92` patches are
+  unchanged. REST overlay fallback for acknowledged never-started jobs is not
+  in this derivative: JobAssigned does not bind GitHub job ID or run attempt.
+- Ordinary merge in this repository does not require a general CI status
+  check. `Gate` remains truthful advisory evidence.
+
+- Confirm current GitHub scale-set demand before each new JIT registration.
+  A retained local assignment requests reconciliation but cannot allocate a
+  runner against a fresh zero-demand snapshot. Reads have a five-second
+  deadline and a thirty-second backoff after zero, invalid or failed evidence;
+  a stale local zero can still recover against fresh positive demand. Existing
+  jobs, queue timestamps and runners are preserved. Fast jobs whose start and
+  completion share one message batch no longer retain running capacity, and
+  terminal records from earlier writers cannot request more runners. This is
+  GARM `v0.2.1-nddev.92`; runtime adoption is a separate deployment operation.
+
+- Recovery requires exact complete progress evidence, preserves unresolved
+  identities on checkpoint/restart failures, and never replays interrupted
+  restart authorization. Blocked/suppressed stalled work remains unhealthy;
+  FileStore admits only one unfinished attempt across concurrent decisions.
+  Scoped action ownership and admission fencing remain separate rollout work.
+
+- Publish background CI failures as unassigned repository-local issues with
+  exact run/attempt/job identity. Classify `actions/ci-feedback/feedback.py` in
+  the network-bootstrap inventory. The in-repo `workflow_run` caller includes
+  `cancelled` so already-failed jobs on a cancelled attempt still reach
+  `publish()`; a clean cancel still creates no issue. Dedup trusts the configured
+  immutable bot account ID, not arbitrary App bots, and recovers a durable marker after a
+  lost POST reply. This publisher does not invent an agent consumer or execute
+  log text.
+
+- GARM `v0.2.1-nddev.91` introduced demand reconciliation from durable admitted
+  queue ownership when the persisted `DesiredRunnerCount` was zero. The later
+  `.92` change above requires current GitHub evidence before actual creation.
+  Pre-job creates
   also bind a queued non-terminal waiter when the journal is not yet
-  assigned, and terminal lineage is omitted from retry inventory. This is
-  GARM `v0.2.1-nddev.91`.
+  assigned, and terminal lineage is omitted from retry inventory.
 
 - Pack 4 GiB workers onto the member with the least remaining memory that
   still fits, instead of spreading onto empty 16 GiB hosts. The emptiest-
@@ -403,6 +483,12 @@ All notable changes are documented here. The project follows Semantic
 Versioning.
 
 ## [Unreleased]
+
+- Permit an explicitly trusted User publisher while retaining exact ID/type
+  deduplication and the Bot default; include bounded failure reason and timestamps.
+
+- Include CodeQL in background CI feedback and limit issue-write permission
+  to the publisher job.
 
 ### Added
 

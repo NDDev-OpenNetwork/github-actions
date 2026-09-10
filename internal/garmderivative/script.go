@@ -117,6 +117,7 @@ var runtimeContractFields = []string{
 	"authoritative_repository_binding",
 	"authoritative_running_repository_binding",
 	"authoritative_idle_offline_runner_reaping",
+	"authoritative_idle_online_runner_retirement",
 	"authoritative_access_refusal_backoff_seconds",
 	"job_started_runner_identity",
 	"job_available_correlation_binding",

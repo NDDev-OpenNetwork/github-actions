@@ -1,0 +1,28 @@
+diff --git a/workers/scaleset/scaleset.go b/workers/scaleset/scaleset.go
+index e19186e..dd6a316 100644
+--- a/workers/scaleset/scaleset.go
++++ b/workers/scaleset/scaleset.go
+@@ -89,6 +89,7 @@ type Worker struct {
+ 	// the autoscaler immediately, while its periodic ticker remains the
+ 	// reconciliation safety net.
+ 	autoscaleWake chan struct{}
++	demandGate    confirmedDemandGate
+ }
+ 
+ func (w *Worker) ensureScaleSetInGitHub() error {
+@@ -888,6 +889,15 @@ func (w *Worker) handleScaleUp() {
+ 		slog.ErrorContext(w.ctx, "error getting scale set client", "error", err)
+ 		return
+ 	}
++	confirmed, err := w.demandGate.target(w.ctx, time.Now(), scaleSetCli, w.scaleSet, current, target)
++	if err != nil {
++		slog.ErrorContext(w.ctx, "current GitHub demand could not be confirmed; retaining queued jobs", "error", err)
++		return
++	}
++	if confirmed <= current {
++		return
++	}
++	target = confirmed
+ 	for i := current; i < target; i++ {
+ 		newRunnerName := strings.ToLower(fmt.Sprintf("%s-%s", w.scaleSet.GetRunnerPrefix(), util.NewID()))
+ 		jitConfig, err := scaleSetCli.GenerateJitRunnerConfig(w.ctx, newRunnerName, w.scaleSet.ScaleSetID)

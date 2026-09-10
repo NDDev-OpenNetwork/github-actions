@@ -59,7 +59,9 @@ func (store FileStore) ReadHeartbeat(_ context.Context) (Heartbeat, error) {
 func (store FileStore) Begin(_ context.Context, attempt Attempt) (bool, error) {
 	acquired := false
 	err := store.locked(func(state *fileState) error {
-		if _, exists := state.Active[attempt.ID]; exists {
+		// Distinct decisions may race between Active and Begin. Persist only one
+		// unfinished attempt, not merely one copy of each attempt ID.
+		if len(state.Active) != 0 {
 			return nil
 		}
 		for _, result := range state.Finished {
@@ -101,6 +103,15 @@ func (store FileStore) Finish(_ context.Context, result Result) error {
 		}
 		return nil
 	})
+}
+
+func (store FileStore) History(_ context.Context) ([]Result, error) {
+	var history []Result
+	err := store.locked(func(state *fileState) error {
+		history = slices.Clone(state.Finished)
+		return nil
+	})
+	return history, err
 }
 
 func (store FileStore) locked(update func(*fileState) error) error {

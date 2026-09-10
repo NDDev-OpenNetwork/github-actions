@@ -243,12 +243,22 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 		if queueTime.IsZero() || queueTime.After(now) {
 			queueTime = now
 		}
+		clearedDeliveryTombstone := false
+		if _, terminal := journal.TerminalJobs[job.ScaleSetJobID]; terminal {
+			// REST still-queued identity outranks a listener delivery tombstone.
+			delete(journal.TerminalJobs, job.ScaleSetJobID)
+			clearedDeliveryTombstone = true
+			changed = true
+		}
 		if existing, exists := journal.Intents[key]; exists {
 			if existing.ScaleSetName != scaleSet.Name || existing.Owner != entity.Owner ||
 				!queueIntentRepositoryCompatible(existing, queueIntent{Owner: entity.Owner, Repository: repository}) {
 				return fmt.Errorf("authoritative queued job changed immutable queue identity")
 			}
 			if queueIntentRepositoryBound(existing) {
+				if clearedDeliveryTombstone {
+					admitQueuedToBudget(journal, config, now)
+				}
 				return nil
 			}
 			// Direct JIT normally goes from JobAssigned straight to JobStarted,
@@ -271,6 +281,9 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			existing.UpdatedAt = now
 			journal.Intents[key] = existing
 			ensureRepositoryState(journal, config, repository)
+			if clearedDeliveryTombstone {
+				admitQueuedToBudget(journal, config, now)
+			}
 			changed = true
 			return nil
 		}
@@ -403,21 +416,22 @@ func (c *queueIntentCoordinator) HasQueuedAvailable(scaleSet params.ScaleSet, jo
 	return pending, err
 }
 
-// AdmittedCapacityTarget is the exact current runner target from durable queue
-// ownership. GitHub DesiredRunnerCount is not an upper bound: it drops to zero
-// while JobAssigned waiters still need a runner, which is the
-// assigned-without-instance stall. Cancellations leave the journal, so this
-// count already clips stale-high desired. Cap it with MaxRunners at the
-// scale-up call site via admittedScaleUpTarget.
+// AdmittedCapacityTarget counts non-terminal local resource ownership. It is
+// an admission ceiling, not proof that GitHub can dispatch the retained jobs.
+// The scale-up path confirms current GitHub demand before creating a runner;
+// a stale-low persisted message count alone must not prevent that read.
 func (c *queueIntentCoordinator) AdmittedCapacityTarget(scaleSet params.ScaleSet, entity params.ForgeEntity) (int, error) {
 	config, err := c.loadConfig()
 	if err != nil {
 		return 0, err
 	}
 	target := 0
-	err = c.update(config, func(journal *queueIntentJournal, _ time.Time) error {
+	err = c.update(config, func(journal *queueIntentJournal, now time.Time) error {
 		for _, intent := range journal.Intents {
 			if intent.ScaleSetID != int64(scaleSet.ScaleSetID) || intent.ScaleSetName != scaleSet.Name || intent.Owner != entity.Owner {
+				continue
+			}
+			if expiry, terminal := journal.TerminalJobs[intent.JobID]; terminal && expiry.After(now) {
 				continue
 			}
 			switch intent.State {
@@ -442,9 +456,9 @@ func admittedScaleUpTarget(intentTarget, maxRunners int) int {
 	return intentTarget
 }
 
-// shouldScaleUp is true when GitHub desired or durable admitted ownership
-// still needs a runner. Admitted is the floor that GitHub TotalAssignedJobs
-// does not provide after the runner for a sibling job is deleted.
+// shouldScaleUp requests reconciliation when either local observation suggests
+// missing capacity. The create path still requires both local admission and a
+// fresh GitHub demand snapshot; neither stale counter authorizes a new runner.
 func shouldScaleUp(current, githubDesired, admitted int) bool {
 	return current < admitted || current < githubDesired
 }
@@ -619,18 +633,27 @@ func (c *queueIntentCoordinator) ObserveLifecycle(scaleSet params.ScaleSet, enti
 		suppressedTerminalAssignments = suppressedTerminalAssignments[:0]
 		completedKeys := make(map[string]struct{}, len(completed))
 		startedKeys := make(map[string]struct{}, len(started))
+		for _, job := range started {
+			startedKeys[queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)] = struct{}{}
+		}
 		for _, job := range completed {
 			if !validQueueText(job.JobID) {
 				return fmt.Errorf("completed job has invalid job ID")
 			}
 			key := queueIntentKey(int64(scaleSet.ScaleSetID), job.JobID)
 			intent, exists := journal.Intents[key]
-			// GitHub may retire a capacity waiter before it ever emits
-			// JobAvailable, then immediately assign the same workflow job under a
-			// new UUID. Retain that unstarted intent as a terminal lineage marker;
-			// it is excluded from admission below and lets the replacement inherit
-			// the original queue time instead of starving at the tail forever.
-			if exists && intent.RunnerRequestID == 0 && intent.RunnerName == "" && intent.State != queueStateRunning {
+			_, startedInBatch := startedKeys[key]
+			// Listener JobCompleted with no runner ends this GUID's scale-set
+			// delivery reservation. It is not a REST workflow-job outcome: the
+			// GitHub job may remain queued under the same external_id. Keep the
+			// GUID, release the assigned slot, and tombstone only listener
+			// redelivery of this GUID. REST EnsureAuthoritative of a still-queued
+			// exact identity clears that tombstone. A later different GUID with
+			// the same run/name is not this job and must not inherit its clock.
+			// A fast job may start and finish in this one batch. Completion
+			// must win; keeping its pre-start lineage would let the started
+			// loop resurrect a terminal running intent and request spare VMs.
+			if exists && !startedInBatch && intent.RunnerRequestID == 0 && intent.RunnerName == "" && intent.State != queueStateRunning {
 				intent.State = queueStateQueued
 				intent.StateEnteredAt = now
 				intent.UpdatedAt = now
@@ -841,88 +864,30 @@ func bindStartedIdentity(journal *queueIntentJournal, config queueAdmissionConfi
 }
 
 func transferTerminalWaiterLineage(
-	journal *queueIntentJournal,
-	scaleSet params.ScaleSet,
-	entity params.ForgeEntity,
-	replacement *queueIntent,
-	now time.Time,
+	_ *queueIntentJournal,
+	_ params.ScaleSet,
+	_ params.ForgeEntity,
+	_ *queueIntent,
+	_ time.Time,
 ) (string, bool, error) {
-	if replacement == nil || replacement.WorkflowRunID <= 0 || !validQueueText(replacement.JobDisplayName) {
-		return "", false, nil
-	}
-	candidates := make([]queueIntent, 0, 1)
-	for _, candidate := range journal.Intents {
-		terminalExpiry, terminal := journal.TerminalJobs[candidate.JobID]
-		if !terminal || !terminalExpiry.After(now) || candidate.JobID == replacement.JobID ||
-			candidate.State != queueStateQueued || candidate.RunnerRequestID != 0 || candidate.RunnerName != "" ||
-			candidate.ScaleSetID != int64(scaleSet.ScaleSetID) || candidate.ScaleSetName != scaleSet.Name ||
-			candidate.Owner != entity.Owner || candidate.WorkflowRunID != replacement.WorkflowRunID ||
-			candidate.JobDisplayName != replacement.JobDisplayName {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) > 1 {
-		return "", false, fmt.Errorf("redelivered waiter identity is ambiguous for workflow run %d job %q", replacement.WorkflowRunID, replacement.JobDisplayName)
-	}
-	if len(candidates) == 0 {
-		return "", false, nil
-	}
-	lineage := candidates[0]
-	delete(journal.Intents, lineage.Key)
-	replacement.QueueTime = lineage.QueueTime
-	replacement.FirstQueuedAt = lineage.FirstQueuedAt
-	replacement.Priority = lineage.Priority
-	replacement.Repository = lineage.Repository
-	replacement.State = queueStateQueued
-	replacement.StateEnteredAt = now
-	replacement.UpdatedAt = now
-	return lineage.JobID, true, nil
+	// Listener JobCompleted ends a delivery reservation. It does not prove a
+	// REST workflow-job terminal outcome, and a later JobAssigned with the
+	// same run/name is a different GUID. Do not migrate identity or queue age.
+	return "", false, nil
 }
 
 func transferAssignedReservation(
-	journal *queueIntentJournal,
-	config queueAdmissionConfig,
-	scaleSet params.ScaleSet,
-	entity params.ForgeEntity,
-	started params.ScaleSetJobMessage,
-	now time.Time,
+	_ *queueIntentJournal,
+	_ queueAdmissionConfig,
+	_ params.ScaleSet,
+	_ params.ForgeEntity,
+	_ params.ScaleSetJobMessage,
+	_ time.Time,
 ) (string, bool, error) {
-	candidates := make([]queueIntent, 0)
-	for _, candidate := range journal.Intents {
-		if candidate.State != queueStateAssigned || candidate.ScaleSetID != int64(scaleSet.ScaleSetID) ||
-			candidate.ScaleSetName != scaleSet.Name || candidate.Owner != entity.Owner || candidate.JobID == started.JobID {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) == 0 {
-		return "", false, nil
-	}
-	sort.Slice(candidates, func(left, right int) bool {
-		if !candidates[left].UpdatedAt.Equal(candidates[right].UpdatedAt) {
-			return candidates[left].UpdatedAt.Before(candidates[right].UpdatedAt)
-		}
-		return candidates[left].Key < candidates[right].Key
-	})
-	replacement, err := queueIntentFromLifecycle(
-		config, scaleSet, entity, started, now, time.Duration(config.ExecutionTTLSeconds)*time.Second,
-	)
-	if err != nil {
-		return "", false, err
-	}
-	reservation := candidates[0]
-	delete(journal.Intents, reservation.Key)
-	replacement.QueueTime = reservation.QueueTime
-	replacement.FirstQueuedAt = reservation.FirstQueuedAt
-	replacement.Priority = reservation.Priority
-	replacement.State = queueStateRunning
-	replacement.StateEnteredAt = now
-	replacement.UpdatedAt = now
-	replacement.ExpiresAt = expiryForState(config, queueStateRunning, now)
-	journal.Intents[replacement.Key] = replacement
-	ensureRepositoryState(journal, config, replacement.Repository)
-	return reservation.JobID, true, nil
+	// JobStarted of GUID B is not proof that assigned waiter A was a
+	// mis-keyed reservation for B. Deleting or renaming A drops its FIFO
+	// clock and hides a still-waiting job. Rehydrate B on its own key.
+	return "", false, nil
 }
 
 func admitQueuedToBudget(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
@@ -1052,6 +1017,13 @@ func (c *queueIntentCoordinator) update(config queueAdmissionConfig, mutate func
 	if err := mutate(&journal, now); err != nil {
 		return err
 	}
+	// JobAvailable is the dispatch token. A request-less JobAssigned may occupy
+	// the slot to bootstrap an empty scale set, but admit above can re-grant that
+	// occupancy after TTL before this transaction records a newer available job.
+	// Yield only the occupancy a currently admissible dispatchable job can use,
+	// so a quota-blocked or over-size available job cannot idle a useful slot.
+	yieldRequestlessOccupancy(&journal, config, now)
+	admitQueuedToBudget(&journal, config, now)
 	if err := journal.Validate(); err != nil {
 		return err
 	}
@@ -1297,22 +1269,140 @@ func baseQueuePriority(config queueAdmissionConfig, scaleSetName string, job par
 	return 1
 }
 
-func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
-	candidates := make([]queueIntent, 0)
+func cloneQueueIntentJournal(journal *queueIntentJournal) queueIntentJournal {
+	clone := queueIntentJournal{
+		SchemaVersion: journal.SchemaVersion,
+		Generation:    journal.Generation,
+		UpdatedAt:     journal.UpdatedAt,
+		Intents:       make(map[string]queueIntent, len(journal.Intents)),
+		Repositories:  make(map[string]queueRepositoryState, len(journal.Repositories)),
+		TerminalJobs:  make(map[string]time.Time, len(journal.TerminalJobs)),
+	}
+	for key, intent := range journal.Intents {
+		clone.Intents[key] = intent
+	}
+	for key, repository := range journal.Repositories {
+		clone.Repositories[key] = repository
+	}
+	for key, expiry := range journal.TerminalJobs {
+		clone.TerminalJobs[key] = expiry
+	}
+	return clone
+}
+
+func queueIntentAdmissionBlocked(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, backgroundInFlight int, now time.Time, intent queueIntent) bool {
+	limit := repositoryPolicy(config, intent.Repository).MaxInFlight
+	if queueHasCompetingRepository(journal, intent.Repository) {
+		limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
+	}
+	terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
+	return intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
+		inFlight[intent.Repository] >= limit ||
+		(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight)
+}
+
+func dispatchableAdmissionCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
 	backgroundInFlight := queueBackgroundInFlight(journal)
+	candidates := make([]queueIntent, 0)
 	for _, intent := range journal.Intents {
-		limit := repositoryPolicy(config, intent.Repository).MaxInFlight
-		if queueHasCompetingRepository(journal, intent.Repository) {
-			limit = min(limit, percentageCeiling(config.MaxInFlight, config.MaxRepositorySharePercent))
-		}
-		terminalExpiry, terminal := journal.TerminalJobs[intent.JobID]
-		if intent.State != queueStateQueued || (terminal && terminalExpiry.After(now)) ||
-			inFlight[intent.Repository] >= limit ||
-			(intent.Priority == 2 && backgroundInFlight >= config.MaxBackgroundInFlight) {
+		if intent.RunnerRequestID == 0 || queueIntentAdmissionBlocked(journal, config, inFlight, backgroundInFlight, now, intent) {
 			continue
 		}
 		candidates = append(candidates, intent)
 	}
+	sortQueueAdmissionCandidates(journal, config, now, candidates)
+	return candidates
+}
+
+func dispatchableQueuedWouldFit(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) bool {
+	_, exists := resourceFitCandidate(journal, config, dispatchableAdmissionCandidates(journal, config, inFlight, now), now)
+	return exists
+}
+
+func yieldableRequestlessKeys(journal *queueIntentJournal) []string {
+	keys := make([]string, 0)
+	for key, intent := range journal.Intents {
+		if intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		leftIntent := journal.Intents[keys[left]]
+		rightIntent := journal.Intents[keys[right]]
+		if leftWait, rightWait := queueWaitSince(leftIntent), queueWaitSince(rightIntent); !leftWait.Equal(rightWait) {
+			return leftWait.Before(rightWait)
+		}
+		return keys[left] < keys[right]
+	})
+	return keys
+}
+
+func demoteRequestlessAssigned(journal *queueIntentJournal, key string, config queueAdmissionConfig, now time.Time) {
+	intent, exists := journal.Intents[key]
+	if !exists || intent.State != queueStateAssigned || intent.RunnerRequestID != 0 || intent.RunnerName != "" {
+		return
+	}
+	intent.State = queueStateQueued
+	intent.StateEnteredAt = now
+	intent.UpdatedAt = now
+	if intent.FirstQueuedAt.IsZero() {
+		intent.FirstQueuedAt = intent.QueueTime
+		if intent.FirstQueuedAt.IsZero() {
+			intent.FirstQueuedAt = now
+		}
+	}
+	next := expiryForState(config, queueStateQueued, now)
+	horizon := intent.FirstQueuedAt.Add(time.Duration(config.ExecutionTTLSeconds) * time.Second)
+	if next.After(horizon) {
+		next = horizon
+	}
+	intent.ExpiresAt = next
+	journal.Intents[key] = intent
+}
+
+func yieldRequestlessOccupancy(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time) {
+	for {
+		_, repositoryInFlight := queueInFlight(journal)
+		if dispatchableQueuedWouldFit(journal, config, repositoryInFlight, now) {
+			return
+		}
+		yielded := false
+		for _, key := range yieldableRequestlessKeys(journal) {
+			clone := cloneQueueIntentJournal(journal)
+			demoteRequestlessAssigned(&clone, key, config, now)
+			_, cloneInFlight := queueInFlight(&clone)
+			if !dispatchableQueuedWouldFit(&clone, config, cloneInFlight, now) {
+				continue
+			}
+			demoteRequestlessAssigned(journal, key, config, now)
+			yielded = true
+			break
+		}
+		if !yielded {
+			return
+		}
+	}
+}
+
+func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionConfig, inFlight map[string]int, now time.Time) []queueIntent {
+	blockRequestless := dispatchableQueuedWouldFit(journal, config, inFlight, now)
+	backgroundInFlight := queueBackgroundInFlight(journal)
+	candidates := make([]queueIntent, 0)
+	for _, intent := range journal.Intents {
+		if queueIntentAdmissionBlocked(journal, config, inFlight, backgroundInFlight, now, intent) {
+			continue
+		}
+		if blockRequestless && intent.RunnerRequestID == 0 {
+			continue
+		}
+		candidates = append(candidates, intent)
+	}
+	sortQueueAdmissionCandidates(journal, config, now, candidates)
+	return candidates
+}
+
+func sortQueueAdmissionCandidates(journal *queueIntentJournal, config queueAdmissionConfig, now time.Time, candidates []queueIntent) {
 	sort.Slice(candidates, func(left, right int) bool {
 		leftPriority := effectiveQueuePriority(candidates[left], config, now)
 		rightPriority := effectiveQueuePriority(candidates[right], config, now)
@@ -1329,7 +1419,6 @@ func eligibleQueueCandidates(journal *queueIntentJournal, config queueAdmissionC
 		}
 		return candidates[left].Key < candidates[right].Key
 	})
-	return candidates
 }
 
 func percentageCeiling(total, percent int) int {

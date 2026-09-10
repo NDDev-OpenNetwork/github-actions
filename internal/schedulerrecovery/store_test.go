@@ -4,11 +4,53 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestFileStoreSerializesDifferentConcurrentAttempts(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	store := FileStore{Path: filepath.Join(directory, "state.json"), LockPath: filepath.Join(directory, "state.lock")}
+	at := time.Now().UTC()
+	attempts := []Attempt{NewAttempt(at, []string{"instance-a"}), NewAttempt(at, []string{"instance-b"})}
+	acquired := make([]bool, len(attempts))
+	errs := make([]error, len(attempts))
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	for index := range attempts {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			independent := FileStore{Path: store.Path, LockPath: store.LockPath}
+			acquired[index], errs[index] = independent.Begin(context.Background(), attempts[index])
+		}()
+	}
+	close(start)
+	workers.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+	require.NotEqual(t, acquired[0], acquired[1], "exactly one different attempt may be active")
+	active, err := store.Active(context.Background())
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	require.NoError(t, store.Finish(context.Background(), Result{AttemptID: active[0].ID, FinishedAt: at, Remaining: active[0].Stuck}))
+	history, err := store.History(context.Background())
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, active[0].Stuck, history[0].Remaining)
+	loser := 0
+	if acquired[0] {
+		loser = 1
+	}
+	ok, err := store.Begin(context.Background(), attempts[loser])
+	require.NoError(t, err)
+	require.True(t, ok, "finishing the active attempt must release admission")
+}
 
 func TestFileStorePersistsAttemptAndSuppressesReplay(t *testing.T) {
 	t.Parallel()
