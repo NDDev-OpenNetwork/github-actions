@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Provider `v0.1.5-nddev.130` is `.129` rebuilt on the raised AWS SDK
+  minor and patch releases. No provider behaviour changes; the version moves
+  because the binary does, and the release manifest records which source
+  commit and which bytes. Root `go.mod` changes cannot ship under the
+  previous derivative version - that is how two hosts once ran different
+  binaries under one name.
+
 - Observer schema 17 labels the oldest queued waiter per scale set and the
   oldest assigned waiter with journal `job_id`.
   `lifecycle_queued_delivery_stall`, `queue_wait_slow_burn` and
