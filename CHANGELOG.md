@@ -491,6 +491,11 @@ Versioning.
 
 ## [Unreleased]
 
+- Reproduce Incus provider `v0.1.5-nddev.131` from the reviewed root and
+  nested Go dependency update. The new manifest binds the exact source commit
+  and two byte-identical builds; interface, queue schema and GARM identity stay
+  unchanged.
+
 - Permit an explicitly trusted User publisher while retaining exact ID/type
   deduplication and the Bot default; include bounded failure reason and timestamps.
 
