@@ -2,7 +2,7 @@
 // go.mod/go.sum stay identical to the pinned provider derivative.
 module github.com/NDDev-OpenNetwork/github-actions/internal/incusplacement/starlarkexec
 
-go 1.26.7
+go 1.27.1
 
 require (
 	github.com/NDDev-OpenNetwork/github-actions v0.0.0

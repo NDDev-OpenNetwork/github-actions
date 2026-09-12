@@ -146,21 +146,21 @@ func TestEvaluateUsesOneLedgerAcrossCapabilityNames(t *testing.T) {
 
 func validInputs() (HostSnapshot, ReservePolicy, Request) {
 	return HostSnapshot{
-			Healthy:            true,
-			TotalCPUUnits:      32,
-			TotalMemoryMiB:     128 * 1024,
-			AvailableMemoryMiB: 128 * 1024,
-			FreeDiskPercent:    50,
-		}, ReservePolicy{
-			MinimumCPUUnits:        4,
-			MinimumMemoryMiB:       16 * 1024,
-			MinimumPercent:         10,
-			MinimumFreeDiskPercent: 20,
-		}, Request{
-			PoolName:  "nddev-linux-standard",
-			VCPU:      4,
-			MemoryMiB: 12 * 1024,
-		}
+		Healthy:            true,
+		TotalCPUUnits:      32,
+		TotalMemoryMiB:     128 * 1024,
+		AvailableMemoryMiB: 128 * 1024,
+		FreeDiskPercent:    50,
+	}, ReservePolicy{
+		MinimumCPUUnits:        4,
+		MinimumMemoryMiB:       16 * 1024,
+		MinimumPercent:         10,
+		MinimumFreeDiskPercent: 20,
+	}, Request{
+		PoolName:  "nddev-linux-standard",
+		VCPU:      4,
+		MemoryMiB: 12 * 1024,
+	}
 }
 
 func TestEvaluatePreservesLiveAvailableMemoryReserve(t *testing.T) {

@@ -378,18 +378,42 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			}
 			lease, owned := state.Leases[instance.Name]
 			if !owned || (lease.State != providerjournal.StateAdmitted && lease.State != providerjournal.StateCreated && lease.State != providerjournal.StateDeleting) {
-				return nil, fmt.Errorf(
-					"incomplete instance metadata: instance %q has no flavor and no active provider lease",
-					instance.Name,
-				)
+				// The list and journal are separate observations. A create/delete
+				// may finish between them, leaving an old metadata-free list entry
+				// after its lease is gone. Re-read that exact instance once before
+				// declaring the whole inventory unaccountable. Only confirmed
+				// absence or a stopped instance can be omitted; refreshed live
+				// metadata still passes every ownership and isolation check below.
+				refreshed, _, refreshErr := cli.GetInstanceFull(instance.Name)
+				if isNotFoundError(refreshErr) {
+					continue
+				}
+				if refreshErr != nil {
+					return nil, fmt.Errorf("refresh incomplete instance %q: %w", instance.Name, refreshErr)
+				}
+				if refreshed == nil || refreshed.Name != instance.Name {
+					return nil, fmt.Errorf("refresh incomplete instance %q returned an invalid identity", instance.Name)
+				}
+				instance = refreshed.Instance
+				flavor = instance.ExpandedConfig[flavorKey]
+				if flavor == "" {
+					if instance.Status == "Stopped" {
+						continue
+					}
+					return nil, fmt.Errorf(
+						"incomplete instance metadata: instance %q has no flavor and no active provider lease after refresh",
+						instance.Name,
+					)
+				}
+			} else {
+				allocations = append(allocations, provideradmission.Allocation{
+					InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
+					PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
+					MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
+					State: lease.State, JobName: instance.Name, Location: instance.Location,
+				})
+				continue
 			}
-			allocations = append(allocations, provideradmission.Allocation{
-				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
-				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
-				MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
-				State: lease.State, JobName: instance.Name, Location: instance.Location,
-			})
-			continue
 		}
 		pool, exists := n.platform.Pool(flavor)
 		if !exists {

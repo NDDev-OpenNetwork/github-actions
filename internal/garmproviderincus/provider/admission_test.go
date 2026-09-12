@@ -159,10 +159,57 @@ func TestObservedAllocationsClassifyUnjournaledIncompleteMetadata(t *testing.T) 
 	instance := ownedInstance("runner-incomplete")
 	delete(instance.ExpandedConfig, flavorKey)
 	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	cli.On("GetInstanceFull", instance.Name).Return(instance, "", nil).Once()
 
 	_, err = admission.observedAllocations(context.Background(), cli)
 	require.ErrorContains(t, err, "incomplete instance metadata")
 	require.ErrorContains(t, err, "no flavor and no active provider lease")
+}
+
+func TestObservedAllocationsRefreshUnjournaledIncompleteSnapshot(t *testing.T) {
+	t.Parallel()
+	foreign := ownedInstance("runner-raced")
+	foreign.ExpandedConfig[controllerIDKeyName] = "foreign-controller"
+	wrongType := ownedInstance("runner-raced")
+	wrongType.Type = string(api.InstanceTypeContainer)
+	for _, testCase := range []struct {
+		name      string
+		instance  *api.InstanceFull
+		err       error
+		wantCount int
+		wantError string
+	}{
+		{name: "deleted after listing", err: os.ErrNotExist},
+		{name: "metadata completed after listing", instance: ownedInstance("runner-raced"), wantCount: 1},
+		{name: "stopped after listing", instance: &api.InstanceFull{Instance: api.Instance{Name: "runner-raced", Status: "Stopped"}}},
+		{name: "refresh unavailable", err: os.ErrPermission, wantError: "refresh incomplete instance"},
+		{name: "foreign refreshed owner", instance: foreign, wantError: controllerIDKeyName},
+		{name: "wrong refreshed isolation type", instance: wrongType, wantError: "has type"},
+		{name: "missing result", wantError: "invalid identity"},
+		{name: "different instance", instance: ownedInstance("another-runner"), wantError: "invalid identity"},
+		{name: "still incomplete", instance: &api.InstanceFull{Instance: api.Instance{Name: "runner-raced"}}, wantError: "after refresh"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			admission := testNDDevAdmission()
+			directory := t.TempDir()
+			admission.controller.Store = providerjournal.Store{
+				Path: filepath.Join(directory, "journal.json"), LockPath: filepath.Join(directory, "journal.lock"),
+			}
+			_, err := admission.controller.Store.Update(context.Background(), func(*providerjournal.Journal) error { return nil })
+			require.NoError(t, err)
+			cli := new(MockIncusServer)
+			cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{{Instance: api.Instance{Name: "runner-raced"}}}, nil).Once()
+			cli.On("GetInstanceFull", "runner-raced").Return(testCase.instance, "", testCase.err).Once()
+			allocations, err := admission.observedAllocations(context.Background(), cli)
+			if testCase.wantError != "" {
+				require.ErrorContains(t, err, testCase.wantError)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, allocations, testCase.wantCount)
+			}
+			cli.AssertExpectations(t)
+		})
+	}
 }
 
 func TestReconcileRetainsDeletingLeaseUntilClusterTombstoneDisappears(t *testing.T) {
