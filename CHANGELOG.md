@@ -491,6 +491,9 @@ Versioning.
 
 ## [Unreleased]
 
+- Converge reviewed benchmark dependency updates on Bun 1.3.14, explicitly load
+  runtime/test ambient types for TypeScript 7, and consume the complete feedback publisher.
+
 - Preserve every early CI failure with exact per-job issue identities, legacy
   snapshot adoption, closed-issue deduplication and bounded independent delivery
   budgets supplied by durable polling executors.
