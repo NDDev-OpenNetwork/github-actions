@@ -33,3 +33,7 @@
 
 # Stamped controller binaries from .
 dist/
+
+# Feedback and contract tests compile local Python imports.
+__pycache__/
+.pytest_cache/
