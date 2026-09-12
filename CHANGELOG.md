@@ -491,6 +491,10 @@ Versioning.
 
 ## [Unreleased]
 
+- Preserve every early CI failure with exact per-job issue identities, legacy
+  snapshot adoption, closed-issue deduplication and bounded independent delivery
+  budgets supplied by durable polling executors.
+
 - Reproduce Incus provider `v0.1.5-nddev.131` from the reviewed root and
   nested Go dependency update. The new manifest binds the exact source commit
   and two byte-identical builds; interface, queue schema and GARM identity stay
