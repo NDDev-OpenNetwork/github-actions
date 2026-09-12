@@ -57,6 +57,7 @@ class FeedbackTests(unittest.TestCase):
         api = self.active_api()
         result = self.early(api)
         self.assertEqual(result, {"status": "published", "issue_number": 1,
+                                 "subjects": [{"job_id": 101, "status": "published", "issue_number": 1}],
                                  "attempt_complete": False, "run_status": "in_progress",
                                  "run_conclusion": None})
         body = api.posts[0]["body"]
@@ -123,6 +124,69 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(final["run_conclusion"], "cancelled")
         self.assertEqual(len(api.posts), 1)
         self.assertEqual(api.issues[0]["body"], original_body)
+
+    def test_later_failed_jobs_are_published_without_reopening_prior_issue(self):
+        api = self.active_api()
+        self.early(api)
+        original = api.posts[0]["body"]
+        api.issues = [{"number": 7, "state": "closed",
+                       "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"},
+                       "body": original}]
+        api.jobs[1].update(status="completed", conclusion="timed_out")
+        api.run.update(status="completed", conclusion="failure")
+        result = self.early(api)
+        self.assertEqual(len(api.posts), 2)
+        second = json.loads(api.posts[1]["body"].split("```json\n")[1].split("\n```")[0])
+        self.assertEqual([job["id"] for job in second["failed_jobs"]], [102])
+        self.assertEqual(api.issues[0]["body"], original)
+        self.assertTrue(result["attempt_complete"])
+        self.assertEqual({subject["job_id"] for subject in result["subjects"]}, {101, 102})
+
+    def test_legacy_snapshot_covers_only_exact_recorded_jobs(self):
+        api = API()
+        self.publish(api)
+        original = api.posts[0]["body"]
+        for body, expected_new in ((original, 1), (original.replace('"head_sha": "' + "a" * 40,
+                                   '"head_sha": "' + "b" * 40), 2),
+                                   (original.split("```json")[0] + "```json\n{}\n```", 2)):
+            with self.subTest(body=body[:40]):
+                api = self.active_api()
+                api.jobs[1].update(status="completed", conclusion="failure")
+                api.issues = [{"number": 8, "state": "closed", "body": body,
+                               "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"}}]
+                self.early(api)
+                self.assertEqual(len(api.posts), expected_new)
+
+    def test_ambiguous_job_post_recovers_only_its_exact_subject(self):
+        api = self.active_api()
+        real = api.request
+        writes = []
+        def request(path, data=None):
+            if data is not None:
+                writes.append(data)
+                api.issues.append({"number": 12, "body": data["body"],
+                                   "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"}})
+                raise TimeoutError("POST reply lost")
+            return real(path, data)
+        api.request = request
+        result = self.early(api)
+        self.assertEqual(result["subjects"], [{"job_id": 101, "status": "already-published", "issue_number": 12}])
+        self.assertEqual(len(writes), 1)
+
+    def test_exhausted_job_is_reconciled_before_deferral_and_other_jobs_progress(self):
+        api = self.active_api()
+        api.jobs[1].update(status="completed", conclusion="failure")
+        result = feedback.publish(api, REPO, 10, 100, 2, allow_in_progress=True, exhausted_job_ids=[101])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["deferred_job_ids"], [101])
+        self.assertEqual([subject["job_id"] for subject in result["subjects"]], [102])
+        self.assertEqual(len(api.posts), 1)
+        api.issues = [{"number": 9, "body": "<!-- ci-feedback-job:v1:10:100:2:101 -->\nold",
+                       "user": {"id": feedback.GITHUB_ACTIONS_BOT_ID, "type": "Bot"}}]
+        api.jobs = api.jobs[:1]
+        result = feedback.publish(api, REPO, 10, 100, 2, allow_in_progress=True, exhausted_job_ids=[101])
+        self.assertEqual(result["status"], "already-published")
+        self.assertEqual(len(api.posts), 1)
 
     def test_terminal_observation_metadata_is_explicit_in_early_mode(self):
         api = API()

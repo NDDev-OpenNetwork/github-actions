@@ -45,10 +45,11 @@ is never treated as a failure or success by itself.
 
 Early evidence records `run_status`, `attempt_complete: false` and a null run
 conclusion. It is a dated failure snapshot; its observed job count and failure
-list do not claim to include jobs that finish later. The attempt marker is the
-same as for terminal delivery, so completion or cancellation cannot create a
-second issue for that attempt. The publisher preserves the original issue and
-any human edits; it does not rewrite that snapshot to claim a final outcome.
+list do not claim to include jobs that finish later. Each failed job has its own
+`ci-feedback-job:v1` marker, bound to repository/run/attempt/job. Later failures
+create their own issues while prior issues, including closed ones and human
+edits, remain unchanged. Legacy attempt snapshots cover only explicitly listed
+jobs with matching repository, attempt and source; omitted jobs are not covered.
 
 In early mode every Python return includes `attempt_complete`, `run_status`
 and `run_conclusion`. An unfinished attempt with no failed jobs returns
@@ -58,6 +59,14 @@ record terminal receipts only after an explicit `attempt_complete: true`.
 The final observed status belongs in that receipt. The exact-attempt link in
 the issue provides subsequent authoritative job outcomes. A fresh rerun has
 its own attempt key and is never substituted for the original.
+
+Published results include a `subjects` list with job and issue identities.
+Durable polling executors retain these references across observations and final
+receipts. They may pass `exhausted_job_ids` from their own bounded retry journal;
+the publisher still checks for a successful prior delivery before deferring a
+subject. A `partial` result lists `deferred_job_ids` and is never a terminal
+delivery receipt, even if the workflow itself completed. Exhausted subjects do
+not prevent reporting other jobs. The completed-only interface remains unchanged.
 
 This option does not itself schedule polling or add an event subscription.
 Completed `workflow_run` delivery stays supported; an independently configured
@@ -69,7 +78,8 @@ Serialize reporters for the same repository/run/attempt with cancellation off.
 Direct issue listing avoids search-index lag; exact-publisher markers deduplicate
 re-delivery, including an already closed issue. Collection is bounded to 10 pages
 of 100 jobs/issues and 4 MiB per response. Exceeding the inventory bound fails
-explicitly instead of assuming no prior issue. Mutation is a single issue POST;
+explicitly instead of assuming no prior issue. Mutation is one issue POST per
+new subject (one attempt in completed-only mode, one job in early mode);
 there are no blind write retries. A rerun rechecks the durable marker first.
 
 API requests remain repository-local on api.github.com. Redirects are refused so
@@ -128,7 +138,8 @@ delivery including App bots, lost POST replies, spoofed markers, incorrect
 identities, partial pagination, bounded large failure evidence and token routing.
 Early-mode cases cover completed failed jobs beside unfinished work, explicit
 opt-in, no-failure pending observations, invalid run/job states, foreign attempts
-and source commits, and one durable issue across completion or cancellation.
+and source commits, later job failures, legacy snapshots, closed-issue preservation,
+and exact-subject recovery across completion or cancellation.
 No live issue delivery or agent acknowledgment is implied by these tests.
 
 References: GitHub Actions workflow_run security, GITHUB_TOKEN event recursion,
