@@ -5,9 +5,12 @@ contract for an Incus provider identity change. Provider binaries and the fleet
 observer both resolve provider identity at process startup, so updating files
 and restarting only GARM leaves inventory observation fail-closed and stale.
 
-Apply the declared phases in order. Deploy and read back all platform policies
-before activating the provider binary and config. Restart the manager, verify
-queue identity preservation, then restart the observer. Acceptance requires a
+Apply contract v2's declared phases in order: verify source/config, swap the
+services identity, restart the observer, swap member identities, and verify
+bounded convergence. A provider-only update preserves the manager process;
+its PID is checked before and after the wave. Changed broker and pressure
+observer binaries restart conditionally. A manager binary/config change is a
+separate rollout. Acceptance requires a
 fresh healthy sample, zero collection errors, inventory parity with the
 provider, and a successful natural job bound to the new provider identity.
 
@@ -23,7 +26,7 @@ learned by omission on a live wave:
    (mode 0640 root:garm is part of the contract);
 3. `previous_provider_identities` — one release of rolling compatibility, the
    only thing letting in-flight work from the outgoing release finish;
-4. the `platform.yaml` provider pin on all five hosts — the observer and
+4. the `platform.yaml` provider pin on every selected services/compute host — the observer and
    controller resolve identity at startup, and a missed pin reads as
    `platform_unhealthy`;
 5. **stale-stamped warm instances**. Warm must be exact-current. Since
@@ -51,5 +54,15 @@ binary reproducibly from the manifest’s own `source_commit` and refuses a
 sha mismatch, deploys services then members in the pin order above, and
 verifies live identity, observer health, zero failed units and warm
 convergence onto the new release. Edit and review the estate toml and the
-five platform pins first — the script deploys reviewed state, it does not
+selected platform pins first — the script deploys reviewed state, it does not
 invent it.
+
+## Incomplete inventory during a lease transition
+
+The Incus list and provider journal are separate observations. A completed
+transition can leave an old metadata-free list entry after its lease disappears.
+The provider repeats the complete inventory observation once for this exact
+condition, retaining replacement workers in the same accounting pass. Active
+leases still account for pending transitions. Persistent ambiguity, unknown
+ownership, image drift and isolation violations still fail closed; the refresh
+itself changes no worker or journal state.

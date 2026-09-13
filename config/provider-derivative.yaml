@@ -37,8 +37,8 @@ runtime:
   queue_intent_schema_version: 6
 
 build:
-  source_commit: e1493e0b960cbeb561faf1df356767b2933e71ec
-  binary_sha256: 03e7d481fe8969ae55a5a31ea6bcb115e27bc3864d6b64212e0a8b45377732b9
+  source_commit: 7a82d685b1b658f6aa66a8967ae91ed2b92df71b
+  binary_sha256: 5769660e5d6f2f2efc0925fe55ed5987110f46e60a8a9e58aac061c12189961c
   go_version: go1.27.1
   cgo_enabled: false
   target_os: linux

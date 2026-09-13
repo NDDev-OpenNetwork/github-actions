@@ -8,10 +8,12 @@ import (
 )
 
 type Contract struct {
-	SchemaVersion int      `json:"schema_version"`
-	OrderedPhases []string `json:"ordered_phases"`
-	RestartUnits  []string `json:"restart_units"`
-	Convergence   struct {
+	SchemaVersion           int      `json:"schema_version"`
+	OrderedPhases           []string `json:"ordered_phases"`
+	RestartUnits            []string `json:"restart_units"`
+	ConditionalRestartUnits []string `json:"conditional_restart_units"`
+	PreserveManager         bool     `json:"preserve_manager_for_provider_only_update"`
+	Convergence             struct {
 		HealthRequired                    bool `json:"health_required"`
 		FreshSampleRequired               bool `json:"fresh_sample_required"`
 		CollectionErrorsMustEqual         int  `json:"collection_errors_must_equal"`
@@ -38,20 +40,21 @@ func Load(path string) (Contract, error) {
 
 func (contract Contract) Validate() error {
 	wantPhases := []string{
-		"platform-policies",
-		"provider-binary-and-config",
-		"manager-restart",
+		"source-and-config-verification",
+		"services-identity-swap",
 		"observer-restart",
+		"member-identity-swap",
 		"bounded-convergence",
 	}
-	if contract.SchemaVersion != 1 {
+	if contract.SchemaVersion != 2 {
 		return fmt.Errorf("unsupported rollout contract schema %d", contract.SchemaVersion)
 	}
 	if !slices.Equal(contract.OrderedPhases, wantPhases) {
 		return fmt.Errorf("provider rollout phases must be %v", wantPhases)
 	}
-	if !slices.Equal(contract.RestartUnits, []string{"garm.service", "gha-fleet-observer.service"}) {
-		return fmt.Errorf("provider rollout must restart manager then observer")
+	if !contract.PreserveManager || !slices.Equal(contract.RestartUnits, []string{"gha-fleet-observer.service"}) ||
+		!slices.Equal(contract.ConditionalRestartUnits, []string{"gha-cache-broker.service", "gha-pressure-observer.service"}) {
+		return fmt.Errorf("provider-only rollout must preserve the manager, restart the observer, and restart changed broker/pressure binaries")
 	}
 	convergence := contract.Convergence
 	if !convergence.HealthRequired || !convergence.FreshSampleRequired ||

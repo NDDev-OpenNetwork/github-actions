@@ -59,7 +59,7 @@ git:
 
 ci:
   profile: "go"
-  go_version: "1.26.6"
+  go_version: "1.27.1"
   build_command: "go build -trimpath ./..."
   test_command: "go test ./..."
   timeout_minutes: 40

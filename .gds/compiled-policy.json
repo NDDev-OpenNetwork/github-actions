@@ -2,8 +2,8 @@
   "schema_version": 1,
   "compiled_policy": {
     "repository_id": "repo_01M0EYTYCS3DNXDHZ0CVKXWWW1",
-    "bundle_version": "0.8.0",
-    "digest": "sha256:2ce3acbe4f66efb8486d15781d9866a2120b509cbb78826358290361c8b898ab"
+    "bundle_version": "0.9.4",
+    "digest": "sha256:7a0654a2e86b4e493dc1067ff7ccabb740dbc20a11cf55e77d6bc4411935466c"
   },
   "sources": [
     {
