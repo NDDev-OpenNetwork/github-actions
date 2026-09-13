@@ -1,14 +1,13 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ordered_phases": [
-    "platform-policies",
-    "provider-binary-and-config",
-    "manager-restart",
+    "source-and-config-verification",
+    "services-identity-swap",
     "observer-restart",
+    "member-identity-swap",
     "bounded-convergence"
   ],
   "restart_units": [
-    "garm.service",
     "gha-fleet-observer.service"
   ],
   "convergence": {
@@ -18,5 +17,10 @@
     "visible_inventory_must_match_provider": true,
     "queue_identity_must_be_preserved": true,
     "natural_job_required": true
-  }
+  },
+  "conditional_restart_units": [
+    "gha-cache-broker.service",
+    "gha-pressure-observer.service"
+  ],
+  "preserve_manager_for_provider_only_update": true
 }

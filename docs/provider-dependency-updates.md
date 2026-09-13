@@ -22,3 +22,7 @@ Major dependency updates remain separate because grouping must not hide a
 review-significant compatibility change. GARM derivative inputs are rebuilt by
 CI too, but root Go module changes do not change its vendored upstream source;
 its existing reproducible digest must remain identical.
+
+The reported Incus SDK version must agree with the actual module pin; the CLI
+provenance test reads `go.mod` rather than repeating a second expected literal.
+Formatter and nested verification commands use the selected Go toolchain.

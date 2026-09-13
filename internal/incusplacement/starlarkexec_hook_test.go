@@ -21,7 +21,7 @@ func TestStarlarkExecutionHarness(t *testing.T) {
 	if raceEnabled {
 		args = []string{"test", "-race", "-count=1", "."}
 	}
-	cmd := exec.Command("go", args...)
+	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	output, err := cmd.CombinedOutput()
@@ -36,7 +36,7 @@ func TestStarlarkExecutionHarnessVet(t *testing.T) {
 		t.Fatal("runtime.Caller failed")
 	}
 	dir := filepath.Join(filepath.Dir(file), "starlarkexec")
-	cmd := exec.Command("go", "vet", ".")
+	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "vet", ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	output, err := cmd.CombinedOutput()

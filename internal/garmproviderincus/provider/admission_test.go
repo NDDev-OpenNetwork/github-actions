@@ -158,11 +158,60 @@ func TestObservedAllocationsClassifyUnjournaledIncompleteMetadata(t *testing.T) 
 	require.NoError(t, err)
 	instance := ownedInstance("runner-incomplete")
 	delete(instance.ExpandedConfig, flavorKey)
-	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Once()
+	cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{*instance}, nil).Twice()
 
 	_, err = admission.observedAllocations(context.Background(), cli)
 	require.ErrorContains(t, err, "incomplete instance metadata")
 	require.ErrorContains(t, err, "no flavor and no active provider lease")
+}
+
+func TestObservedAllocationsRefreshUnjournaledIncompleteSnapshot(t *testing.T) {
+	t.Parallel()
+	foreign := ownedInstance("runner-raced")
+	foreign.ExpandedConfig[controllerIDKeyName] = "foreign-controller"
+	wrongType := ownedInstance("runner-raced")
+	wrongType.Type = string(api.InstanceTypeContainer)
+	for _, testCase := range []struct {
+		name      string
+		instances []api.InstanceFull
+		err       error
+		wantNames []string
+		wantError string
+	}{
+		{name: "deleted after listing"},
+		{name: "metadata completed after listing", instances: []api.InstanceFull{*ownedInstance("runner-raced")}, wantNames: []string{"runner-raced"}},
+		{name: "replacement is accounted", instances: []api.InstanceFull{*ownedInstance("replacement-runner")}, wantNames: []string{"replacement-runner"}},
+		{name: "stopped after listing", instances: []api.InstanceFull{{Instance: api.Instance{Name: "runner-raced", Status: "Stopped"}}}},
+		{name: "refresh unavailable", err: os.ErrPermission, wantError: "observe Incus allocations"},
+		{name: "foreign refreshed owner", instances: []api.InstanceFull{*foreign}, wantError: controllerIDKeyName},
+		{name: "wrong refreshed isolation type", instances: []api.InstanceFull{*wrongType}, wantError: "has type"},
+		{name: "still incomplete", instances: []api.InstanceFull{{Instance: api.Instance{Name: "runner-raced"}}}, wantError: "no flavor and no active provider lease"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			admission := testNDDevAdmission()
+			directory := t.TempDir()
+			admission.controller.Store = providerjournal.Store{
+				Path: filepath.Join(directory, "journal.json"), LockPath: filepath.Join(directory, "journal.lock"),
+			}
+			_, err := admission.controller.Store.Update(context.Background(), func(*providerjournal.Journal) error { return nil })
+			require.NoError(t, err)
+			cli := new(MockIncusServer)
+			first := cli.On("GetInstances", api.InstanceTypeAny).Return([]api.InstanceFull{{Instance: api.Instance{Name: "runner-raced"}}}, nil).Once()
+			cli.On("GetInstances", api.InstanceTypeAny).Return(testCase.instances, testCase.err).Once().NotBefore(first)
+			allocations, err := admission.observedAllocations(context.Background(), cli)
+			if testCase.wantError != "" {
+				require.ErrorContains(t, err, testCase.wantError)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, allocations, len(testCase.wantNames))
+				for i, name := range testCase.wantNames {
+					require.Equal(t, name, allocations[i].InstanceName)
+					require.Equal(t, 10240, allocations[i].MemoryMiB)
+				}
+			}
+			cli.AssertExpectations(t)
+		})
+	}
 }
 
 func TestReconcileRetainsDeletingLeaseUntilClusterTombstoneDisappears(t *testing.T) {

@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := verify
+GOFMT = $(shell go env GOROOT)/bin/gofmt
 
 .PHONY: build build-controller controller-release build-garm-derivative fmt-check garm-derivative-script test test-controller-release-manifest test-race vet verify
 
@@ -52,8 +53,8 @@ build-garm-derivative:
 	scripts/build-garm-nddev.sh
 
 fmt-check:
-	@test -z "$$(gofmt -l cmd internal third_party)" || { \
-		gofmt -d cmd internal third_party; \
+	@test -z "$$("$(GOFMT)" -l cmd internal third_party)" || { \
+		"$(GOFMT)" -d cmd internal third_party; \
 		exit 1; \
 	}
 

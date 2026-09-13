@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -79,7 +80,23 @@ func TestVersionCommandReportsBuildAndSDKProvenance(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("decode version output: %v", err)
 	}
-	if output["version"] != version || output["commit"] != commit || output["incus_sdk_version"] != "v7.3.0" {
+	// Compare the reported SDK with the independently declared module pin.
+	// A second version literal would let dependency upgrades leave stale provenance.
+	module, err := os.ReadFile("../../go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSDK := ""
+	for _, line := range strings.Split(string(module), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "github.com/lxc/incus/v7" {
+			expectedSDK = fields[1]
+		}
+	}
+	if expectedSDK == "" {
+		t.Fatal("Incus SDK module pin is missing")
+	}
+	if output["version"] != version || output["commit"] != commit || output["incus_sdk_version"] != expectedSDK {
 		t.Fatalf("unexpected version output: %#v", output)
 	}
 }

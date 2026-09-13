@@ -63,7 +63,7 @@ var _ execution.ExternalProvider = &Incus{}
 var Version = "v0.0.0-unknown"
 var Commit = "unknown"
 
-const IncusSDKVersion = "v7.3.0"
+const IncusSDKVersion = "v7.4.0"
 
 const (
 	expectedCallbackURL = "https://198.51.100.1:9443/api/v1/callbacks"
