@@ -1,0 +1,75 @@
+diff --git a/runner/pool/pool.go b/runner/pool/pool.go
+--- a/runner/pool/pool.go
++++ b/runner/pool/pool.go
+@@ -157,10 +157,11 @@
+ 	store dbCommon.Store
+ 	jobs  map[int64]params.Job
+ 
+-	providers   map[string]common.Provider
+-	tools       []commonParams.RunnerApplicationDownload
+-	quit        chan struct{}
+-	checkedJobs map[int64]time.Time
++	providers             map[string]common.Provider
++	tools                 []commonParams.RunnerApplicationDownload
++	quit                  chan struct{}
++	checkedJobs           map[int64]time.Time
++	checkedJournalIntents map[string]time.Time
+ 	// authoritativeReconcileBlockedUntil is a manager-wide fail-closed
+ 	// permission/rate-limit backoff. Without it, one missing Actions permission
+ 	// causes the bounded row loop to issue another denied request for every old
+@@ -2023,6 +2024,7 @@
+ 	if r.authoritativeReconcileDeferred(time.Now()) {
+ 		return nil
+ 	}
++	r.reconcileJournalQueueIntents()
+ 	queued, err := r.store.ListEntityJobsByStatus(r.ctx, r.entity.EntityType, r.entity.ID, params.JobStatusQueued)
+ 	if err != nil {
+ 		if errors.Is(err, runnerErrors.ErrNotFound) {
+@@ -2143,6 +2145,10 @@
+ // check-run external GUID, repository, run, exact attempt, check_run_url and
+ // source SHA bind to one GitHub Actions workflow job. A name is never identity.
+ func (r *basePoolManager) reconcileStaleScaleSetJob(job params.Job) bool {
++	return r.reconcileExactScaleSetJob(job, 0)
++}
++
++func (r *basePoolManager) reconcileExactScaleSetJob(job params.Job, expectedScaleSetID int64) bool {
+ 	if job.ScaleSetJobID == "" || job.RunID == 0 || job.RepositoryOwner == "" || job.RepositoryName == "" {
+ 		slog.WarnContext(r.ctx, "scale set job is missing exact reconciliation identity", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+@@ -2184,6 +2190,10 @@
+ 			"scale_set_job_id", job.ScaleSetJobID, "run_id", job.RunID)
+ 		return false
+ 	}
++	if checkRun == nil {
++		slog.WarnContext(r.ctx, "exact journal GUID is absent from the complete workflow suite; retaining intent", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
+ 	if !isGitHubActionsCheckRun(checkRun) {
+ 		slog.WarnContext(r.ctx, "matched check run is not a GitHub Actions producer", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+@@ -2228,8 +2238,14 @@
+ 		slog.WarnContext(r.ctx, "matched job has no scale-set labels", "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+ 	}
+-	if _, err := r.exactScaleSetForJobFromLabels(ghJob.Labels); err != nil {
++	matchedScaleSet, err := r.exactScaleSetForJobFromLabels(ghJob.Labels)
++	if err != nil {
+ 		slog.With(slog.Any("error", err)).WarnContext(r.ctx, "matched job labels do not uniquely identify an entity scale set", "scale_set_job_id", job.ScaleSetJobID)
++		return false
++	}
++
++	if expectedScaleSetID != 0 && int64(matchedScaleSet.ScaleSetID) != expectedScaleSetID {
++		slog.WarnContext(r.ctx, "workflow job scale set differs from journal", "expected_scale_set_id", expectedScaleSetID, "observed_scale_set_id", matchedScaleSet.ScaleSetID, "scale_set_job_id", job.ScaleSetJobID)
+ 		return false
+ 	}
+ 
+@@ -2307,9 +2323,6 @@
+ 			return nil, false, nil
+ 		}
+ 		if done {
+-			if matched == nil {
+-				return nil, false, nil
+-			}
+ 			return matched, true, nil
+ 		}
+ 		requestedPage = resp.NextPage

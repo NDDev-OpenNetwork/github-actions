@@ -17,18 +17,16 @@
 //
 // A drain never stops a running worker. It closes the gate so no new work is
 // placed, then waits for the jobs already there to finish on their own --
-// except warm instances, which are ready-unregistered by definition, hold
-// nobody's job, and are recycled rather than waited out: one held a reboot
-// hostage for a full forty-five-minute timeout. If real jobs outlast the
-// deadline the drain reports that it is still occupied and by what; it does
-// not decide to end someone's build.
+// including containers whose names begin with warm-. A consumed warm keeps
+// its name, and this member-local client does not own the provider claim lock.
+// Warm retirement belongs to the provider's journal-aware maintenance path.
+// Fence-only mode closes placement without declaring the member drained.
 package memberdrain
 
 import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -39,9 +37,6 @@ import (
 // cluster's containers.
 type Client interface {
 	GetInstances(api.InstanceType) ([]api.Instance, error)
-	// DeleteInstance removes one instance. The drain uses it only for warm
-	// instances, which carry no job by construction.
-	DeleteInstance(name string) error
 }
 
 // Units is the systemd control a drain needs. Stopping the pressure timer is
@@ -89,6 +84,7 @@ type Options struct {
 	Timeout    time.Duration
 	Poll       time.Duration
 	Apply      bool
+	FenceOnly  bool
 }
 
 // Occupant is one instance still held by the member.
@@ -120,6 +116,7 @@ type Result struct {
 	Drained           bool       `json:"drained"`
 	TimedOut          bool       `json:"timed_out"`
 	Applied           bool       `json:"applied"`
+	FenceOnly         bool       `json:"fence_only,omitempty"`
 }
 
 const (
@@ -225,7 +222,10 @@ func Drain(ctx context.Context, deps Deps, options Options) (Result, error) {
 	}
 	result := Result{
 		MemberName: options.MemberName, Action: "drain", Reason: options.Reason,
-		TimerUnit: options.TimerUnit, Applied: options.Apply,
+		TimerUnit: options.TimerUnit, Applied: options.Apply, FenceOnly: options.FenceOnly,
+	}
+	if options.FenceOnly {
+		result.Action = "fence"
 	}
 	if !options.Apply {
 		occupants, err := Occupancy(deps.Client, options.MemberName)
@@ -263,26 +263,13 @@ func Drain(ctx context.Context, deps Deps, options Options) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		// A warm instance is ready-unregistered by definition: it holds no
-		// job, and the maintainer refills it on an open member. Waiting for
-		// one is waiting for nothing -- one held a reboot hostage for the
-		// full timeout -- so warm occupants are recycled, not waited out.
-		remaining := occupants[:0]
-		for _, occupant := range occupants {
-			if strings.HasPrefix(occupant.Name, "warm-") {
-				if err := deps.Client.DeleteInstance(occupant.Name); err != nil {
-					return Result{}, fmt.Errorf("recycle warm occupant %s: %w", occupant.Name, err)
-				}
-				result.RecycledWarm = append(result.RecycledWarm, occupant.Name)
-				continue
-			}
-			remaining = append(remaining, occupant)
-		}
-		occupants = remaining
 		result.Occupants = occupants
 		result.WaitedSecs = int(deps.now().Sub(started) / time.Second)
 		if len(occupants) == 0 {
 			result.Drained = true
+			return result, nil
+		}
+		if options.FenceOnly {
 			return result, nil
 		}
 		if !deps.now().Before(deadline) {

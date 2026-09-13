@@ -155,10 +155,9 @@ func TestDrainSetsTheMarkerBeforeClosingTheGateAndLeavesTheTimerAlone(t *testing
 	}
 }
 
-func TestDrainRecyclesWarmOccupantsInsteadOfWaitingForThem(t *testing.T) {
-	// A warm instance holds no job by definition. One held a reboot hostage
-	// for the full forty-five-minute timeout; recycling it costs nothing and
-	// the maintainer refills on an open member.
+func TestDrainWaitsForWarmNamedWorkersToLeaveNaturally(t *testing.T) {
+	// A consumed warm retains its name. The member drain must wait for it
+	// just like another worker; only the provider owns safe warm retirement.
 	var events []string
 	client := &fakeClient{batches: [][]api.Instance{
 		{
@@ -186,14 +185,43 @@ func TestDrainRecyclesWarmOccupantsInsteadOfWaitingForThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if len(client.deleted) != 1 || client.deleted[0] != "warm-nddev-priority-standard-4235eff3bcff" {
-		t.Fatalf("expected exactly the warm occupant recycled, got %v", client.deleted)
+	if len(client.deleted) != 0 {
+		t.Fatalf("drain deleted a worker by its warm name: %v", client.deleted)
 	}
-	if len(result.RecycledWarm) != 1 {
-		t.Fatalf("recycled warm not reported: %#v", result)
+	if len(result.RecycledWarm) != 0 {
+		t.Fatalf("drain claimed warm deletion: %#v", result)
 	}
 	if !result.Drained {
 		t.Fatalf("expected the drain to complete once the real worker left: %#v", result)
+	}
+}
+
+func TestFenceOnlyReportsOccupancyWithoutWaitingOrDeleting(t *testing.T) {
+	var events []string
+	client := &fakeClient{batches: [][]api.Instance{{
+		instance("warm-example-consumed", "example-member", "Running"),
+		instance("example-running", "example-member", "Running"),
+	}}}
+	result, err := Drain(context.Background(), Deps{
+		Client: client, Marker: &fakeMarker{}, Units: &fakeUnits{events: &events}, Gate: &fakeGate{events: &events},
+		Sleep: func(context.Context, time.Duration) error { t.Fatal("a fence must not wait for occupants"); return nil },
+	}, Options{MemberName: "example-member", Reason: "manager maintenance", Apply: true, FenceOnly: true})
+	if err != nil || !result.GateClosed || result.Drained || !result.FenceOnly || len(result.Occupants) != 2 || len(client.deleted) != 0 {
+		t.Fatalf("incorrect non-destructive fence: %#v deleted=%v err=%v", result, client.deleted, err)
+	}
+}
+
+func TestDrainTimesOutWithoutDeletingWarmNamedRunningWork(t *testing.T) {
+	var events []string
+	client := &fakeClient{batches: [][]api.Instance{{instance("warm-example-consumed", "example-member", "Running")}}}
+	now := time.Unix(0, 0)
+	result, err := Drain(context.Background(), Deps{
+		Client: client, Marker: &fakeMarker{}, Units: &fakeUnits{events: &events}, Gate: &fakeGate{events: &events},
+		Now:   func() time.Time { return now },
+		Sleep: func(_ context.Context, interval time.Duration) error { now = now.Add(interval); return nil },
+	}, Options{MemberName: "example-member", Reason: "planned maintenance", Apply: true, Timeout: 10 * time.Second, Poll: time.Second})
+	if err != nil || !result.TimedOut || result.Drained || len(client.deleted) != 0 || len(result.RecycledWarm) != 0 {
+		t.Fatalf("drain did not preserve occupied member: %#v deleted=%v err=%v", result, client.deleted, err)
 	}
 }
 

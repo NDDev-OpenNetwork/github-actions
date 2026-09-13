@@ -1713,22 +1713,6 @@ func (c drainClient) GetInstances(kind api.InstanceType) ([]api.Instance, error)
 	return c.incus.GetInstances(kind)
 }
 
-func (c drainClient) DeleteInstance(name string) error {
-	// Incus refuses to delete a running instance, and a warm occupant is
-	// running by definition. Force-stop first; if the stop fails because the
-	// instance is already stopped or already gone, the delete below is the
-	// call that decides.
-	stop, err := c.incus.UpdateInstanceState(name, api.InstanceStatePut{Action: "stop", Force: true, Timeout: -1}, "")
-	if err == nil {
-		_ = stop.Wait()
-	}
-	op, err := c.incus.DeleteInstance(name)
-	if err != nil {
-		return err
-	}
-	return op.Wait()
-}
-
 // pressureGate closes and reopens the member's gate through the publisher that
 // owns it. Writing scheduler.instance directly is overwritten within one cycle.
 type pressureGate struct {
@@ -1961,6 +1945,7 @@ func runDrainMember(args []string, stdout, stderr io.Writer) int {
 	timerUnit := flags.String("timer-unit", memberdrain.DefaultTimerUnit, "the timer that owns this member's gate")
 	reason := flags.String("reason", "", "why the member is being taken out of service, published as the gate's close reason")
 	restore := flags.Bool("restore", false, "hand the member back: republish from live pressure and start the timer")
+	fenceOnly := flags.Bool("fence-only", false, "close placement and report occupants without waiting for a drained member")
 	timeout := flags.Duration("timeout", memberdrain.DefaultTimeout, "how long to wait for running jobs to finish")
 	poll := flags.Duration("poll", memberdrain.DefaultPoll, "how often to re-read what the member is carrying")
 	apply := flags.Bool("apply", false, "stop the timer and publish, rather than reporting what would happen")
@@ -1971,8 +1956,8 @@ func runDrainMember(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gha-fleet: drain-member requires --config and no positional arguments")
 		return 2
 	}
-	if *restore && *reason != "" {
-		fmt.Fprintln(stderr, "gha-fleet: drain-member --restore takes no --reason")
+	if *restore && (*reason != "" || *fenceOnly) {
+		fmt.Fprintln(stderr, "gha-fleet: drain-member --restore takes neither --reason nor --fence-only")
 		return 2
 	}
 	cfg, err := config.Load(*configPath)
@@ -2015,7 +2000,7 @@ func runDrainMember(args []string, stdout, stderr io.Writer) int {
 	}
 	options := memberdrain.Options{
 		MemberName: cfg.Incus.Cluster.MemberName, Reason: *reason,
-		TimerUnit: *timerUnit, Timeout: *timeout, Poll: *poll, Apply: *apply,
+		TimerUnit: *timerUnit, Timeout: *timeout, Poll: *poll, Apply: *apply, FenceOnly: *fenceOnly,
 	}
 	var result memberdrain.Result
 	if *restore {
