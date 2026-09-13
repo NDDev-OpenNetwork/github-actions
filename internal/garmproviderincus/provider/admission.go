@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -331,7 +332,29 @@ func (n *nddevAdmission) diagnosticsBlocked() (bool, error) {
 	return workerdiagnostics.AtDurableWALHighWatermark(stats, n.diagnosticsMaxBytes), nil
 }
 
+var errIncompleteInventory = errors.New("incomplete instance metadata")
+
 func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
+	var allocations []provideradmission.Allocation
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		allocations, err = n.observeAllocationsOnce(ctx, cli)
+		if !errors.Is(err, errIncompleteInventory) {
+			return allocations, err
+		}
+		// Incus inventory and the lease journal are separate observations.
+		// A completed transition can leave an old metadata-free list entry
+		// after its lease is removed. Re-read the whole inventory once, so
+		// disappeared names and any replacements are accounted together.
+		// Persistent ambiguity still fails closed; no lease or worker changes.
+	}
+	return nil, err
+}
+
+func (n *nddevAdmission) observeAllocationsOnce(ctx context.Context, cli InstanceServerInterface) ([]provideradmission.Allocation, error) {
 	instances, err := cli.GetInstances(api.InstanceTypeAny)
 	if err != nil {
 		return nil, fmt.Errorf("observe Incus allocations: %w", err)
@@ -378,42 +401,18 @@ func (n *nddevAdmission) observedAllocations(ctx context.Context, cli InstanceSe
 			}
 			lease, owned := state.Leases[instance.Name]
 			if !owned || (lease.State != providerjournal.StateAdmitted && lease.State != providerjournal.StateCreated && lease.State != providerjournal.StateDeleting) {
-				// The list and journal are separate observations. A create/delete
-				// may finish between them, leaving an old metadata-free list entry
-				// after its lease is gone. Re-read that exact instance once before
-				// declaring the whole inventory unaccountable. Only confirmed
-				// absence or a stopped instance can be omitted; refreshed live
-				// metadata still passes every ownership and isolation check below.
-				refreshed, _, refreshErr := cli.GetInstanceFull(instance.Name)
-				if isNotFoundError(refreshErr) {
-					continue
-				}
-				if refreshErr != nil {
-					return nil, fmt.Errorf("refresh incomplete instance %q: %w", instance.Name, refreshErr)
-				}
-				if refreshed == nil || refreshed.Name != instance.Name {
-					return nil, fmt.Errorf("refresh incomplete instance %q returned an invalid identity", instance.Name)
-				}
-				instance = refreshed.Instance
-				flavor = instance.ExpandedConfig[flavorKey]
-				if flavor == "" {
-					if instance.Status == "Stopped" {
-						continue
-					}
-					return nil, fmt.Errorf(
-						"incomplete instance metadata: instance %q has no flavor and no active provider lease after refresh",
-						instance.Name,
-					)
-				}
-			} else {
-				allocations = append(allocations, provideradmission.Allocation{
-					InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
-					PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
-					MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
-					State: lease.State, JobName: instance.Name, Location: instance.Location,
-				})
-				continue
+				return nil, fmt.Errorf(
+					"%w: instance %q has no flavor and no active provider lease",
+					errIncompleteInventory, instance.Name,
+				)
 			}
+			allocations = append(allocations, provideradmission.Allocation{
+				InstanceName: lease.InstanceName, ControllerID: lease.ControllerID,
+				PoolID: lease.PoolID, PoolName: lease.PoolName, VCPU: lease.VCPU, CPUAllowanceUnits: lease.CPUAllowanceUnits,
+				MemoryMiB: lease.MemoryMiB, ImageFingerprint: lease.ImageFingerprint,
+				State: lease.State, JobName: instance.Name, Location: instance.Location,
+			})
+			continue
 		}
 		pool, exists := n.platform.Pool(flavor)
 		if !exists {
