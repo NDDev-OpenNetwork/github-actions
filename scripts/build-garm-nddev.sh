@@ -19,11 +19,11 @@ set -Eeuo pipefail
 # Every value below is the manifest's. Editing one here detaches the build
 # from the provenance it is reviewed against, which is why the region is
 # regenerated and compared rather than maintained.
-readonly derivative_version="v0.2.1-nddev.94"
+readonly derivative_version="v0.2.1-nddev.95"
 readonly upstream_repository="https://github.com/cloudbase/garm"
 readonly upstream_commit="154638445c3949c1958b01812f69d9a1e4d82684"
-readonly build_image="docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
-readonly build_go_version="go1.26.6"
+readonly build_image="docker.io/library/golang@sha256:6860a573025fcd35aba4f1b23e858b1c1dcd425d53fa73562e169a6ab1c2339a"
+readonly build_go_version="go1.27.1"
 readonly build_cgo_enabled="1"
 readonly build_target_os="linux"
 readonly build_target_arch="amd64"
@@ -32,7 +32,7 @@ readonly build_module_mode="vendor"
 readonly build_tags="osusergo,netgo,sqlite_omit_load_extension"
 readonly build_reproducible_rebuilds="2"
 readonly build_maximum_required_glibc="2.34"
-readonly expected_binary_sha256="75ec2a259092859bbb42b448f99b549bc33606649b4c953bf4292b006c7652a9"
+readonly expected_binary_sha256="1b4014dbf23eaeffd7706772ce7d080beeb5c9af82f771021aa5c29a9ad27abd"
 readonly patch_paths=(
   "third_party/garm/patches/0001-event-driven-reconciliation.patch"
   "third_party/garm/patches/0002-central-queue-admission.patch"
@@ -68,6 +68,8 @@ readonly patch_paths=(
   "third_party/garm/patches/0032-exact-scale-set-job-identity.patch"
   "third_party/garm/patches/0033-live-message-demand-authority.patch"
   "third_party/garm/patches/0034-bump-golang-x-text-v0.39.0.patch"
+  "third_party/garm/patches/0035-reconcile-journal-without-db-row.patch"
+  "third_party/garm/patches/0036-refresh-vendored-go-dependencies.patch"
 )
 readonly patch_sha256s=(
   "2f0571f141e7388d6ea0cb0341549ba5bf5dab26d0006382a71b76655e272d34"
@@ -104,6 +106,8 @@ readonly patch_sha256s=(
   "396eea6c1ee9250843ed8002e57658c8a1a6d853423ecba7ed5f85442ec59d9c"
   "e2a9bb7cc787a3c1dc7bfe4c8e1af458cff8ed77ddd8d5b135c0402bef4a5dbb"
   "2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2"
+  "1544734007932649e58af7d0b35d83d4e06aeb10a1d1b03d049272953ca0e7b9"
+  "2417a1ff7ec61f3e03311ece1ee32d38ecb9f4e1e4efb2d43ab48e10d371f509"
 )
 readonly overlay_paths=(
   "third_party/garm/overlay/workers/scaleset/queue_intent.go"
@@ -117,9 +121,13 @@ readonly overlay_paths=(
   "third_party/garm/overlay/runner/pool/scale_set_identity.go"
   "third_party/garm/overlay/runner/pool/scale_set_identity_test.go"
   "third_party/garm/overlay/runner/pool/authoritative_reconcile_backoff_test.go"
+  "third_party/garm/overlay/workers/scaleset/queue_reconciliation.go"
+  "third_party/garm/overlay/workers/scaleset/queue_reconciliation_test.go"
+  "third_party/garm/overlay/runner/pool/queue_reconciliation.go"
+  "third_party/garm/overlay/runner/pool/queue_reconciliation_test.go"
 )
 readonly overlay_sha256s=(
-  "c15fb2a6b82ad6cc6b79708d1608aa7ee026bbf2a3c17f247775dfd8e51d2735"
+  "4b1b9e926a7492423c5ef118ec2a8c0793211e622d16ef37a94f8b2b75604915"
   "abafa5100ee6bbf8ee1dd94d79e34222a3fbc5ed628c022487137896cd1fc5dd"
   "2fd202d890088680ef9257e0a3366855b6e4d216c41a7a8936d7866998021219"
   "c52b783f1b420a3bb15fdc3ca7a445e295251e82e64a85f4d2b41de474546eff"
@@ -130,6 +138,10 @@ readonly overlay_sha256s=(
   "a022ffa920b31655e0101ed60263a2375b7f1258f32bb6e44cc16cb55bca5ee2"
   "952708658cbd15a489bc9084678ddad4ac27d9ea19a82af53a334e15d5813be6"
   "d0c8f58b0fe98f5aa496dc161d8064b4029f430b8836c1d37f4429f27a7de620"
+  "46bf21b502904d853ef4e4a079283901a39f395c22367237e79d516b094aec58"
+  "d11766b2efc01f08a300c48408a1d150d6730160efebcce7feb26f0380f313bb"
+  "118bd4e553ebe8bc8f9e5a90b039bb36e36b91e27a91995dde213fe5b6225b2f"
+  "b5f5e3234984fde3e5afa99a77d848b079f98c73750fe19638526788b52f89fa"
 )
 readonly overlay_targets=(
   "workers/scaleset/queue_intent.go"
@@ -143,6 +155,10 @@ readonly overlay_targets=(
   "runner/pool/scale_set_identity.go"
   "runner/pool/scale_set_identity_test.go"
   "runner/pool/authoritative_reconcile_backoff_test.go"
+  "workers/scaleset/queue_reconciliation.go"
+  "workers/scaleset/queue_reconciliation_test.go"
+  "runner/pool/queue_reconciliation.go"
+  "runner/pool/queue_reconciliation_test.go"
 )
 # END GENERATED REGION
 

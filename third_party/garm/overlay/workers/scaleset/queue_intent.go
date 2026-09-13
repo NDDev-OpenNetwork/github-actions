@@ -255,6 +255,14 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 				!queueIntentRepositoryCompatible(existing, queueIntent{Owner: entity.Owner, Repository: repository}) {
 				return fmt.Errorf("authoritative queued job changed immutable queue identity")
 			}
+			if existing.WorkflowRunID != 0 && job.RunID != 0 && existing.WorkflowRunID != job.RunID {
+				return fmt.Errorf("authoritative queued job changed workflow run identity")
+			}
+			if existing.WorkflowRunID == 0 && job.RunID > 0 {
+				existing.WorkflowRunID = job.RunID
+				journal.Intents[key] = existing
+				changed = true
+			}
 			if queueIntentRepositoryBound(existing) {
 				if clearedDeliveryTombstone {
 					admitQueuedToBudget(journal, config, now)
@@ -288,7 +296,7 @@ func (c *queueIntentCoordinator) EnsureAuthoritative(scaleSet params.ScaleSet, e
 			return nil
 		}
 		journal.Intents[key] = queueIntent{
-			Key: key, ScaleSetID: int64(scaleSet.ScaleSetID), JobID: job.ScaleSetJobID,
+			Key: key, ScaleSetID: int64(scaleSet.ScaleSetID), JobID: job.ScaleSetJobID, WorkflowRunID: job.RunID,
 			ScaleSetName: scaleSet.Name, Owner: entity.Owner, Repository: repository,
 			WorkflowRef: "authoritative-rehydration", EventName: job.Action,
 			QueueTime: queueTime, FirstQueuedAt: now, State: queueStateQueued,

@@ -13,14 +13,21 @@ one arc and the first live windows found what the fakes could not.
   timer running, so every tick republishes a fresh closed state carrying
   `drained: <reason>` — the staleness alert stays armed and silent for the
   right reason, and the drain survives a reboot;
-- it **recycles warm occupants** (force-stop, then delete: Incus refuses to
-  delete a running instance) instead of waiting out disposable capacity —
-  and since provider v0.1.5-nddev.107 the warm reconciler also recycles
-  outdated-identity or outdated-image instances on its own timer, so a
-  stale-stamp sweep after maintenance is no longer a manual step;
-- it **waits for real jobs** to finish and never aborts one;
+- it waits for **all running occupants**, including containers named `warm-*`,
+  and never stops or deletes them. A claimed warm retains its name, and even
+  a warm-looking metadata snapshot does not grant the member the provider's
+  claim lock. Unassigned warm retirement belongs to the provider's
+  `warm-drain` operation with its documented manager/claim preconditions;
 - `--restore --apply` clears the marker, republishes from live pressure, and
   heals members drained by older controllers.
+
+For a manager-only maintenance window, add `--fence-only`. The command closes
+placement and reports existing occupants immediately; occupied members are
+not reported as drained. This mode preserves warm capacity and running work.
+A manager replacement must still prove its own provider/worker quiescence
+before stopping the process. Full member drains, including slab healing, wait
+for warm retirement to be coordinated by its owner instead of force-stopping
+an instance. Restore the marker if a maintenance window is abandoned.
 
 The reason string travels: the gate publishes it into the cluster member
 config, and the observer reads it there to tell maintenance from an incident.

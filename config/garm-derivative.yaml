@@ -1,6 +1,6 @@
 schema_version: 1
 artifact: garm
-derivative_version: v0.2.1-nddev.94
+derivative_version: v0.2.1-nddev.95
 upstream:
   repository: https://github.com/cloudbase/garm
   release: v0.2.1
@@ -109,9 +109,15 @@ patches:
   - path: third_party/garm/patches/0034-bump-golang-x-text-v0.39.0.patch
     sha256: 2d23c290fe462553607739afeccca2fe1dcc13d2352e6324464f35fa3ffb6bc2
     purpose: Upgrade the one source-reachable advisory, golang.org/x/text, to v0.39.0. x/mod v0.37.0 and x/sync v0.21.0 are required transitives of that release. OpenPGP is not imported.
+  - path: third_party/garm/patches/0035-reconcile-journal-without-db-row.patch
+    sha256: 1544734007932649e58af7d0b35d83d4e06aeb10a1d1b03d049272953ca0e7b9
+    purpose: Feed repository-bound journal entries into the periodic exact GitHub verifier even after DB cleanup; preserve unknown, running, wrong-scope and ambiguous identities, keep bounded per-GUID retry state, and distinguish a complete absent GUID from an incomplete response.
+  - path: third_party/garm/patches/0036-refresh-vendored-go-dependencies.patch
+    sha256: 2417a1ff7ec61f3e03311ece1ee32d38ecb9f4e1e4efb2d43ab48e10d371f509
+    purpose: Update the vendored Go dependency closure and language/toolchain pins to reviewed compatible current releases; preserve offline test/build reproducibility and remove obsolete advisory-bearing x packages.
 overlays:
   - path: third_party/garm/overlay/workers/scaleset/queue_intent.go
-    sha256: c15fb2a6b82ad6cc6b79708d1608aa7ee026bbf2a3c17f247775dfd8e51d2735
+    sha256: 4b1b9e926a7492423c5ef118ec2a8c0793211e622d16ef37a94f8b2b75604915
     purpose: Fsync-backed central queue admission that excludes terminal capacity, gives completion precedence in fast start/complete batches, requests fresh demand when persisted desired is zero, demotes an expired never-started assigned waiter to queued instead of deleting it, refreshes queued TTL up to the execution horizon, FIFO-orders by FirstQueuedAt, treats listener JobCompleted as a delivery-reservation end rather than a REST workflow-job terminal, does not alias a later same-run/name GUID onto that waiter, does not delete or rename an assigned waiter because an unrelated JobStarted arrived, and yields request-less occupancy only when a dispatchable JobAvailable would actually fit after that yield.
   - path: third_party/garm/overlay/workers/scaleset/queue_intent_test.go
     sha256: abafa5100ee6bbf8ee1dd94d79e34222a3fbc5ed628c022487137896cd1fc5dd
@@ -143,9 +149,21 @@ overlays:
   - path: third_party/garm/overlay/runner/pool/authoritative_reconcile_backoff_test.go
     sha256: d0c8f58b0fe98f5aa496dc161d8064b4029f430b8836c1d37f4429f27a7de620
     purpose: Prove GitHub 403 and 429 establish the 15-minute access-refusal backoff, while 404 and 500 retain ordinary per-job retry without extending that backoff. Gate unit tests, not Worker/DB/HTTP integration.
+  - path: third_party/garm/overlay/workers/scaleset/queue_reconciliation.go
+    sha256: 46bf21b502904d853ef4e4a079283901a39f395c22367237e79d516b094aec58
+    purpose: Read bounded non-running repository-bound journal candidates without mutating TTLs, capacity, execution or terminal lineage; retain exact GUID, owner, repository, run and scale-set identities.
+  - path: third_party/garm/overlay/workers/scaleset/queue_reconciliation_test.go
+    sha256: d11766b2efc01f08a300c48408a1d150d6730160efebcce7feb26f0380f313bb
+    purpose: Prove run ID survives new and already-bound authoritative rehydration, conflicting identities and repeats cannot renew state, and candidate reads preserve running, acquired, claimed, foreign, fresh and terminal work.
+  - path: third_party/garm/overlay/runner/pool/queue_reconciliation.go
+    sha256: 118bd4e553ebe8bc8f9e5a90b039bb36e36b91e27a91995dde213fe5b6225b2f
+    purpose: Reconcile at most two journal candidates per pass with a five-minute per-GUID budget. Missing legacy run identity is discovered only in a complete ten-run window spanning thirty minutes before first queue observation plus one minute, then independently verified by exact GitHub GUID/run/attempt/check URL/SHA/scale-set binding.
+  - path: third_party/garm/overlay/runner/pool/queue_reconciliation_test.go
+    sha256: b5f5e3234984fde3e5afa99a77d848b079f98c73750fe19638526788b52f89fa
+    purpose: "Exercise the real periodic entry point with SQLite and the native durable journal: remove an exact completed orphan without any DB row, preserve a running sibling, persist a terminal receipt across restart, reject wrong scale set, access refusal, incomplete/ambiguous discovery, and rate-limit retained in-progress work."
 build:
-  container_image: docker.io/library/golang@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
-  go_version: go1.26.6
+  container_image: docker.io/library/golang@sha256:6860a573025fcd35aba4f1b23e858b1c1dcd425d53fa73562e169a6ab1c2339a
+  go_version: go1.27.1
   cgo_enabled: true
   target_os: linux
   target_arch: amd64
@@ -157,7 +175,7 @@ build:
     - sqlite_omit_load_extension
   reproducible_rebuilds: 2
   maximum_required_glibc: "2.34"
-  binary_sha256: 75ec2a259092859bbb42b448f99b549bc33606649b4c953bf4292b006c7652a9
+  binary_sha256: 1b4014dbf23eaeffd7706772ce7d080beeb5c9af82f771021aa5c29a9ad27abd
 runtime_contract:
   queue_intent_schema_version: 6
   event_driven_scale_set_wake: true
