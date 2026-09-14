@@ -276,14 +276,6 @@ pools:
       network_policy: release-allowlist
       cache_write_scope: none
       egress_allowlist:
-        # Reviewed application deployment target. This is the replacement
-        # Amsterdam bastion/application host and is never runner capacity.
-        - destination: 203.0.113.20/32
-          protocol: tcp
-          ports: "22"
-          purpose: >-
-            SSH deploy of the declaro-platform tenant onto server-nddev-amsterdam
-            by example-org/declaro.
         - destination: 203.0.113.21/32
           protocol: tcp
           ports: "22"
