@@ -6,8 +6,8 @@ go 1.27.1
 
 require (
 	github.com/NDDev-OpenNetwork/github-actions v0.0.0
-	github.com/lxc/incus/v7 v7.4.0
-	go.starlark.net v0.0.0-20260708150628-5395d018f003
+	github.com/lxc/incus/v7 v7.5.1
+	go.starlark.net v0.0.0-20260908191801-89a6a09411d5
 )
 
 require (
