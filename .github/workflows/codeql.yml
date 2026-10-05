@@ -31,7 +31,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: NDDev-OpenNetwork/ci-workflows/.github/workflows/public-codeql.yml@9eb9e070ae87b0fc3bdbd2cbed5afe3b92f7e2c7 # 9eb9e07
+    uses: NDDev-OpenNetwork/ci-workflows/.github/workflows/public-codeql.yml@1e32920e80393d07318c611273ffba0fa7859a35 # 9eb9e07
     with:
       # Public repository: `pull_request` runs untrusted fork code. Name the
       # hosted runner explicitly — the reusable's default belongs to the pinned
